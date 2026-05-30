@@ -20,7 +20,9 @@ import {
   ChevronLeft,
   CalendarDays,
   PieChart as PieChartIcon,
-  ArrowRight,
+  LayoutDashboard,
+  Receipt,
+  Search,
   type LucideIcon
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
@@ -182,14 +184,22 @@ const GENERAL_KEY = '__general__';
 
 type SummaryView = 'week' | 'month' | 'year';
 
+// Top-level navigation tabs.
+const TABS = [
+  { id: 'dashboard', label: 'בית', icon: LayoutDashboard },
+  { id: 'analytics', label: 'אנליטיקה', icon: PieChartIcon },
+  { id: 'subbudgets', label: 'תקציבים', icon: Wallet },
+  { id: 'expenses', label: 'הוצאות', icon: Receipt },
+] as const;
+type TabId = (typeof TABS)[number]['id'];
+
 interface ExpenseSummaryProps {
   expenses: Expense[];
   categories: Category[];
-  onBack: () => void;
 }
 
 // Dark-themed visual breakdown of expenses by category, per week / month / year.
-function ExpenseSummary({ expenses, categories, onBack }: ExpenseSummaryProps) {
+function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
   const [view, setView] = useState<SummaryView>('month');
   const [anchor, setAnchor] = useState<Date>(() => new Date());
 
@@ -283,29 +293,12 @@ function ExpenseSummary({ expenses, categories, onBack }: ExpenseSummaryProps) {
   ];
 
   return (
-    <div
-      dir="rtl"
-      className="min-h-screen bg-neutral-950 text-white"
-      style={{
-        paddingTop: 'env(safe-area-inset-top)',
-        paddingBottom: 'env(safe-area-inset-bottom)',
-      }}
-    >
-      <div className="max-w-2xl mx-auto px-4 sm:px-6 pb-10">
-        {/* Top bar */}
-        <div className="flex items-center justify-between py-4">
-          <button
-            onClick={onBack}
-            className="w-11 h-11 -mr-2 flex items-center justify-center rounded-xl text-neutral-300 hover:bg-neutral-800 active:scale-95 transition-all"
-            aria-label="חזרה"
-            title="חזרה"
-          >
-            <ArrowRight className="w-6 h-6" />
-          </button>
-          <h1 className="text-lg font-bold">סיכום הוצאות</h1>
-          <div className="w-11 h-11 flex items-center justify-center rounded-xl text-neutral-300">
-            <CalendarDays className="w-6 h-6" />
-          </div>
+    <div className="max-w-2xl mx-auto">
+      <div>
+        {/* Page title */}
+        <div className="flex items-center gap-2 mb-4 text-neutral-100">
+          <PieChartIcon className="w-6 h-6 text-emerald-400" />
+          <h2 className="text-lg sm:text-xl font-bold">אנליטיקה</h2>
         </div>
 
         {/* Week / Month / Year segmented control */}
@@ -479,6 +472,108 @@ interface Envelope {
   allocated: number;
   spent: number;
   isGeneral: boolean;
+}
+
+interface SpendingDonutProps {
+  monthExpenses: Expense[];
+  categories: Category[];
+  monthLabel: string;
+}
+
+// Compact donut of how much was spent per category in the selected month.
+function SpendingDonut({ monthExpenses, categories, monthLabel }: SpendingDonutProps) {
+  const total = monthExpenses.reduce((s, e) => s + e.amount, 0);
+  const getCat = (value: string) =>
+    categories.find((c) => c.value === value) || categories[categories.length - 1];
+
+  const breakdown = Object.values(
+    monthExpenses.reduce<Record<string, { value: string; amount: number }>>((acc, e) => {
+      acc[e.category] = acc[e.category] || { value: e.category, amount: 0 };
+      acc[e.category].amount += e.amount;
+      return acc;
+    }, {})
+  )
+    .map((g) => {
+      const cat = getCat(g.value);
+      return {
+        value: g.value,
+        label: cat?.label ?? g.value,
+        hex: hexForColor(cat?.color ?? 'bg-gray-500'),
+        amount: g.amount,
+        percentage: total > 0 ? (g.amount / total) * 100 : 0,
+      };
+    })
+    .sort((a, b) => b.amount - a.amount);
+
+  const donutData =
+    breakdown.length > 0
+      ? breakdown.map((b) => ({ id: b.value, value: b.amount, hex: b.hex }))
+      : [{ id: 'empty', value: 1, hex: '#262626' }];
+
+  return (
+    <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 mb-6 sm:mb-8">
+      <h2 className="text-base sm:text-lg font-semibold text-neutral-100 flex items-center gap-2 mb-1">
+        <PieChartIcon className="w-5 h-5 text-emerald-400" />
+        הוצאות לפי קטגוריה
+      </h2>
+      <p className="text-sm text-neutral-500 mb-4">{monthLabel}</p>
+
+      {breakdown.length === 0 ? (
+        <div className="text-center py-8">
+          <div className="bg-neutral-800 w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3">
+            <TrendingDown className="w-7 h-7 text-neutral-500" />
+          </div>
+          <p className="text-neutral-400">אין הוצאות החודש</p>
+          <p className="text-neutral-500 text-sm mt-1">הוסף הוצאה כדי לראות את הפילוח</p>
+        </div>
+      ) : (
+        <div className="flex flex-col sm:flex-row items-center gap-6">
+          <div className="relative w-44 h-44 shrink-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={donutData}
+                  dataKey="value"
+                  nameKey="id"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius="64%"
+                  outerRadius="100%"
+                  paddingAngle={breakdown.length > 1 ? 2 : 0}
+                  stroke="#0a0a0a"
+                  strokeWidth={2}
+                  isAnimationActive={false}
+                >
+                  {donutData.map((s) => (
+                    <Cell key={s.id} fill={s.hex} />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+              <span className="text-xl font-bold text-neutral-100 leading-none">
+                ₪{total.toLocaleString()}
+              </span>
+              <span className="text-[11px] text-neutral-500 mt-1">סה"כ</span>
+            </div>
+          </div>
+
+          <div className="flex-1 w-full min-w-0 space-y-2.5">
+            {breakdown.slice(0, 6).map((b) => (
+              <div key={b.value} className="flex items-center gap-2 text-sm">
+                <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: b.hex }} />
+                <span className="text-neutral-300 truncate flex-1">{b.label}</span>
+                <span className="text-neutral-500 shrink-0">{b.percentage.toFixed(0)}%</span>
+                <span className="text-neutral-100 font-medium shrink-0 w-20 text-left">
+                  ₪{b.amount.toLocaleString()}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 interface SubBudgetTrackerProps {
@@ -812,8 +907,11 @@ function App() {
   });
   const [showBudgetSaved, setShowBudgetSaved] = useState(false);
 
-  // Toggles between the management dashboard and the visual summary screen.
-  const [showSummary, setShowSummary] = useState(false);
+  // Active top-level navigation tab.
+  const [activeTab, setActiveTab] = useState<TabId>('dashboard');
+
+  // Search query for the Expenses history page.
+  const [search, setSearch] = useState('');
 
   // The month currently being viewed (stored as the 1st of that month).
   const [selectedDate, setSelectedDate] = useState<Date>(() => {
@@ -1048,136 +1146,114 @@ function App() {
     return allCategories.find(c => c.value === categoryValue) || CATEGORIES[4];
   };
 
-  if (showSummary) {
-    return (
-      <ExpenseSummary
-        expenses={expenses}
-        categories={allCategories}
-        onBack={() => setShowSummary(false)}
-      />
-    );
-  }
+  // Full history (all months) for the Expenses page, filtered by search and
+  // sorted newest-first by date.
+  const historyExpenses = expenses
+    .filter((e) => {
+      const q = search.trim().toLowerCase();
+      if (!q) return true;
+      return (
+        e.description.toLowerCase().includes(q) || e.category.toLowerCase().includes(q)
+      );
+    })
+    .slice()
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  const historyTotal = historyExpenses.reduce((s, e) => s + e.amount, 0);
+
+  // Reusable month selector (used on Dashboard & Sub-Budgets pages).
+  const monthSelector = (
+    <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-3 sm:p-4 mb-6 sm:mb-8">
+      <div className="flex items-center justify-between gap-2">
+        <button
+          onClick={() => goToMonth(-1)}
+          className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl text-neutral-400 hover:bg-neutral-800 active:scale-95 transition-all"
+          aria-label="חודש קודם"
+          title="חודש קודם"
+        >
+          <ChevronRight className="w-6 h-6" />
+        </button>
+
+        <div className="flex flex-col items-center min-w-0">
+          <div className="flex items-center gap-2 text-neutral-100">
+            <CalendarDays className="w-5 h-5 text-emerald-400 shrink-0" />
+            <span className="text-base sm:text-lg font-semibold capitalize truncate">
+              {monthLabel}
+            </span>
+          </div>
+          {!isCurrentMonth && (
+            <button
+              onClick={goToCurrentMonth}
+              className="mt-0.5 text-xs font-medium text-emerald-400 hover:text-emerald-300 active:opacity-70 transition-colors"
+            >
+              חזרה לחודש הנוכחי
+            </button>
+          )}
+        </div>
+
+        <button
+          onClick={() => goToMonth(1)}
+          className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl text-neutral-400 hover:bg-neutral-800 active:scale-95 transition-all"
+          aria-label="חודש הבא"
+          title="חודש הבא"
+        >
+          <ChevronLeft className="w-6 h-6" />
+        </button>
+      </div>
+    </div>
+  );
 
   return (
     <div dir="rtl" className="min-h-screen bg-neutral-950 text-neutral-100">
-      {/* Header */}
+      {/* Header + desktop nav */}
       <header
         className="bg-neutral-900/80 backdrop-blur shadow-lg shadow-black/20 border-b border-neutral-800 sticky top-0 z-20"
         style={{ paddingTop: 'env(safe-area-inset-top)' }}
       >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="bg-gradient-to-br from-emerald-500 to-teal-600 p-2.5 sm:p-3 rounded-xl shadow-lg shadow-emerald-500/20 shrink-0">
-                <Wallet className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
+              <div className="bg-gradient-to-br from-emerald-500 to-teal-600 p-2.5 rounded-xl shadow-lg shadow-emerald-500/20 shrink-0">
+                <Wallet className="w-6 h-6 text-white" />
               </div>
               <div className="min-w-0">
-                <h1 className="text-xl sm:text-3xl font-bold text-neutral-100 truncate">מנהל התקציב שלי</h1>
-                <p className="text-neutral-400 text-xs sm:text-sm truncate">נהל את ההוצאות שלך בצורה חכמה</p>
+                <h1 className="text-lg sm:text-2xl font-bold text-neutral-100 truncate">מנהל התקציב שלי</h1>
+                <p className="text-neutral-400 text-xs truncate hidden sm:block">נהל את ההוצאות שלך בצורה חכמה</p>
               </div>
             </div>
-            <button
-              onClick={() => setShowSummary(true)}
-              className="shrink-0 flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 px-3 sm:px-4 py-2.5 rounded-xl font-medium transition-all active:scale-95"
-              title="סיכום חזותי"
-            >
-              <PieChartIcon className="w-5 h-5 text-emerald-400" />
-              <span className="hidden sm:inline text-sm">סיכום</span>
-            </button>
+
+            {/* Desktop nav */}
+            <nav className="hidden md:flex items-center gap-1 bg-neutral-800/60 p-1 rounded-2xl">
+              {TABS.map((tab) => {
+                const Icon = tab.icon;
+                const active = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all ${
+                      active
+                        ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow shadow-emerald-500/20'
+                        : 'text-neutral-300 hover:text-white hover:bg-neutral-700/60'
+                    }`}
+                  >
+                    <Icon className="w-4 h-4" />
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </nav>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-        {/* Month Selector */}
-        <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-3 sm:p-4 mb-6 sm:mb-8">
-          <div className="flex items-center justify-between gap-2">
-            <button
-              onClick={() => goToMonth(-1)}
-              className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl text-neutral-400 hover:bg-neutral-800 active:scale-95 transition-all"
-              aria-label="חודש קודם"
-              title="חודש קודם"
-            >
-              <ChevronRight className="w-6 h-6" />
-            </button>
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 pb-28 md:pb-10">
+        {/* ============================ DASHBOARD ============================ */}
+        {activeTab === 'dashboard' && (
+          <>
+            {monthSelector}
 
-            <div className="flex flex-col items-center min-w-0">
-              <div className="flex items-center gap-2 text-neutral-100">
-                <CalendarDays className="w-5 h-5 text-emerald-400 shrink-0" />
-                <span className="text-base sm:text-lg font-semibold capitalize truncate">
-                  {monthLabel}
-                </span>
-              </div>
-              {!isCurrentMonth && (
-                <button
-                  onClick={goToCurrentMonth}
-                  className="mt-0.5 text-xs font-medium text-emerald-400 hover:text-emerald-300 active:opacity-70 transition-colors"
-                >
-                  חזרה לחודש הנוכחי
-                </button>
-              )}
-            </div>
-
-            <button
-              onClick={() => goToMonth(1)}
-              className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl text-neutral-400 hover:bg-neutral-800 active:scale-95 transition-all"
-              aria-label="חודש הבא"
-              title="חודש הבא"
-            >
-              <ChevronLeft className="w-6 h-6" />
-            </button>
-          </div>
-        </div>
-
-        {/* Budget Setter */}
-        <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 mb-6 sm:mb-8">
-          <h2 className="text-base sm:text-lg font-semibold text-neutral-100 mb-4">הגדר תקציב חודשי</h2>
-          <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 sm:items-end">
-            <div className="flex-1 sm:max-w-xs">
-              <label className="block text-sm font-medium text-neutral-300 mb-2">
-                סכום התקציב (₪)
-              </label>
-              <input
-                type="number"
-                inputMode="decimal"
-                value={budgetInput}
-                onChange={(e) => setBudgetInput(e.target.value)}
-                placeholder={budget > 0 ? `נוכחי: ₪${budget.toLocaleString()}` : 'הזן סכום'}
-                className="w-full px-4 py-3 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base sm:text-lg"
-                min="0"
-                step="100"
-              />
-            </div>
-            <button
-              onClick={handleSetBudget}
-              className="w-full sm:w-auto bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-8 py-3 rounded-xl font-medium hover:from-emerald-600 hover:to-teal-700 transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 active:scale-[0.98]"
-            >
-              {showBudgetSaved ? (
-                <>
-                  <Check className="w-5 h-5" />
-                  נשמר!
-                </>
-              ) : (
-                'עדכן תקציב'
-              )}
-            </button>
-          </div>
-        </div>
-
-        {/* Sub-Budgets (Envelope Budgeting) */}
-        <SubBudgetTracker
-          budget={budget}
-          monthLabel={monthLabel}
-          monthExpenses={monthExpenses}
-          categories={allCategories}
-          subBudgets={subBudgets}
-          onAddSubBudget={handleAddSubBudget}
-          onSetSubBudget={handleSetSubBudget}
-          onRemoveSubBudget={handleRemoveSubBudget}
-        />
-
-        {/* Dashboard Summary Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6 mb-6 sm:mb-8">
+            {/* Budget Status Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6 mb-6 sm:mb-8">
           {/* Total Budget Card */}
           <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 hover:border-neutral-700 transition-colors">
             <div className="flex items-center justify-between mb-3 sm:mb-4">
@@ -1448,28 +1524,117 @@ function App() {
           </form>
         </div>
 
-        {/* Expenses List */}
+            {/* Spending by category */}
+            <SpendingDonut
+              monthExpenses={monthExpenses}
+              categories={allCategories}
+              monthLabel={monthLabel}
+            />
+          </>
+        )}
+
+        {/* ============================ ANALYTICS =========================== */}
+        {activeTab === 'analytics' && (
+          <ExpenseSummary expenses={expenses} categories={allCategories} />
+        )}
+
+        {/* =========================== SUB-BUDGETS ========================== */}
+        {activeTab === 'subbudgets' && (
+          <>
+            {monthSelector}
+
+            {/* Global budget setter */}
+            <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 mb-6 sm:mb-8">
+              <h2 className="text-base sm:text-lg font-semibold text-neutral-100 mb-4">הגדר תקציב חודשי</h2>
+              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 sm:items-end">
+                <div className="flex-1 sm:max-w-xs">
+                  <label className="block text-sm font-medium text-neutral-300 mb-2">סכום התקציב (₪)</label>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    value={budgetInput}
+                    onChange={(e) => setBudgetInput(e.target.value)}
+                    placeholder={budget > 0 ? `נוכחי: ₪${budget.toLocaleString()}` : 'הזן סכום'}
+                    className="w-full px-4 py-3 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base sm:text-lg"
+                    min="0"
+                    step="100"
+                  />
+                </div>
+                <button
+                  onClick={handleSetBudget}
+                  className="w-full sm:w-auto bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-8 py-3 rounded-xl font-medium hover:from-emerald-600 hover:to-teal-700 transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 active:scale-[0.98]"
+                >
+                  {showBudgetSaved ? (
+                    <>
+                      <Check className="w-5 h-5" />
+                      נשמר!
+                    </>
+                  ) : (
+                    'עדכן תקציב'
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <SubBudgetTracker
+              budget={budget}
+              monthLabel={monthLabel}
+              monthExpenses={monthExpenses}
+              categories={allCategories}
+              subBudgets={subBudgets}
+              onAddSubBudget={handleAddSubBudget}
+              onSetSubBudget={handleSetSubBudget}
+              onRemoveSubBudget={handleRemoveSubBudget}
+            />
+          </>
+        )}
+
+        {/* ============================ EXPENSES ============================ */}
+        {activeTab === 'expenses' && (
         <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 overflow-hidden">
           <div className="p-4 sm:p-6 border-b border-neutral-800">
-            <h2 className="text-base sm:text-lg font-semibold text-neutral-100">רשימת ההוצאות</h2>
+            <h2 className="text-base sm:text-lg font-semibold text-neutral-100">היסטוריית הוצאות</h2>
             <p className="text-sm text-neutral-500 mt-1">
-              {monthExpenses.length} הוצאות ב{monthLabel}
+              {historyExpenses.length} הוצאות • סה"כ ₪{historyTotal.toLocaleString()}
             </p>
+            <div className="relative mt-4">
+              <Search className="w-5 h-5 text-neutral-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="חיפוש לפי תיאור או קטגוריה"
+                className="w-full pr-11 pl-9 py-3 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base"
+              />
+              {search && (
+                <button
+                  onClick={() => setSearch('')}
+                  className="absolute left-2 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300 p-1.5 rounded-lg"
+                  aria-label="נקה חיפוש"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
           </div>
 
-          {monthExpenses.length === 0 ? (
+          {historyExpenses.length === 0 ? (
             <div className="p-10 sm:p-12 text-center">
               <div className="bg-neutral-800 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
                 <TrendingDown className="w-8 h-8 text-neutral-500" />
               </div>
-              <p className="text-neutral-300 text-base sm:text-lg">אין הוצאות בחודש זה</p>
-              <p className="text-neutral-500 text-sm mt-1">הוסף הוצאה חדשה או בחר חודש אחר</p>
+              <p className="text-neutral-300 text-base sm:text-lg">
+                {search ? 'לא נמצאו תוצאות' : 'אין הוצאות עדיין'}
+              </p>
+              <p className="text-neutral-500 text-sm mt-1">
+                {search ? 'נסה מונח חיפוש אחר' : 'הוסף את ההוצאה הראשונה שלך בעמוד הבית'}
+              </p>
             </div>
           ) : (
             <>
               {/* Mobile: card list (native-app feel) */}
               <ul className="md:hidden divide-y divide-neutral-800">
-                {monthExpenses.map((expense) => {
+                {historyExpenses.map((expense) => {
                   const categoryInfo = getCategoryInfo(expense.category);
                   const IconComponent = categoryInfo.icon;
 
@@ -1519,7 +1684,7 @@ function App() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-neutral-800">
-                    {monthExpenses.map((expense) => {
+                    {historyExpenses.map((expense) => {
                       const categoryInfo = getCategoryInfo(expense.category);
                       const IconComponent = categoryInfo.icon;
 
@@ -1560,31 +1725,49 @@ function App() {
             </>
           )}
 
-          {/* Summary Footer */}
-          {monthExpenses.length > 0 && (
-            <div className="bg-neutral-800/50 px-4 sm:px-6 py-4 border-t border-neutral-800">
-              <div className="flex justify-between items-center">
-                <span className="text-neutral-300 font-medium">סה"כ הוצאות:</span>
-                <span className={`text-xl sm:text-2xl font-bold ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}>
-                  ₪{totalExpenses.toLocaleString()}
-                </span>
-              </div>
-            </div>
-          )}
         </div>
+        )}
       </main>
 
-      {/* Footer */}
-      <footer
-        className="border-t border-neutral-800 bg-neutral-900 mt-8 sm:mt-12"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
-      >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      {/* Footer (desktop only; mobile uses the bottom nav) */}
+      <footer className="hidden md:block border-t border-neutral-800 bg-neutral-900 mt-8 sm:mt-12">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <p className="text-center text-sm text-neutral-500">
             מנהל התקציב שלי - נהל את הכסף שלך בצורה חכמה
           </p>
         </div>
       </footer>
+
+      {/* Mobile sticky bottom navigation (thumb-friendly) */}
+      <nav
+        className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-neutral-900/95 backdrop-blur border-t border-neutral-800"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      >
+        <div className="flex items-stretch justify-around">
+          {TABS.map((tab) => {
+            const Icon = tab.icon;
+            const active = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex-1 flex flex-col items-center gap-1 pt-2.5 pb-1.5 transition-colors active:scale-95 ${
+                  active ? 'text-emerald-400' : 'text-neutral-500'
+                }`}
+                aria-label={tab.label}
+              >
+                <Icon className="w-6 h-6" />
+                <span className="text-[11px] font-medium">{tab.label}</span>
+                <span
+                  className={`h-0.5 w-8 rounded-full transition-colors ${
+                    active ? 'bg-emerald-400' : 'bg-transparent'
+                  }`}
+                />
+              </button>
+            );
+          })}
+        </div>
+      </nav>
     </div>
   );
 }
