@@ -23,6 +23,8 @@ import {
   LayoutDashboard,
   Receipt,
   Search,
+  RotateCcw,
+  Layers,
   type LucideIcon
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
@@ -895,9 +897,180 @@ function SubBudgetTracker({
   );
 }
 
+type BudgetChangeMode = 'keep' | 'reset' | 'clear';
+
+interface BudgetChangeModalProps {
+  open: boolean;
+  newBudget: number;
+  currentBudget: number;
+  monthLabel: string;
+  onSelect: (mode: BudgetChangeMode) => void;
+  onClose: () => void;
+}
+
+// Premium dark confirmation sheet shown when the monthly budget changes while
+// the active month already has sub-budget allocations. Each option acts ONLY on
+// the active month's data.
+function BudgetChangeModal({
+  open,
+  newBudget,
+  currentBudget,
+  monthLabel,
+  onSelect,
+  onClose,
+}: BudgetChangeModalProps) {
+  // Close on Escape for keyboard users.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const options: {
+    mode: BudgetChangeMode;
+    icon: LucideIcon;
+    title: string;
+    desc: string;
+    accent: string;
+    ring: string;
+    iconBg: string;
+  }[] = [
+    {
+      mode: 'keep',
+      icon: Check,
+      title: 'השאר את תתי-התקציבים והקטגוריות בדיוק כמו שהם',
+      desc: 'כל הקטגוריות והסכומים שהוקצו להן יישארו ללא שינוי.',
+      accent: 'hover:border-emerald-500/60 hover:bg-emerald-500/5',
+      ring: 'focus-visible:ring-emerald-500/40',
+      iconBg: 'bg-emerald-500/15 text-emerald-400',
+    },
+    {
+      mode: 'reset',
+      icon: RotateCcw,
+      title: 'שמור על הקטגוריות, אך אפס את סכומי התקציב שלהן',
+      desc: 'הקטגוריות יישמרו, אך הסכומים יתאפסו כדי שתוכל להקצות מחדש.',
+      accent: 'hover:border-amber-500/60 hover:bg-amber-500/5',
+      ring: 'focus-visible:ring-amber-500/40',
+      iconBg: 'bg-amber-500/15 text-amber-400',
+    },
+    {
+      mode: 'clear',
+      icon: Trash2,
+      title: 'אפס הכל לחלוטין לחודש זה',
+      desc: 'הסרת כל תתי-התקציבים של חודש זה והתחלה מאפס.',
+      accent: 'hover:border-rose-500/60 hover:bg-rose-500/5',
+      ring: 'focus-visible:ring-rose-500/40',
+      iconBg: 'bg-rose-500/15 text-rose-400',
+    },
+  ];
+
+  return (
+    <div
+      dir="rtl"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="budget-modal-title"
+    >
+      {/* Backdrop */}
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="סגור"
+        className="absolute inset-0 bg-black/70 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out]"
+      />
+
+      {/* Sheet / card */}
+      <div
+        className="relative w-full sm:max-w-lg bg-neutral-900 border border-neutral-800 shadow-2xl shadow-black/60 rounded-t-3xl sm:rounded-3xl p-5 sm:p-7 max-h-[92vh] overflow-y-auto"
+        style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}
+      >
+        {/* Mobile grab handle */}
+        <div className="sm:hidden mx-auto mb-4 h-1.5 w-12 rounded-full bg-neutral-700" />
+
+        <div className="flex items-start gap-3 mb-1">
+          <div className="bg-gradient-to-br from-emerald-500 to-teal-600 p-2.5 rounded-xl shadow-lg shadow-emerald-500/20 shrink-0">
+            <Layers className="w-5 h-5 text-white" />
+          </div>
+          <div className="min-w-0">
+            <h2 id="budget-modal-title" className="text-base sm:text-lg font-bold text-neutral-100 leading-snug">
+              שינית את התקציב החודשי, מה לגבי תתי-התקציבים?
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 -mt-1 -ml-1 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 p-2 rounded-lg transition-all"
+            aria-label="סגור"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <p className="text-sm text-neutral-400 leading-relaxed mb-4">
+          זיהינו עדכון בתקציב הכללי. כיצד תרצה לנהל את תתי-התקציבים והקטגוריות שלך לחודש זה?
+        </p>
+
+        {/* Old -> new budget summary */}
+        <div className="flex items-center justify-between gap-3 bg-neutral-800/60 border border-neutral-700/60 rounded-2xl px-4 py-3 mb-5">
+          <span className="text-xs text-neutral-500 capitalize truncate">{monthLabel}</span>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-sm text-neutral-500 line-through">₪{currentBudget.toLocaleString()}</span>
+            <ChevronLeft className="w-4 h-4 text-neutral-600" />
+            <span className="text-base font-bold text-emerald-400">₪{newBudget.toLocaleString()}</span>
+          </div>
+        </div>
+
+        {/* Option buttons */}
+        <div className="space-y-3">
+          {options.map((opt) => {
+            const Icon = opt.icon;
+            return (
+              <button
+                key={opt.mode}
+                type="button"
+                onClick={() => onSelect(opt.mode)}
+                className={`w-full text-right flex items-center gap-3.5 p-4 rounded-2xl bg-neutral-800/40 border border-neutral-700/70 transition-all active:scale-[0.99] outline-none focus-visible:ring-2 ${opt.accent} ${opt.ring}`}
+              >
+                <div className={`shrink-0 w-11 h-11 rounded-xl flex items-center justify-center ${opt.iconBg}`}>
+                  <Icon className="w-5 h-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-neutral-100 text-sm leading-snug">{opt.title}</p>
+                  <p className="text-xs text-neutral-500 mt-1 leading-relaxed">{opt.desc}</p>
+                </div>
+                <ChevronLeft className="w-5 h-5 text-neutral-600 shrink-0" />
+              </button>
+            );
+          })}
+        </div>
+
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-4 w-full py-3 rounded-xl text-sm font-medium text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 transition-all"
+        >
+          ביטול
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function App() {
-  const [budget, setBudget] = useState<number>(0);
+  // Monthly budget is scoped per month ('YYYY-MM' -> amount) so changing one
+  // month never affects another month's history.
+  const [budgetsByMonth, setBudgetsByMonth] = useState<Record<string, number>>({});
   const [budgetInput, setBudgetInput] = useState<string>('');
+
+  // Budget-change confirmation modal state.
+  const [showBudgetModal, setShowBudgetModal] = useState(false);
+  const [pendingBudget, setPendingBudget] = useState<number | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [newExpense, setNewExpense] = useState({
     description: '',
@@ -930,8 +1103,11 @@ function App() {
   const [newCategoryIcon, setNewCategoryIcon] = useState(ICON_OPTIONS[0].name);
   const [categoryError, setCategoryError] = useState('');
 
-  // Per-category sub-budget allocations (category value -> amount).
-  const [subBudgets, setSubBudgets] = useState<Record<string, number>>({});
+  // Per-category sub-budget allocations, scoped per month:
+  // monthKey ('YYYY-MM') -> { categoryValue -> amount }.
+  const [subBudgetsByMonth, setSubBudgetsByMonth] = useState<
+    Record<string, Record<string, number>>
+  >({});
 
   // The full list of selectable categories: built-ins + user-created.
   const allCategories: Category[] = [
@@ -944,16 +1120,18 @@ function App() {
     })),
   ];
 
+  // The month currently in focus ('YYYY-MM') and its budget + sub-budgets.
+  // Deriving these keeps the rest of the component working with simple values.
+  const selectedMonthKey = monthKeyOfDate(selectedDate);
+  const budget = budgetsByMonth[selectedMonthKey] ?? 0;
+  const subBudgets = subBudgetsByMonth[selectedMonthKey] ?? {};
+
   // Load data from localStorage on mount
   useEffect(() => {
-    const savedBudget = localStorage.getItem('monthlyBudget');
     const savedExpenses = localStorage.getItem('expenses');
     const savedCategories = localStorage.getItem('customCategories');
-    const savedSubBudgets = localStorage.getItem('subBudgets');
+    const thisMonth = monthKeyOfDate(new Date());
 
-    if (savedBudget) {
-      setBudget(parseFloat(savedBudget));
-    }
     if (savedExpenses) {
       const parsed: Expense[] = JSON.parse(savedExpenses);
       // Migrate any legacy (he-IL) dates to the canonical ISO format.
@@ -962,8 +1140,23 @@ function App() {
     if (savedCategories) {
       setCustomCategories(JSON.parse(savedCategories));
     }
-    if (savedSubBudgets) {
-      setSubBudgets(JSON.parse(savedSubBudgets));
+
+    // Per-month budget (migrate legacy single global budget into this month).
+    const savedBudgets = localStorage.getItem('budgetsByMonth');
+    const legacyBudget = localStorage.getItem('monthlyBudget');
+    if (savedBudgets) {
+      setBudgetsByMonth(JSON.parse(savedBudgets));
+    } else if (legacyBudget) {
+      setBudgetsByMonth({ [thisMonth]: parseFloat(legacyBudget) });
+    }
+
+    // Per-month sub-budgets (migrate legacy flat map into this month).
+    const savedSubByMonth = localStorage.getItem('subBudgetsByMonth');
+    const legacySub = localStorage.getItem('subBudgets');
+    if (savedSubByMonth) {
+      setSubBudgetsByMonth(JSON.parse(savedSubByMonth));
+    } else if (legacySub) {
+      setSubBudgetsByMonth({ [thisMonth]: JSON.parse(legacySub) });
     }
   }, []);
 
@@ -972,21 +1165,68 @@ function App() {
     localStorage.setItem('customCategories', JSON.stringify(customCategories));
   }, [customCategories]);
 
-  // Save sub-budgets to localStorage
+  // Save per-month sub-budgets to localStorage
   useEffect(() => {
-    localStorage.setItem('subBudgets', JSON.stringify(subBudgets));
-  }, [subBudgets]);
+    localStorage.setItem('subBudgetsByMonth', JSON.stringify(subBudgetsByMonth));
+  }, [subBudgetsByMonth]);
 
-  // Save budget to localStorage
+  // Save per-month budgets to localStorage
+  useEffect(() => {
+    localStorage.setItem('budgetsByMonth', JSON.stringify(budgetsByMonth));
+  }, [budgetsByMonth]);
+
+  // Budget update entry point. If the active month already has sub-budget
+  // allocations, we ask how to reconcile them via the confirmation modal;
+  // otherwise the new budget is applied immediately.
   const handleSetBudget = () => {
     const amount = parseFloat(budgetInput);
-    if (!isNaN(amount) && amount >= 0) {
-      setBudget(amount);
-      localStorage.setItem('monthlyBudget', amount.toString());
-      setBudgetInput('');
-      setShowBudgetSaved(true);
-      setTimeout(() => setShowBudgetSaved(false), 2000);
+    if (isNaN(amount) || amount < 0) return;
+
+    const hasAllocations = Object.values(subBudgets).some((v) => v > 0);
+    if (hasAllocations) {
+      setPendingBudget(amount);
+      setShowBudgetModal(true);
+    } else {
+      applyBudgetChange(amount, 'keep');
     }
+  };
+
+  // Applies the new budget to the active month and reconciles its sub-budgets
+  // per the chosen option. All writes are scoped to `selectedMonthKey`, so
+  // other months are never touched.
+  const applyBudgetChange = (amount: number, mode: BudgetChangeMode) => {
+    setBudgetsByMonth((prev) => ({ ...prev, [selectedMonthKey]: amount }));
+
+    if (mode === 'reset' || mode === 'clear') {
+      // Wipe this month's allocations only.
+      setSubBudgetsByMonth((prev) => ({ ...prev, [selectedMonthKey]: {} }));
+    }
+
+    if (mode === 'clear') {
+      // "Start fresh": remove custom categories that aren't referenced anywhere
+      // else (no expenses in any month, no allocations in other months) so
+      // historical data stays intact.
+      setCustomCategories((prev) =>
+        prev.filter((c) => {
+          const usedByExpense = expenses.some((e) => e.category === c.value);
+          const usedOtherMonth = Object.entries(subBudgetsByMonth).some(
+            ([mk, map]) => mk !== selectedMonthKey && (map?.[c.value] ?? 0) > 0
+          );
+          return usedByExpense || usedOtherMonth;
+        })
+      );
+    }
+
+    setBudgetInput('');
+    setPendingBudget(null);
+    setShowBudgetModal(false);
+    setShowBudgetSaved(true);
+    setTimeout(() => setShowBudgetSaved(false), 2000);
+  };
+
+  const handleCloseBudgetModal = () => {
+    setShowBudgetModal(false);
+    setPendingBudget(null);
   };
 
   // Save expenses to localStorage
@@ -1099,30 +1339,31 @@ function App() {
       value = trimmed;
     }
 
-    setSubBudgets((prev) => ({ ...prev, [value as string]: amount }));
+    const key = value as string;
+    setSubBudgetsByMonth((prev) => ({
+      ...prev,
+      [selectedMonthKey]: { ...(prev[selectedMonthKey] ?? {}), [key]: amount },
+    }));
   };
 
   const handleSetSubBudget = (value: string, amount: number) => {
-    setSubBudgets((prev) => {
-      if (!(amount > 0)) {
-        const next = { ...prev };
-        delete next[value];
-        return next;
-      }
-      return { ...prev, [value]: amount };
+    setSubBudgetsByMonth((prev) => {
+      const monthMap = { ...(prev[selectedMonthKey] ?? {}) };
+      if (!(amount > 0)) delete monthMap[value];
+      else monthMap[value] = amount;
+      return { ...prev, [selectedMonthKey]: monthMap };
     });
   };
 
   const handleRemoveSubBudget = (value: string) => {
-    setSubBudgets((prev) => {
-      const next = { ...prev };
-      delete next[value];
-      return next;
+    setSubBudgetsByMonth((prev) => {
+      const monthMap = { ...(prev[selectedMonthKey] ?? {}) };
+      delete monthMap[value];
+      return { ...prev, [selectedMonthKey]: monthMap };
     });
   };
 
-  // Month navigation
-  const selectedMonthKey = monthKeyOfDate(selectedDate);
+  // Month navigation (selectedMonthKey is derived above with budget/subBudgets).
   const monthLabel = selectedDate.toLocaleDateString('he-IL', { month: 'long', year: 'numeric' });
   const isCurrentMonth = selectedMonthKey === monthKeyOfDate(new Date());
   const goToMonth = (offset: number) =>
@@ -1768,6 +2009,18 @@ function App() {
           })}
         </div>
       </nav>
+
+      {/* Budget change confirmation modal */}
+      <BudgetChangeModal
+        open={showBudgetModal && pendingBudget !== null}
+        newBudget={pendingBudget ?? 0}
+        currentBudget={budget}
+        monthLabel={monthLabel}
+        onSelect={(mode) => {
+          if (pendingBudget !== null) applyBudgetChange(pendingBudget, mode);
+        }}
+        onClose={handleCloseBudgetModal}
+      />
     </div>
   );
 }
