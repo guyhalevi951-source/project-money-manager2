@@ -653,29 +653,29 @@ function App() {
   }
 
   return (
-    <div dir="rtl" className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+    <div dir="rtl" className="min-h-screen bg-neutral-950 text-neutral-100">
       {/* Header */}
       <header
-        className="bg-white shadow-sm border-b border-slate-200 sticky top-0 z-20"
+        className="bg-neutral-900/80 backdrop-blur shadow-lg shadow-black/20 border-b border-neutral-800 sticky top-0 z-20"
         style={{ paddingTop: 'env(safe-area-inset-top)' }}
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="bg-gradient-to-br from-emerald-500 to-teal-600 p-2.5 sm:p-3 rounded-xl shadow-lg shrink-0">
+              <div className="bg-gradient-to-br from-emerald-500 to-teal-600 p-2.5 sm:p-3 rounded-xl shadow-lg shadow-emerald-500/20 shrink-0">
                 <Wallet className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
               </div>
               <div className="min-w-0">
-                <h1 className="text-xl sm:text-3xl font-bold text-slate-800 truncate">מנהל התקציב שלי</h1>
-                <p className="text-slate-500 text-xs sm:text-sm truncate">נהל את ההוצאות שלך בצורה חכמה</p>
+                <h1 className="text-xl sm:text-3xl font-bold text-neutral-100 truncate">מנהל התקציב שלי</h1>
+                <p className="text-neutral-400 text-xs sm:text-sm truncate">נהל את ההוצאות שלך בצורה חכמה</p>
               </div>
             </div>
             <button
               onClick={() => setShowSummary(true)}
-              className="shrink-0 flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 sm:px-4 py-2.5 rounded-xl font-medium transition-all active:scale-95"
+              className="shrink-0 flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 px-3 sm:px-4 py-2.5 rounded-xl font-medium transition-all active:scale-95"
               title="סיכום חזותי"
             >
-              <PieChartIcon className="w-5 h-5 text-emerald-600" />
+              <PieChartIcon className="w-5 h-5 text-emerald-400" />
               <span className="hidden sm:inline text-sm">סיכום</span>
             </button>
           </div>
@@ -684,11 +684,11 @@ function App() {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {/* Month Selector */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-3 sm:p-4 mb-6 sm:mb-8">
+        <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-3 sm:p-4 mb-6 sm:mb-8">
           <div className="flex items-center justify-between gap-2">
             <button
               onClick={() => goToMonth(-1)}
-              className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 active:scale-95 transition-all"
+              className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl text-neutral-400 hover:bg-neutral-800 active:scale-95 transition-all"
               aria-label="חודש קודם"
               title="חודש קודם"
             >
@@ -696,8 +696,8 @@ function App() {
             </button>
 
             <div className="flex flex-col items-center min-w-0">
-              <div className="flex items-center gap-2 text-slate-800">
-                <CalendarDays className="w-5 h-5 text-emerald-500 shrink-0" />
+              <div className="flex items-center gap-2 text-neutral-100">
+                <CalendarDays className="w-5 h-5 text-emerald-400 shrink-0" />
                 <span className="text-base sm:text-lg font-semibold capitalize truncate">
                   {monthLabel}
                 </span>
@@ -705,7 +705,7 @@ function App() {
               {!isCurrentMonth && (
                 <button
                   onClick={goToCurrentMonth}
-                  className="mt-0.5 text-xs font-medium text-emerald-600 hover:text-emerald-700 active:opacity-70 transition-colors"
+                  className="mt-0.5 text-xs font-medium text-emerald-400 hover:text-emerald-300 active:opacity-70 transition-colors"
                 >
                   חזרה לחודש הנוכחי
                 </button>
@@ -714,7 +714,7 @@ function App() {
 
             <button
               onClick={() => goToMonth(1)}
-              className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 active:scale-95 transition-all"
+              className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl text-neutral-400 hover:bg-neutral-800 active:scale-95 transition-all"
               aria-label="חודש הבא"
               title="חודש הבא"
             >
@@ -724,11 +724,11 @@ function App() {
         </div>
 
         {/* Budget Setter */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6 mb-6 sm:mb-8">
-          <h2 className="text-base sm:text-lg font-semibold text-slate-700 mb-4">הגדר תקציב חודשי</h2>
+        <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 mb-6 sm:mb-8">
+          <h2 className="text-base sm:text-lg font-semibold text-neutral-100 mb-4">הגדר תקציב חודשי</h2>
           <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 sm:items-end">
             <div className="flex-1 sm:max-w-xs">
-              <label className="block text-sm font-medium text-slate-600 mb-2">
+              <label className="block text-sm font-medium text-neutral-300 mb-2">
                 סכום התקציב (₪)
               </label>
               <input
@@ -737,7 +737,7 @@ function App() {
                 value={budgetInput}
                 onChange={(e) => setBudgetInput(e.target.value)}
                 placeholder={budget > 0 ? `נוכחי: ₪${budget.toLocaleString()}` : 'הזן סכום'}
-                className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all text-base sm:text-lg"
+                className="w-full px-4 py-3 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base sm:text-lg"
                 min="0"
                 step="100"
               />
@@ -761,70 +761,70 @@ function App() {
         {/* Dashboard Summary Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6 mb-6 sm:mb-8">
           {/* Total Budget Card */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6 hover:shadow-md transition-shadow">
+          <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 hover:border-neutral-700 transition-colors">
             <div className="flex items-center justify-between mb-3 sm:mb-4">
-              <span className="text-sm font-medium text-slate-500">תקציב חודשי</span>
-              <div className="bg-emerald-100 p-2 rounded-lg">
-                <Wallet className="w-5 h-5 text-emerald-600" />
+              <span className="text-sm font-medium text-neutral-400">תקציב חודשי</span>
+              <div className="bg-emerald-500/15 p-2 rounded-lg">
+                <Wallet className="w-5 h-5 text-emerald-400" />
               </div>
             </div>
-            <p className="text-2xl sm:text-3xl font-bold text-slate-800">₪{budget.toLocaleString()}</p>
-            <p className="text-sm text-slate-400 mt-2">הסכום שהוקצב להוצאות</p>
+            <p className="text-2xl sm:text-3xl font-bold text-neutral-100">₪{budget.toLocaleString()}</p>
+            <p className="text-sm text-neutral-500 mt-2">הסכום שהוקצב להוצאות</p>
           </div>
 
           {/* Total Expenses Card */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6 hover:shadow-md transition-shadow">
+          <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 hover:border-neutral-700 transition-colors">
             <div className="flex items-center justify-between mb-3 sm:mb-4">
-              <span className="text-sm font-medium text-slate-500">סה"כ הוצאות</span>
-              <div className="bg-rose-100 p-2 rounded-lg">
-                <TrendingDown className="w-5 h-5 text-rose-600" />
+              <span className="text-sm font-medium text-neutral-400">סה"כ הוצאות</span>
+              <div className="bg-rose-500/15 p-2 rounded-lg">
+                <TrendingDown className="w-5 h-5 text-rose-400" />
               </div>
             </div>
-            <p className={`text-2xl sm:text-3xl font-bold ${isOverBudget ? 'text-rose-600' : 'text-slate-800'}`}>
+            <p className={`text-2xl sm:text-3xl font-bold ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}>
               ₪{totalExpenses.toLocaleString()}
             </p>
-            <p className="text-sm text-slate-400 mt-2">
+            <p className="text-sm text-neutral-500 mt-2">
               {monthExpenses.length} הוצאות ב{monthLabel}
             </p>
           </div>
 
           {/* Budget Status Card */}
-          <div className={`rounded-2xl shadow-sm border p-4 sm:p-6 hover:shadow-md transition-shadow sm:col-span-2 md:col-span-1 ${
+          <div className={`rounded-2xl shadow-lg shadow-black/20 border p-4 sm:p-6 transition-colors sm:col-span-2 md:col-span-1 ${
             isOverBudget
-              ? 'bg-rose-50 border-rose-200'
-              : 'bg-white border-slate-200'
+              ? 'bg-rose-500/10 border-rose-500/40'
+              : 'bg-neutral-900 border-neutral-800 hover:border-neutral-700'
           }`}>
             <div className="flex items-center justify-between mb-3 sm:mb-4">
-              <span className="text-sm font-medium text-slate-500">מצב התקציב</span>
-              <div className={`p-2 rounded-lg ${isOverBudget ? 'bg-rose-200' : 'bg-blue-100'}`}>
+              <span className="text-sm font-medium text-neutral-400">מצב התקציב</span>
+              <div className={`p-2 rounded-lg ${isOverBudget ? 'bg-rose-500/20' : 'bg-indigo-500/15'}`}>
                 {isOverBudget ? (
-                  <AlertTriangle className="w-5 h-5 text-rose-600" />
+                  <AlertTriangle className="w-5 h-5 text-rose-400" />
                 ) : (
-                  <Wallet className="w-5 h-5 text-blue-600" />
+                  <Wallet className="w-5 h-5 text-indigo-400" />
                 )}
               </div>
             </div>
 
             {isOverBudget && (
-              <div className="bg-rose-600 text-white text-xs font-medium px-2 py-1 rounded-full inline-block mb-3">
+              <div className="bg-rose-500 text-white text-xs font-medium px-2 py-1 rounded-full inline-block mb-3">
                 חרגת מהתקציב!
               </div>
             )}
 
-            <p className={`text-2xl font-bold ${isOverBudget ? 'text-rose-600' : 'text-slate-800'}`}>
+            <p className={`text-2xl font-bold ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}>
               {remaining >= 0 ? `₪${remaining.toLocaleString()}` : `-₪${Math.abs(remaining).toLocaleString()}`}
             </p>
-            <p className="text-sm text-slate-400 mt-2">
+            <p className="text-sm text-neutral-500 mt-2">
               {remaining >= 0 ? 'נותר בתקציב' : 'חריגה מהתקציב'}
             </p>
 
             {/* Progress Bar */}
             <div className="mt-4">
-              <div className="flex justify-between text-xs text-slate-500 mb-1">
+              <div className="flex justify-between text-xs text-neutral-400 mb-1">
                 <span>ניצולת</span>
                 <span>{Math.min(100, budgetPercentage).toFixed(0)}%</span>
               </div>
-              <div className="h-3 bg-slate-200 rounded-full overflow-hidden">
+              <div className="h-3 bg-neutral-800 rounded-full overflow-hidden">
                 <div
                   className={`h-full rounded-full transition-all duration-500 ${
                     isOverBudget
@@ -841,34 +841,34 @@ function App() {
         </div>
 
         {/* Add Expense Form */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6 mb-6 sm:mb-8">
-          <h2 className="text-base sm:text-lg font-semibold text-slate-700 mb-4 sm:mb-6 flex items-center gap-2">
-            <Plus className="w-5 h-5 text-emerald-500" />
+        <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 mb-6 sm:mb-8">
+          <h2 className="text-base sm:text-lg font-semibold text-neutral-100 mb-4 sm:mb-6 flex items-center gap-2">
+            <Plus className="w-5 h-5 text-emerald-400" />
             הוסף הוצאה חדשה
           </h2>
 
           <form onSubmit={handleAddExpense} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-600 mb-2">תיאור</label>
+              <label className="block text-sm font-medium text-neutral-300 mb-2">תיאור</label>
               <input
                 type="text"
                 value={newExpense.description}
                 onChange={(e) => setNewExpense({ ...newExpense, description: e.target.value })}
                 placeholder="לדוגמה: סופר, דלק"
-                className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all text-base"
+                className="w-full px-4 py-3 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base"
                 required
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-600 mb-2">סכום (₪)</label>
+              <label className="block text-sm font-medium text-neutral-300 mb-2">סכום (₪)</label>
               <input
                 type="number"
                 inputMode="decimal"
                 value={newExpense.amount}
                 onChange={(e) => setNewExpense({ ...newExpense, amount: e.target.value })}
                 placeholder="0.00"
-                className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all text-base"
+                className="w-full px-4 py-3 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base"
                 min="0"
                 step="0.01"
                 required
@@ -876,22 +876,22 @@ function App() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-600 mb-2">תאריך</label>
+              <label className="block text-sm font-medium text-neutral-300 mb-2">תאריך</label>
               <input
                 type="date"
                 value={newExpense.date}
                 onChange={(e) => setNewExpense({ ...newExpense, date: e.target.value })}
-                className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all text-base"
+                className="w-full px-4 py-3 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base [color-scheme:dark]"
                 required
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-600 mb-2">קטגוריה</label>
+              <label className="block text-sm font-medium text-neutral-300 mb-2">קטגוריה</label>
               <select
                 value={newExpense.category}
                 onChange={(e) => handleCategoryChange(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all bg-white text-base"
+                className="w-full px-4 py-3 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base"
               >
                 {allCategories.map((cat) => (
                   <option key={cat.value} value={cat.value}>
@@ -902,10 +902,10 @@ function App() {
               </select>
 
               {isAddingCategory && (
-                <div className="mt-3 p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-4">
+                <div className="mt-3 p-4 bg-neutral-800/60 border border-emerald-500/30 rounded-xl space-y-4">
                   {/* Name */}
                   <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1.5">
+                    <label className="block text-xs font-medium text-neutral-300 mb-1.5">
                       שם הקטגוריה
                     </label>
                     <input
@@ -923,13 +923,13 @@ function App() {
                       }}
                       placeholder="לדוגמה: תחבורה, מתנות"
                       autoFocus
-                      className="w-full px-3 py-2.5 rounded-lg border border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all text-base bg-white"
+                      className="w-full px-3 py-2.5 rounded-lg bg-neutral-900 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base"
                     />
                   </div>
 
                   {/* Color picker */}
                   <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1.5">צבע</label>
+                    <label className="block text-xs font-medium text-neutral-300 mb-1.5">צבע</label>
                     <div className="flex flex-wrap gap-2.5">
                       {COLOR_OPTIONS.map((c) => (
                         <button
@@ -940,7 +940,7 @@ function App() {
                           aria-label={c.name}
                           className={`w-9 h-9 rounded-full ${c.class} transition-all ${
                             newCategoryColor === c.class
-                              ? 'ring-2 ring-offset-2 ring-slate-700 scale-110'
+                              ? 'ring-2 ring-offset-2 ring-offset-neutral-800 ring-white scale-110'
                               : 'hover:scale-110 active:scale-95'
                           }`}
                         />
@@ -950,7 +950,7 @@ function App() {
 
                   {/* Icon picker */}
                   <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1.5">אייקון</label>
+                    <label className="block text-xs font-medium text-neutral-300 mb-1.5">אייקון</label>
                     <div className="flex flex-wrap gap-2.5">
                       {ICON_OPTIONS.map((o) => {
                         const IconComp = o.icon;
@@ -963,8 +963,8 @@ function App() {
                             aria-label={o.name}
                             className={`w-11 h-11 rounded-lg flex items-center justify-center transition-all ${
                               selected
-                                ? 'bg-emerald-500 text-white ring-2 ring-offset-2 ring-emerald-300'
-                                : 'bg-white text-slate-500 border border-slate-300 hover:border-emerald-400 hover:text-emerald-500 active:scale-95'
+                                ? 'bg-emerald-500 text-white ring-2 ring-offset-2 ring-offset-neutral-800 ring-emerald-400'
+                                : 'bg-neutral-900 text-neutral-400 border border-neutral-700 hover:border-emerald-500 hover:text-emerald-400 active:scale-95'
                             }`}
                           >
                             <IconComp className="w-5 h-5" />
@@ -976,7 +976,7 @@ function App() {
 
                   {/* Live preview */}
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-500">תצוגה מקדימה:</span>
+                    <span className="text-xs text-neutral-400">תצוגה מקדימה:</span>
                     {(() => {
                       const PreviewIcon = resolveIcon(newCategoryIcon);
                       return (
@@ -991,7 +991,7 @@ function App() {
                   </div>
 
                   {categoryError && (
-                    <p className="text-rose-500 text-xs">{categoryError}</p>
+                    <p className="text-rose-400 text-xs">{categoryError}</p>
                   )}
 
                   {/* Actions */}
@@ -1007,7 +1007,7 @@ function App() {
                     <button
                       type="button"
                       onClick={handleCancelAddCategory}
-                      className="shrink-0 text-slate-400 hover:text-rose-500 hover:bg-rose-50 p-2.5 rounded-lg transition-all"
+                      className="shrink-0 text-neutral-400 hover:text-rose-400 hover:bg-rose-500/10 p-2.5 rounded-lg transition-all"
                       title="ביטול"
                       aria-label="ביטול"
                     >
@@ -1031,52 +1031,52 @@ function App() {
         </div>
 
         {/* Expenses List */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="p-4 sm:p-6 border-b border-slate-200">
-            <h2 className="text-base sm:text-lg font-semibold text-slate-700">רשימת ההוצאות</h2>
-            <p className="text-sm text-slate-400 mt-1">
+        <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 overflow-hidden">
+          <div className="p-4 sm:p-6 border-b border-neutral-800">
+            <h2 className="text-base sm:text-lg font-semibold text-neutral-100">רשימת ההוצאות</h2>
+            <p className="text-sm text-neutral-500 mt-1">
               {monthExpenses.length} הוצאות ב{monthLabel}
             </p>
           </div>
 
           {monthExpenses.length === 0 ? (
             <div className="p-10 sm:p-12 text-center">
-              <div className="bg-slate-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                <TrendingDown className="w-8 h-8 text-slate-400" />
+              <div className="bg-neutral-800 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                <TrendingDown className="w-8 h-8 text-neutral-500" />
               </div>
-              <p className="text-slate-500 text-base sm:text-lg">אין הוצאות בחודש זה</p>
-              <p className="text-slate-400 text-sm mt-1">הוסף הוצאה חדשה או בחר חודש אחר</p>
+              <p className="text-neutral-300 text-base sm:text-lg">אין הוצאות בחודש זה</p>
+              <p className="text-neutral-500 text-sm mt-1">הוסף הוצאה חדשה או בחר חודש אחר</p>
             </div>
           ) : (
             <>
               {/* Mobile: card list (native-app feel) */}
-              <ul className="md:hidden divide-y divide-slate-100">
+              <ul className="md:hidden divide-y divide-neutral-800">
                 {monthExpenses.map((expense) => {
                   const categoryInfo = getCategoryInfo(expense.category);
                   const IconComponent = categoryInfo.icon;
 
                   return (
-                    <li key={expense.id} className="p-4 active:bg-slate-50 transition-colors">
+                    <li key={expense.id} className="p-4 active:bg-neutral-800/60 transition-colors">
                       <div className="flex items-center gap-3">
                         <div className={`shrink-0 w-11 h-11 rounded-xl flex items-center justify-center ${categoryInfo.color} text-white`}>
                           <IconComponent className="w-5 h-5" />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="font-medium text-slate-800 truncate">{expense.description}</p>
-                          <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-400">
+                          <p className="font-medium text-neutral-100 truncate">{expense.description}</p>
+                          <div className="flex items-center gap-2 mt-0.5 text-xs text-neutral-500">
                             <span className="truncate">{expense.category}</span>
-                            <span className="text-slate-300">•</span>
+                            <span className="text-neutral-600">•</span>
                             <span className="shrink-0">{formatDisplayDate(expense.date)}</span>
                           </div>
                         </div>
                         <div className="shrink-0 text-left">
-                          <p className="text-base font-semibold text-slate-800 whitespace-nowrap">
+                          <p className="text-base font-semibold text-neutral-100 whitespace-nowrap">
                             ₪{expense.amount.toLocaleString()}
                           </p>
                         </div>
                         <button
                           onClick={() => handleDeleteExpense(expense.id)}
-                          className="shrink-0 text-slate-400 hover:text-rose-500 active:bg-rose-50 p-2.5 rounded-lg transition-all"
+                          className="shrink-0 text-neutral-500 hover:text-rose-400 active:bg-rose-500/10 p-2.5 rounded-lg transition-all"
                           title="מחק"
                           aria-label="מחק הוצאה"
                         >
@@ -1091,27 +1091,27 @@ function App() {
               {/* Desktop: table */}
               <div className="hidden md:block overflow-x-auto">
                 <table className="w-full">
-                  <thead className="bg-slate-50">
+                  <thead className="bg-neutral-800/50">
                     <tr>
-                      <th className="text-right px-6 py-4 text-sm font-semibold text-slate-600">תיאור</th>
-                      <th className="text-right px-6 py-4 text-sm font-semibold text-slate-600">סכום</th>
-                      <th className="text-right px-6 py-4 text-sm font-semibold text-slate-600">קטגוריה</th>
-                      <th className="text-right px-6 py-4 text-sm font-semibold text-slate-600">תאריך</th>
-                      <th className="px-6 py-4 text-sm font-semibold text-slate-600">פעולות</th>
+                      <th className="text-right px-6 py-4 text-sm font-semibold text-neutral-400">תיאור</th>
+                      <th className="text-right px-6 py-4 text-sm font-semibold text-neutral-400">סכום</th>
+                      <th className="text-right px-6 py-4 text-sm font-semibold text-neutral-400">קטגוריה</th>
+                      <th className="text-right px-6 py-4 text-sm font-semibold text-neutral-400">תאריך</th>
+                      <th className="px-6 py-4 text-sm font-semibold text-neutral-400">פעולות</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody className="divide-y divide-neutral-800">
                     {monthExpenses.map((expense) => {
                       const categoryInfo = getCategoryInfo(expense.category);
                       const IconComponent = categoryInfo.icon;
 
                       return (
-                        <tr key={expense.id} className="hover:bg-slate-50 transition-colors">
+                        <tr key={expense.id} className="hover:bg-neutral-800/40 transition-colors">
                           <td className="px-6 py-4">
-                            <span className="font-medium text-slate-800">{expense.description}</span>
+                            <span className="font-medium text-neutral-100">{expense.description}</span>
                           </td>
                           <td className="px-6 py-4">
-                            <span className="text-lg font-semibold text-slate-800">
+                            <span className="text-lg font-semibold text-neutral-100">
                               ₪{expense.amount.toLocaleString()}
                             </span>
                           </td>
@@ -1121,13 +1121,13 @@ function App() {
                               {expense.category}
                             </span>
                           </td>
-                          <td className="px-6 py-4 text-slate-500">
+                          <td className="px-6 py-4 text-neutral-400">
                             {formatDisplayDate(expense.date)}
                           </td>
                           <td className="px-6 py-4">
                             <button
                               onClick={() => handleDeleteExpense(expense.id)}
-                              className="text-slate-400 hover:text-rose-500 hover:bg-rose-50 p-2 rounded-lg transition-all"
+                              className="text-neutral-500 hover:text-rose-400 hover:bg-rose-500/10 p-2 rounded-lg transition-all"
                               title="מחק"
                             >
                               <Trash2 className="w-5 h-5" />
@@ -1144,10 +1144,10 @@ function App() {
 
           {/* Summary Footer */}
           {monthExpenses.length > 0 && (
-            <div className="bg-slate-50 px-4 sm:px-6 py-4 border-t border-slate-200">
+            <div className="bg-neutral-800/50 px-4 sm:px-6 py-4 border-t border-neutral-800">
               <div className="flex justify-between items-center">
-                <span className="text-slate-600 font-medium">סה"כ הוצאות:</span>
-                <span className={`text-xl sm:text-2xl font-bold ${isOverBudget ? 'text-rose-600' : 'text-slate-800'}`}>
+                <span className="text-neutral-300 font-medium">סה"כ הוצאות:</span>
+                <span className={`text-xl sm:text-2xl font-bold ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}>
                   ₪{totalExpenses.toLocaleString()}
                 </span>
               </div>
@@ -1158,11 +1158,11 @@ function App() {
 
       {/* Footer */}
       <footer
-        className="border-t border-slate-200 bg-white mt-8 sm:mt-12"
+        className="border-t border-neutral-800 bg-neutral-900 mt-8 sm:mt-12"
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <p className="text-center text-sm text-slate-400">
+          <p className="text-center text-sm text-neutral-500">
             מנהל התקציב שלי - נהל את הכסף שלך בצורה חכמה
           </p>
         </div>
