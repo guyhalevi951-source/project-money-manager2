@@ -97,6 +97,28 @@ const toISODate = (d: Date) =>
 // Month bucket key ('YYYY-MM') used to group/filter expenses.
 const monthKeyOf = (iso: string) => iso.slice(0, 7);
 const monthKeyOfDate = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+const monthOrder = (monthKey: string) => {
+  const [y, m] = monthKey.split('-').map((n) => parseInt(n, 10));
+  return y * 12 + (m - 1);
+};
+
+const findNearestPriorMonthWithData = (
+  targetMonthKey: string,
+  budgetsByMonth: Record<string, number>,
+  subBudgetsByMonth: Record<string, Record<string, number>>
+): string | null => {
+  const targetOrder = monthOrder(targetMonthKey);
+  const keys = new Set<string>([
+    ...Object.keys(budgetsByMonth),
+    ...Object.keys(subBudgetsByMonth),
+  ]);
+
+  const candidates = Array.from(keys).filter((key) => monthOrder(key) < targetOrder);
+  if (candidates.length === 0) return null;
+
+  candidates.sort((a, b) => monthOrder(b) - monthOrder(a));
+  return candidates[0] ?? null;
+};
 
 // Accepts either an ISO date or a legacy he-IL 'D.M.YYYY' string and returns ISO.
 // Keeps historical data working after the move to ISO storage.
@@ -897,7 +919,7 @@ function SubBudgetTracker({
   );
 }
 
-type BudgetChangeMode = 'keep' | 'reset' | 'clear';
+type BudgetChangeMode = 'keep' | 'reset';
 
 interface BudgetChangeModalProps {
   open: boolean;
@@ -943,8 +965,8 @@ function BudgetChangeModal({
     {
       mode: 'keep',
       icon: Check,
-      title: 'השאר את תתי-התקציבים והקטגוריות בדיוק כמו שהם',
-      desc: 'כל הקטגוריות והסכומים שהוקצו להן יישארו ללא שינוי.',
+      title: 'השאר את תתי-התקציבים כפי שהם',
+      desc: 'תתי-התקציבים שהגיעו מהחודש הקודם יישארו ללא שינוי.',
       accent: 'hover:border-emerald-500/60 hover:bg-emerald-500/5',
       ring: 'focus-visible:ring-emerald-500/40',
       iconBg: 'bg-emerald-500/15 text-emerald-400',
@@ -952,20 +974,11 @@ function BudgetChangeModal({
     {
       mode: 'reset',
       icon: RotateCcw,
-      title: 'שמור על הקטגוריות, אך אפס את סכומי התקציב שלהן',
-      desc: 'הקטגוריות יישמרו, אך הסכומים יתאפסו כדי שתוכל להקצות מחדש.',
+      title: 'אפס את תתי-התקציבים לחודש זה',
+      desc: 'סכומי ההקצאה לחודש זה יתאפסו, ותוכל להגדיר אותם מחדש.',
       accent: 'hover:border-amber-500/60 hover:bg-amber-500/5',
       ring: 'focus-visible:ring-amber-500/40',
       iconBg: 'bg-amber-500/15 text-amber-400',
-    },
-    {
-      mode: 'clear',
-      icon: Trash2,
-      title: 'אפס הכל לחלוטין לחודש זה',
-      desc: 'הסרת כל תתי-התקציבים של חודש זה והתחלה מאפס.',
-      accent: 'hover:border-rose-500/60 hover:bg-rose-500/5',
-      ring: 'focus-visible:ring-rose-500/40',
-      iconBg: 'bg-rose-500/15 text-rose-400',
     },
   ];
 
@@ -1126,6 +1139,35 @@ function App() {
   const budget = budgetsByMonth[selectedMonthKey] ?? 0;
   const subBudgets = subBudgetsByMonth[selectedMonthKey] ?? {};
 
+  // Automatic month inheritance:
+  // When user navigates to a month with no explicit values yet, copy budget +
+  // sub-budgets from the nearest prior month that has data.
+  useEffect(() => {
+    const hasBudget = budgetsByMonth[selectedMonthKey] !== undefined;
+    const hasSubBudgets = subBudgetsByMonth[selectedMonthKey] !== undefined;
+    if (hasBudget && hasSubBudgets) return;
+
+    const sourceMonthKey = findNearestPriorMonthWithData(
+      selectedMonthKey,
+      budgetsByMonth,
+      subBudgetsByMonth
+    );
+    if (!sourceMonthKey) return;
+
+    if (!hasBudget && budgetsByMonth[sourceMonthKey] !== undefined) {
+      const inheritedBudget = budgetsByMonth[sourceMonthKey];
+      setBudgetsByMonth((prev) => ({ ...prev, [selectedMonthKey]: inheritedBudget }));
+    }
+
+    if (!hasSubBudgets && subBudgetsByMonth[sourceMonthKey] !== undefined) {
+      const inheritedSubBudgets = subBudgetsByMonth[sourceMonthKey] ?? {};
+      setSubBudgetsByMonth((prev) => ({
+        ...prev,
+        [selectedMonthKey]: { ...inheritedSubBudgets },
+      }));
+    }
+  }, [selectedMonthKey, budgetsByMonth, subBudgetsByMonth]);
+
   // Load data from localStorage on mount
   useEffect(() => {
     const savedExpenses = localStorage.getItem('expenses');
@@ -1197,24 +1239,9 @@ function App() {
   const applyBudgetChange = (amount: number, mode: BudgetChangeMode) => {
     setBudgetsByMonth((prev) => ({ ...prev, [selectedMonthKey]: amount }));
 
-    if (mode === 'reset' || mode === 'clear') {
+    if (mode === 'reset') {
       // Wipe this month's allocations only.
       setSubBudgetsByMonth((prev) => ({ ...prev, [selectedMonthKey]: {} }));
-    }
-
-    if (mode === 'clear') {
-      // "Start fresh": remove custom categories that aren't referenced anywhere
-      // else (no expenses in any month, no allocations in other months) so
-      // historical data stays intact.
-      setCustomCategories((prev) =>
-        prev.filter((c) => {
-          const usedByExpense = expenses.some((e) => e.category === c.value);
-          const usedOtherMonth = Object.entries(subBudgetsByMonth).some(
-            ([mk, map]) => mk !== selectedMonthKey && (map?.[c.value] ?? 0) > 0
-          );
-          return usedByExpense || usedOtherMonth;
-        })
-      );
     }
 
     setBudgetInput('');
