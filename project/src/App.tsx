@@ -10,7 +10,9 @@ import {
   Heart,
   Film,
   Home,
-  HelpCircle
+  HelpCircle,
+  Tag,
+  X
 } from 'lucide-react';
 
 interface Expense {
@@ -21,12 +23,34 @@ interface Expense {
   date: string;
 }
 
-const CATEGORIES = [
+interface Category {
+  value: string;
+  label: string;
+  icon: typeof Utensils;
+  color: string;
+}
+
+const CATEGORIES: Category[] = [
   { value: 'אוכל', label: 'אוכל', icon: Utensils, color: 'bg-amber-500' },
   { value: 'בריאות', label: 'בריאות', icon: Heart, color: 'bg-rose-500' },
   { value: 'בילויים', label: 'בילויים', icon: Film, color: 'bg-purple-500' },
   { value: 'שכר דירה', label: 'שכר דירה', icon: Home, color: 'bg-cyan-500' },
   { value: 'אחר', label: 'אחר', icon: HelpCircle, color: 'bg-gray-500' },
+];
+
+// Sentinel value used by the category <select> to trigger the "add custom" flow
+const ADD_CUSTOM_VALUE = '__add_custom__';
+
+// Color palette cycled through when assigning a look to user-created categories
+const CUSTOM_COLORS = [
+  'bg-indigo-500',
+  'bg-pink-500',
+  'bg-teal-500',
+  'bg-orange-500',
+  'bg-lime-600',
+  'bg-fuchsia-500',
+  'bg-sky-500',
+  'bg-red-500',
 ];
 
 function App() {
@@ -40,10 +64,26 @@ function App() {
   });
   const [showBudgetSaved, setShowBudgetSaved] = useState(false);
 
+  // Custom (user-created) categories, persisted separately from the built-in ones.
+  // Icon components can't be serialized, so we store only value/label/color.
+  const [customCategories, setCustomCategories] = useState<
+    { value: string; label: string; color: string }[]
+  >([]);
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [categoryError, setCategoryError] = useState('');
+
+  // The full list of selectable categories: built-ins + user-created.
+  const allCategories: Category[] = [
+    ...CATEGORIES,
+    ...customCategories.map((c) => ({ ...c, icon: Tag })),
+  ];
+
   // Load data from localStorage on mount
   useEffect(() => {
     const savedBudget = localStorage.getItem('monthlyBudget');
     const savedExpenses = localStorage.getItem('expenses');
+    const savedCategories = localStorage.getItem('customCategories');
 
     if (savedBudget) {
       setBudget(parseFloat(savedBudget));
@@ -51,7 +91,15 @@ function App() {
     if (savedExpenses) {
       setExpenses(JSON.parse(savedExpenses));
     }
+    if (savedCategories) {
+      setCustomCategories(JSON.parse(savedCategories));
+    }
   }, []);
+
+  // Save custom categories to localStorage
+  useEffect(() => {
+    localStorage.setItem('customCategories', JSON.stringify(customCategories));
+  }, [customCategories]);
 
   // Save budget to localStorage
   const handleSetBudget = () => {
@@ -94,6 +142,51 @@ function App() {
     setExpenses(expenses.filter(expense => expense.id !== id));
   };
 
+  // Handle category dropdown change. Selecting the sentinel opens the "add" input
+  // instead of changing the selected category.
+  const handleCategoryChange = (value: string) => {
+    if (value === ADD_CUSTOM_VALUE) {
+      setIsAddingCategory(true);
+      setCategoryError('');
+      return;
+    }
+    setNewExpense({ ...newExpense, category: value });
+  };
+
+  // Create a new custom category and select it immediately.
+  const handleAddCategory = () => {
+    const name = newCategoryName.trim();
+
+    if (!name) {
+      setCategoryError('יש להזין שם קטגוריה');
+      return;
+    }
+    if (name === ADD_CUSTOM_VALUE) {
+      setCategoryError('שם לא חוקי');
+      return;
+    }
+
+    const exists = allCategories.some((c) => c.value === name);
+    if (exists) {
+      setCategoryError('קטגוריה בשם זה כבר קיימת');
+      return;
+    }
+
+    const color = CUSTOM_COLORS[customCategories.length % CUSTOM_COLORS.length];
+    setCustomCategories([...customCategories, { value: name, label: name, color }]);
+    setNewExpense({ ...newExpense, category: name });
+    setNewCategoryName('');
+    setCategoryError('');
+    setIsAddingCategory(false);
+  };
+
+  // Cancel the add-category flow without creating anything.
+  const handleCancelAddCategory = () => {
+    setIsAddingCategory(false);
+    setNewCategoryName('');
+    setCategoryError('');
+  };
+
   // Calculate total expenses
   const totalExpenses = expenses.reduce((sum, expense) => sum + expense.amount, 0);
   const budgetPercentage = budget > 0 ? (totalExpenses / budget) * 100 : 0;
@@ -101,8 +194,8 @@ function App() {
   const remaining = budget - totalExpenses;
 
   // Get category info
-  const getCategoryInfo = (categoryValue: string) => {
-    return CATEGORIES.find(c => c.value === categoryValue) || CATEGORIES[4];
+  const getCategoryInfo = (categoryValue: string): Category => {
+    return allCategories.find(c => c.value === categoryValue) || CATEGORIES[4];
   };
 
   return (
@@ -282,15 +375,59 @@ function App() {
               <label className="block text-sm font-medium text-slate-600 mb-2">קטגוריה</label>
               <select
                 value={newExpense.category}
-                onChange={(e) => setNewExpense({ ...newExpense, category: e.target.value })}
+                onChange={(e) => handleCategoryChange(e.target.value)}
                 className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all bg-white"
               >
-                {CATEGORIES.map((cat) => (
+                {allCategories.map((cat) => (
                   <option key={cat.value} value={cat.value}>
                     {cat.label}
                   </option>
                 ))}
+                <option value={ADD_CUSTOM_VALUE}>+ הוסף קטגוריה חדשה</option>
               </select>
+
+              {isAddingCategory && (
+                <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={newCategoryName}
+                      onChange={(e) => {
+                        setNewCategoryName(e.target.value);
+                        if (categoryError) setCategoryError('');
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddCategory();
+                        }
+                      }}
+                      placeholder="שם הקטגוריה"
+                      autoFocus
+                      className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddCategory}
+                      className="shrink-0 bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:from-emerald-600 hover:to-teal-700 transition-all flex items-center gap-1"
+                    >
+                      <Plus className="w-4 h-4" />
+                      הוסף
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCancelAddCategory}
+                      className="shrink-0 text-slate-400 hover:text-rose-500 hover:bg-rose-50 p-2 rounded-lg transition-all"
+                      title="ביטול"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  {categoryError && (
+                    <p className="text-rose-500 text-xs mt-2">{categoryError}</p>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="flex items-end">
