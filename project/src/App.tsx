@@ -160,6 +160,26 @@ const TAILWIND_HEX: Record<string, string> = {
 };
 const hexForColor = (colorClass: string): string => TAILWIND_HEX[colorClass] ?? '#64748b';
 
+// Linear-interpolate two hex colors by `amount` (0..1).
+const mixHex = (hex: string, target: string, amount: number): string => {
+  const parse = (h: string) => [0, 2, 4].map((i) => parseInt(h.replace('#', '').slice(i, i + 2), 16));
+  const a = parse(hex);
+  const b = parse(target);
+  return (
+    '#' +
+    a
+      .map((v, i) => Math.max(0, Math.min(255, Math.round(v + (b[i] - v) * amount))).toString(16).padStart(2, '0'))
+      .join('')
+  );
+};
+// Darker, vivid tone = amount already SPENT.
+const spentShade = (hex: string) => mixHex(hex, '#000000', 0.12);
+// Soft, dimmed tone (toward the dark bg) = REMAINING budget.
+const remainingShade = (hex: string) => mixHex(hex, '#0a0a0a', 0.62);
+// Bright warning color for overspent envelopes.
+const WARNING_COLOR = '#ef4444';
+const GENERAL_KEY = '__general__';
+
 type SummaryView = 'week' | 'month' | 'year';
 
 interface ExpenseSummaryProps {
@@ -451,6 +471,335 @@ function ExpenseSummary({ expenses, categories, onBack }: ExpenseSummaryProps) {
   );
 }
 
+interface Envelope {
+  key: string;
+  label: string;
+  icon: LucideIcon;
+  hex: string;
+  allocated: number;
+  spent: number;
+  isGeneral: boolean;
+}
+
+interface SubBudgetTrackerProps {
+  budget: number;
+  monthLabel: string;
+  monthExpenses: Expense[];
+  categories: Category[];
+  subBudgets: Record<string, number>;
+  onAddSubBudget: (name: string, amount: number) => void;
+  onSetSubBudget: (value: string, amount: number) => void;
+  onRemoveSubBudget: (value: string) => void;
+}
+
+// Envelope budgeting: allocate the global budget into per-category sub-budgets,
+// with a two-tone donut (spent vs. remaining) and per-envelope progress bars.
+function SubBudgetTracker({
+  budget,
+  monthLabel,
+  monthExpenses,
+  categories,
+  subBudgets,
+  onAddSubBudget,
+  onSetSubBudget,
+  onRemoveSubBudget,
+}: SubBudgetTrackerProps) {
+  const [name, setName] = useState('');
+  const [amount, setAmount] = useState('');
+
+  const spentByCat = monthExpenses.reduce<Record<string, number>>((acc, e) => {
+    acc[e.category] = (acc[e.category] || 0) + e.amount;
+    return acc;
+  }, {});
+
+  const budgetedValues = Object.keys(subBudgets).filter((v) => subBudgets[v] > 0);
+  const allocatedTotal = budgetedValues.reduce((s, v) => s + subBudgets[v], 0);
+  const generalAllocated = Math.max(0, budget - allocatedTotal);
+
+  // Spending that falls outside any budgeted category draws from the General pool.
+  const unbudgetedSpent = Object.entries(spentByCat)
+    .filter(([v]) => !budgetedValues.includes(v))
+    .reduce((s, [, amt]) => s + amt, 0);
+
+  const totalSpent = monthExpenses.reduce((s, e) => s + e.amount, 0);
+
+  const envelopes: Envelope[] = budgetedValues
+    .map((v) => {
+      const cat = categories.find((c) => c.value === v);
+      return {
+        key: v,
+        label: cat?.label ?? v,
+        icon: cat?.icon ?? HelpCircle,
+        hex: hexForColor(cat?.color ?? 'bg-gray-500'),
+        allocated: subBudgets[v],
+        spent: spentByCat[v] || 0,
+        isGeneral: false,
+      };
+    })
+    .sort((a, b) => b.allocated - a.allocated);
+
+  if (generalAllocated > 0 || unbudgetedSpent > 0) {
+    envelopes.push({
+      key: GENERAL_KEY,
+      label: 'כללי / לא מוקצה',
+      icon: Wallet,
+      hex: '#737373',
+      allocated: generalAllocated,
+      spent: unbudgetedSpent,
+      isGeneral: true,
+    });
+  }
+
+  // Build the flat two-tone donut segments.
+  const segments: { id: string; value: number; fill: string }[] = [];
+  envelopes.forEach((env) => {
+    if (env.allocated <= 0 && env.spent <= 0) return;
+    const overspent = env.spent > env.allocated;
+    if (overspent) {
+      // The whole envelope (sized by spending) is shown in the warning color.
+      segments.push({ id: `${env.key}-over`, value: Math.max(env.spent, env.allocated, 1), fill: WARNING_COLOR });
+      return;
+    }
+    if (env.spent > 0) {
+      segments.push({ id: `${env.key}-spent`, value: env.spent, fill: spentShade(env.hex) });
+    }
+    const remaining = env.allocated - env.spent;
+    if (remaining > 0) {
+      segments.push({ id: `${env.key}-remaining`, value: remaining, fill: remainingShade(env.hex) });
+    }
+  });
+
+  const donutData =
+    segments.length > 0 ? segments : [{ id: 'empty', value: 1, fill: '#262626' }];
+
+  const handleAdd = () => {
+    const amt = parseFloat(amount);
+    if (name.trim() && !isNaN(amt) && amt > 0) {
+      onAddSubBudget(name, amt);
+      setName('');
+      setAmount('');
+    }
+  };
+
+  return (
+    <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 mb-6 sm:mb-8">
+      <div className="mb-4">
+        <h2 className="text-base sm:text-lg font-semibold text-neutral-100 flex items-center gap-2">
+          <PieChartIcon className="w-5 h-5 text-violet-400" />
+          תקציבי משנה
+        </h2>
+        <p className="text-sm text-neutral-500 mt-1">חלוקת התקציב לקטגוריות • {monthLabel}</p>
+      </div>
+
+      {budget <= 0 ? (
+        <div className="text-center py-8">
+          <div className="bg-neutral-800 w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3">
+            <Wallet className="w-7 h-7 text-neutral-500" />
+          </div>
+          <p className="text-neutral-300">הגדר תחילה תקציב חודשי</p>
+          <p className="text-neutral-500 text-sm mt-1">לאחר מכן תוכל לחלק אותו לתקציבי משנה</p>
+        </div>
+      ) : (
+        <>
+          {/* Two-tone donut */}
+          <div className="relative w-48 h-48 sm:w-56 sm:h-56 mx-auto">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={donutData}
+                  dataKey="value"
+                  nameKey="id"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius="64%"
+                  outerRadius="100%"
+                  paddingAngle={0}
+                  stroke="#0a0a0a"
+                  strokeWidth={2}
+                  isAnimationActive={false}
+                >
+                  {donutData.map((s) => (
+                    <Cell key={s.id} fill={s.fill} />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+              <span className="text-2xl font-bold text-neutral-100 leading-none">
+                ₪{totalSpent.toLocaleString()}
+              </span>
+              <span className="text-[11px] text-neutral-500 mt-1">
+                מתוך ₪{budget.toLocaleString()}
+              </span>
+            </div>
+          </div>
+
+          {/* Tone legend */}
+          <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 mt-4 text-xs text-neutral-400">
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: spentShade('#10b981') }} />
+              הוצא
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: remainingShade('#10b981') }} />
+              נותר
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: WARNING_COLOR }} />
+              חריגה
+            </span>
+          </div>
+
+          {/* Breakdown list with progress bars */}
+          <div className="mt-6 space-y-4">
+            {envelopes.length === 0 ? (
+              <p className="text-sm text-neutral-500 text-center">הוסף תקציב משנה כדי להתחיל</p>
+            ) : (
+              envelopes.map((env) => {
+                const Icon = env.icon;
+                const overspent = env.spent > env.allocated;
+                const pct = env.allocated > 0 ? (env.spent / env.allocated) * 100 : env.spent > 0 ? 100 : 0;
+                return (
+                  <div key={env.key} className="flex items-center gap-3">
+                    <div
+                      className="shrink-0 w-11 h-11 rounded-full flex items-center justify-center text-white"
+                      style={{ backgroundColor: overspent ? WARNING_COLOR : env.hex }}
+                    >
+                      <Icon className="w-5 h-5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="font-medium text-neutral-100 truncate">{env.label}</span>
+                          {overspent && (
+                            <span className="shrink-0 flex items-center gap-1 text-[10px] font-semibold text-rose-400 bg-rose-500/10 px-1.5 py-0.5 rounded-full">
+                              <AlertTriangle className="w-3 h-3" />
+                              חריגה
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-sm shrink-0 text-neutral-300">
+                          <span className={overspent ? 'text-rose-400 font-semibold' : 'text-neutral-100 font-semibold'}>
+                            ₪{env.spent.toLocaleString()}
+                          </span>
+                          <span className="text-neutral-500"> / ₪{env.allocated.toLocaleString()}</span>
+                        </span>
+                      </div>
+                      <div className="h-2.5 rounded-full bg-neutral-800 overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all duration-500"
+                          style={{
+                            width: `${Math.min(100, Math.max(pct > 0 ? 3 : 0, pct))}%`,
+                            backgroundColor: overspent ? WARNING_COLOR : env.hex,
+                          }}
+                        />
+                      </div>
+                    </div>
+                    {!env.isGeneral && (
+                      <button
+                        onClick={() => onRemoveSubBudget(env.key)}
+                        className="shrink-0 text-neutral-500 hover:text-rose-400 hover:bg-rose-500/10 p-2 rounded-lg transition-all"
+                        title="הסר תקציב משנה"
+                        aria-label="הסר תקציב משנה"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Management: add / edit sub-budgets */}
+          <div className="mt-6 pt-5 border-t border-neutral-800">
+            <p className="text-xs font-medium text-neutral-400 mb-2">הוסף או עדכן תקציב משנה</p>
+            <datalist id="subbudget-categories">
+              {categories.map((c) => (
+                <option key={c.value} value={c.label} />
+              ))}
+            </datalist>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="text"
+                list="subbudget-categories"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="שם קטגוריה (תיווצר אוטומטית אם חדשה)"
+                className="flex-1 min-w-0 px-3 py-2.5 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/30 outline-none transition-all text-sm"
+              />
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAdd();
+                    }
+                  }}
+                  placeholder="₪ סכום"
+                  min="0"
+                  step="10"
+                  className="w-28 sm:w-32 px-3 py-2.5 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/30 outline-none transition-all text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={handleAdd}
+                  className="shrink-0 bg-gradient-to-r from-violet-500 to-indigo-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:from-violet-600 hover:to-indigo-700 transition-all flex items-center justify-center gap-1 active:scale-[0.98]"
+                >
+                  <Plus className="w-4 h-4" />
+                  הוסף
+                </button>
+              </div>
+            </div>
+
+            {/* Quick-edit allocations for existing sub-budgets */}
+            {budgetedValues.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {budgetedValues.map((v) => {
+                  const cat = categories.find((c) => c.value === v);
+                  return (
+                    <div key={v} className="flex items-center gap-2">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: hexForColor(cat?.color ?? 'bg-gray-500') }}
+                      />
+                      <span className="text-sm text-neutral-300 flex-1 truncate">{cat?.label ?? v}</span>
+                      <span className="text-neutral-500 text-sm">₪</span>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        value={subBudgets[v]}
+                        onChange={(e) => onSetSubBudget(v, parseFloat(e.target.value) || 0)}
+                        min="0"
+                        step="10"
+                        className="w-24 px-2 py-1.5 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-100 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/30 outline-none transition-all text-sm text-left"
+                      />
+                    </div>
+                  );
+                })}
+                <div className="flex items-center justify-between pt-1 text-xs">
+                  <span className="text-neutral-500">
+                    מוקצה: ₪{allocatedTotal.toLocaleString()} מתוך ₪{budget.toLocaleString()}
+                  </span>
+                  <span className={allocatedTotal > budget ? 'text-rose-400 font-medium' : 'text-neutral-500'}>
+                    {allocatedTotal > budget
+                      ? `חריגה מהתקציב ב-₪${(allocatedTotal - budget).toLocaleString()}`
+                      : `לא מוקצה: ₪${generalAllocated.toLocaleString()}`}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function App() {
   const [budget, setBudget] = useState<number>(0);
   const [budgetInput, setBudgetInput] = useState<string>('');
@@ -483,6 +832,9 @@ function App() {
   const [newCategoryIcon, setNewCategoryIcon] = useState(ICON_OPTIONS[0].name);
   const [categoryError, setCategoryError] = useState('');
 
+  // Per-category sub-budget allocations (category value -> amount).
+  const [subBudgets, setSubBudgets] = useState<Record<string, number>>({});
+
   // The full list of selectable categories: built-ins + user-created.
   const allCategories: Category[] = [
     ...CATEGORIES,
@@ -499,6 +851,7 @@ function App() {
     const savedBudget = localStorage.getItem('monthlyBudget');
     const savedExpenses = localStorage.getItem('expenses');
     const savedCategories = localStorage.getItem('customCategories');
+    const savedSubBudgets = localStorage.getItem('subBudgets');
 
     if (savedBudget) {
       setBudget(parseFloat(savedBudget));
@@ -511,12 +864,20 @@ function App() {
     if (savedCategories) {
       setCustomCategories(JSON.parse(savedCategories));
     }
+    if (savedSubBudgets) {
+      setSubBudgets(JSON.parse(savedSubBudgets));
+    }
   }, []);
 
   // Save custom categories to localStorage
   useEffect(() => {
     localStorage.setItem('customCategories', JSON.stringify(customCategories));
   }, [customCategories]);
+
+  // Save sub-budgets to localStorage
+  useEffect(() => {
+    localStorage.setItem('subBudgets', JSON.stringify(subBudgets));
+  }, [subBudgets]);
 
   // Save budget to localStorage
   const handleSetBudget = () => {
@@ -615,6 +976,51 @@ function App() {
   const handleCancelAddCategory = () => {
     setIsAddingCategory(false);
     resetCategoryForm();
+  };
+
+  // Sub-budget handlers ------------------------------------------------------
+  // Adds/updates a sub-budget. If the category doesn't exist yet, it's created
+  // on the fly (matching by value or label, case-insensitive).
+  const handleAddSubBudget = (rawName: string, amount: number) => {
+    const trimmed = rawName.trim();
+    if (!trimmed || trimmed === ADD_CUSTOM_VALUE || !(amount > 0)) return;
+
+    const existing = allCategories.find(
+      (c) =>
+        c.value.toLowerCase() === trimmed.toLowerCase() ||
+        c.label.toLowerCase() === trimmed.toLowerCase()
+    );
+
+    let value = existing?.value;
+    if (!value) {
+      const color = COLOR_OPTIONS[customCategories.length % COLOR_OPTIONS.length].class;
+      setCustomCategories((prev) => [
+        ...prev,
+        { value: trimmed, label: trimmed, color, iconName: ICON_OPTIONS[0].name },
+      ]);
+      value = trimmed;
+    }
+
+    setSubBudgets((prev) => ({ ...prev, [value as string]: amount }));
+  };
+
+  const handleSetSubBudget = (value: string, amount: number) => {
+    setSubBudgets((prev) => {
+      if (!(amount > 0)) {
+        const next = { ...prev };
+        delete next[value];
+        return next;
+      }
+      return { ...prev, [value]: amount };
+    });
+  };
+
+  const handleRemoveSubBudget = (value: string) => {
+    setSubBudgets((prev) => {
+      const next = { ...prev };
+      delete next[value];
+      return next;
+    });
   };
 
   // Month navigation
@@ -757,6 +1163,18 @@ function App() {
             </button>
           </div>
         </div>
+
+        {/* Sub-Budgets (Envelope Budgeting) */}
+        <SubBudgetTracker
+          budget={budget}
+          monthLabel={monthLabel}
+          monthExpenses={monthExpenses}
+          categories={allCategories}
+          subBudgets={subBudgets}
+          onAddSubBudget={handleAddSubBudget}
+          onSetSubBudget={handleSetSubBudget}
+          onRemoveSubBudget={handleRemoveSubBudget}
+        />
 
         {/* Dashboard Summary Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6 mb-6 sm:mb-8">
