@@ -26,6 +26,15 @@
   background: #94a3b8;
 }
 
+/* Hide scrollbar for horizontal period chips (keeps scrolling functional) */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* Number input - remove arrows */
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {

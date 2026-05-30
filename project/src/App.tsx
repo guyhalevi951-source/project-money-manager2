@@ -19,8 +19,11 @@ import {
   ChevronRight,
   ChevronLeft,
   CalendarDays,
+  PieChart as PieChartIcon,
+  ArrowRight,
   type LucideIcon
 } from 'lucide-react';
+import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 
 interface Expense {
   id: string;
@@ -112,6 +115,342 @@ const formatDisplayDate = (iso: string): string => {
   return new Date(y, m - 1, d).toLocaleDateString('he-IL');
 };
 
+// Parse an ISO 'YYYY-MM-DD' into a local Date (midnight).
+const parseISO = (iso: string): Date => {
+  const [y, m, d] = iso.split('-').map((n) => parseInt(n, 10));
+  return new Date(y, (m || 1) - 1, d || 1);
+};
+
+// Short numeric date like "1.1.2024" (used for week ranges).
+const formatShort = (d: Date) => `${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`;
+
+// Week starts on Sunday (common in IL).
+const startOfWeek = (d: Date): Date => {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  x.setDate(x.getDate() - x.getDay());
+  return x;
+};
+const endOfWeek = (d: Date): Date => {
+  const s = startOfWeek(d);
+  return new Date(s.getFullYear(), s.getMonth(), s.getDate() + 6);
+};
+const weekNumber = (d: Date): number => {
+  const firstWeekStart = startOfWeek(new Date(d.getFullYear(), 0, 1));
+  const thisWeekStart = startOfWeek(d);
+  return Math.round((thisWeekStart.getTime() - firstWeekStart.getTime()) / (7 * 86400000)) + 1;
+};
+
+// Maps Tailwind background color classes to hex values for recharts / inline styles.
+const TAILWIND_HEX: Record<string, string> = {
+  'bg-amber-500': '#f59e0b',
+  'bg-rose-500': '#f43f5e',
+  'bg-purple-500': '#a855f7',
+  'bg-cyan-500': '#06b6d4',
+  'bg-gray-500': '#6b7280',
+  'bg-emerald-500': '#10b981',
+  'bg-blue-500': '#3b82f6',
+  'bg-teal-500': '#14b8a6',
+  'bg-indigo-500': '#6366f1',
+  'bg-orange-500': '#f97316',
+  'bg-pink-500': '#ec4899',
+  'bg-lime-600': '#65a30d',
+  'bg-fuchsia-500': '#d946ef',
+  'bg-sky-500': '#0ea5e9',
+  'bg-red-500': '#ef4444',
+};
+const hexForColor = (colorClass: string): string => TAILWIND_HEX[colorClass] ?? '#64748b';
+
+type SummaryView = 'week' | 'month' | 'year';
+
+interface ExpenseSummaryProps {
+  expenses: Expense[];
+  categories: Category[];
+  onBack: () => void;
+}
+
+// Dark-themed visual breakdown of expenses by category, per week / month / year.
+function ExpenseSummary({ expenses, categories, onBack }: ExpenseSummaryProps) {
+  const [view, setView] = useState<SummaryView>('month');
+  const [anchor, setAnchor] = useState<Date>(() => new Date());
+
+  const shift = (dir: number) => {
+    setAnchor((a) => {
+      const x = new Date(a);
+      if (view === 'week') x.setDate(x.getDate() + dir * 7);
+      else if (view === 'month') x.setMonth(x.getMonth() + dir);
+      else x.setFullYear(x.getFullYear() + dir);
+      return x;
+    });
+  };
+
+  // Does the given ISO expense date fall inside the currently selected period?
+  const inPeriod = (iso: string): boolean => {
+    const d = parseISO(iso);
+    if (view === 'year') return d.getFullYear() === anchor.getFullYear();
+    if (view === 'month')
+      return d.getFullYear() === anchor.getFullYear() && d.getMonth() === anchor.getMonth();
+    const s = startOfWeek(anchor);
+    const e = endOfWeek(anchor);
+    return d >= s && d <= new Date(e.getFullYear(), e.getMonth(), e.getDate(), 23, 59, 59);
+  };
+
+  const periodExpenses = expenses.filter((e) => inPeriod(e.date));
+  const total = periodExpenses.reduce((sum, e) => sum + e.amount, 0);
+
+  const fallbackCat = categories[categories.length - 1];
+  const getCat = (value: string): Category =>
+    categories.find((c) => c.value === value) || fallbackCat;
+
+  // Aggregate by category, sorted by amount desc.
+  const breakdown = Object.values(
+    periodExpenses.reduce<Record<string, { value: string; amount: number }>>((acc, e) => {
+      acc[e.category] = acc[e.category] || { value: e.category, amount: 0 };
+      acc[e.category].amount += e.amount;
+      return acc;
+    }, {})
+  )
+    .map((g) => {
+      const cat = getCat(g.value);
+      return {
+        value: g.value,
+        label: cat?.label ?? g.value,
+        color: cat?.color ?? 'bg-gray-500',
+        hex: hexForColor(cat?.color ?? 'bg-gray-500'),
+        icon: cat?.icon ?? HelpCircle,
+        amount: g.amount,
+        percentage: total > 0 ? (g.amount / total) * 100 : 0,
+      };
+    })
+    .sort((a, b) => b.amount - a.amount);
+
+  const donutData =
+    breakdown.length > 0
+      ? breakdown.map((b) => ({ name: b.label, value: b.amount, hex: b.hex }))
+      : [{ name: '', value: 1, hex: '#27272a' }];
+
+  // Period label + optional subtitle (week date range).
+  let periodLabel = '';
+  let periodSubtitle = '';
+  if (view === 'year') {
+    periodLabel = `${anchor.getFullYear()}`;
+  } else if (view === 'month') {
+    periodLabel = anchor.toLocaleDateString('he-IL', { month: 'long', year: 'numeric' });
+  } else {
+    periodLabel = `שבוע ${weekNumber(anchor)}`;
+    periodSubtitle = `${formatShort(startOfWeek(anchor))} - ${formatShort(endOfWeek(anchor))}`;
+  }
+
+  // Build the horizontally scrollable period chips around the anchor.
+  const chipOffsets = [-3, -2, -1, 0, 1];
+  const chips = chipOffsets.map((offset) => {
+    const d = new Date(anchor);
+    if (view === 'week') d.setDate(d.getDate() + offset * 7);
+    else if (view === 'month') d.setMonth(d.getMonth() + offset);
+    else d.setFullYear(d.getFullYear() + offset);
+
+    let label: string;
+    if (view === 'year') label = `${d.getFullYear()}`;
+    else if (view === 'month') label = d.toLocaleDateString('he-IL', { month: 'short' });
+    else label = `שבוע ${weekNumber(d)}`;
+
+    return { offset, date: d, label };
+  });
+
+  const views: { id: SummaryView; label: string }[] = [
+    { id: 'week', label: 'שבוע' },
+    { id: 'month', label: 'חודש' },
+    { id: 'year', label: 'שנה' },
+  ];
+
+  return (
+    <div
+      dir="rtl"
+      className="min-h-screen bg-neutral-950 text-white"
+      style={{
+        paddingTop: 'env(safe-area-inset-top)',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}
+    >
+      <div className="max-w-2xl mx-auto px-4 sm:px-6 pb-10">
+        {/* Top bar */}
+        <div className="flex items-center justify-between py-4">
+          <button
+            onClick={onBack}
+            className="w-11 h-11 -mr-2 flex items-center justify-center rounded-xl text-neutral-300 hover:bg-neutral-800 active:scale-95 transition-all"
+            aria-label="חזרה"
+            title="חזרה"
+          >
+            <ArrowRight className="w-6 h-6" />
+          </button>
+          <h1 className="text-lg font-bold">סיכום הוצאות</h1>
+          <div className="w-11 h-11 flex items-center justify-center rounded-xl text-neutral-300">
+            <CalendarDays className="w-6 h-6" />
+          </div>
+        </div>
+
+        {/* Week / Month / Year segmented control */}
+        <div className="flex p-1 bg-neutral-900 border border-neutral-800 rounded-2xl">
+          {views.map((v) => (
+            <button
+              key={v.id}
+              onClick={() => setView(v.id)}
+              className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                view === v.id
+                  ? 'bg-white text-neutral-900 shadow'
+                  : 'text-neutral-400 hover:text-neutral-200'
+              }`}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Period selector: prev/next + scrollable chips */}
+        <div className="flex items-center gap-1 mt-4">
+          <button
+            onClick={() => shift(-1)}
+            className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl text-neutral-400 hover:bg-neutral-800 active:scale-95 transition-all"
+            aria-label="קודם"
+          >
+            <ChevronRight className="w-5 h-5" />
+          </button>
+
+          <div className="flex-1 overflow-x-auto no-scrollbar">
+            <div className="flex items-center justify-between gap-1 min-w-max px-1">
+              {chips.map((chip) => {
+                const active = chip.offset === 0;
+                return (
+                  <button
+                    key={chip.offset}
+                    onClick={() => setAnchor(chip.date)}
+                    className={`relative px-3 py-2 text-sm whitespace-nowrap transition-colors ${
+                      active ? 'text-white font-semibold' : 'text-neutral-500 hover:text-neutral-300'
+                    }`}
+                  >
+                    {chip.label}
+                    {active && (
+                      <span className="absolute -bottom-0.5 inset-x-2 h-0.5 rounded-full bg-yellow-400" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <button
+            onClick={() => shift(1)}
+            className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl text-neutral-400 hover:bg-neutral-800 active:scale-95 transition-all"
+            aria-label="הבא"
+          >
+            <ChevronLeft className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Selected period label */}
+        <div className="mt-3 text-center">
+          <p className="text-base font-semibold capitalize">{periodLabel}</p>
+          {periodSubtitle && <p className="text-xs text-neutral-500 mt-0.5">{periodSubtitle}</p>}
+        </div>
+
+        {/* Donut + legend */}
+        <div className="mt-6 flex items-center gap-4">
+          <div className="relative w-40 h-40 sm:w-48 sm:h-48 shrink-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={donutData}
+                  dataKey="value"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius="62%"
+                  outerRadius="100%"
+                  paddingAngle={breakdown.length > 1 ? 2 : 0}
+                  stroke="none"
+                  isAnimationActive={false}
+                >
+                  {donutData.map((entry, i) => (
+                    <Cell key={i} fill={entry.hex} />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+              <span className="text-xl sm:text-2xl font-bold leading-none">
+                ₪{total.toLocaleString()}
+              </span>
+              <span className="text-[11px] text-neutral-500 mt-1">סה"כ</span>
+            </div>
+          </div>
+
+          <div className="flex-1 min-w-0 space-y-3">
+            {breakdown.length === 0 ? (
+              <p className="text-sm text-neutral-500">אין נתונים</p>
+            ) : (
+              breakdown.slice(0, 5).map((b) => (
+                <div key={b.value} className="flex items-center gap-2 text-sm">
+                  <span
+                    className="w-3.5 h-3.5 rounded-full shrink-0 border-[3px]"
+                    style={{ borderColor: b.hex }}
+                  />
+                  <span className="text-neutral-300 truncate flex-1">{b.label}</span>
+                  <span className="text-neutral-400 font-medium shrink-0">
+                    {b.percentage.toFixed(2)}%
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Detailed breakdown list */}
+        <div className="mt-8 space-y-5">
+          {breakdown.length === 0 ? (
+            <div className="text-center py-12">
+              <div className="bg-neutral-900 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                <PieChartIcon className="w-8 h-8 text-neutral-600" />
+              </div>
+              <p className="text-neutral-400">אין הוצאות בתקופה זו</p>
+              <p className="text-neutral-600 text-sm mt-1">בחר תקופה אחרת או הוסף הוצאות</p>
+            </div>
+          ) : (
+            breakdown.map((b) => {
+              const Icon = b.icon;
+              return (
+                <div key={b.value} className="flex items-center gap-3">
+                  <div
+                    className="shrink-0 w-12 h-12 rounded-full flex items-center justify-center text-white"
+                    style={{ backgroundColor: b.hex }}
+                  >
+                    <Icon className="w-6 h-6" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <div className="flex items-baseline gap-2 min-w-0">
+                        <span className="font-semibold truncate">{b.label}</span>
+                        <span className="text-xs text-neutral-500 shrink-0">
+                          {b.percentage.toFixed(2)}%
+                        </span>
+                      </div>
+                      <span className="font-semibold shrink-0">₪{b.amount.toLocaleString()}</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-neutral-800 overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{ width: `${Math.max(2, b.percentage)}%`, backgroundColor: b.hex }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [budget, setBudget] = useState<number>(0);
   const [budgetInput, setBudgetInput] = useState<string>('');
@@ -123,6 +462,9 @@ function App() {
     date: toISODate(new Date()),
   });
   const [showBudgetSaved, setShowBudgetSaved] = useState(false);
+
+  // Toggles between the management dashboard and the visual summary screen.
+  const [showSummary, setShowSummary] = useState(false);
 
   // The month currently being viewed (stored as the 1st of that month).
   const [selectedDate, setSelectedDate] = useState<Date>(() => {
@@ -300,6 +642,16 @@ function App() {
     return allCategories.find(c => c.value === categoryValue) || CATEGORIES[4];
   };
 
+  if (showSummary) {
+    return (
+      <ExpenseSummary
+        expenses={expenses}
+        categories={allCategories}
+        onBack={() => setShowSummary(false)}
+      />
+    );
+  }
+
   return (
     <div dir="rtl" className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
       {/* Header */}
@@ -318,9 +670,14 @@ function App() {
                 <p className="text-slate-500 text-xs sm:text-sm truncate">נהל את ההוצאות שלך בצורה חכמה</p>
               </div>
             </div>
-            <div className="text-xs sm:text-sm text-slate-400 shrink-0 text-left">
-              {new Date().toLocaleDateString('he-IL', { month: 'long', year: 'numeric' })}
-            </div>
+            <button
+              onClick={() => setShowSummary(true)}
+              className="shrink-0 flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 sm:px-4 py-2.5 rounded-xl font-medium transition-all active:scale-95"
+              title="סיכום חזותי"
+            >
+              <PieChartIcon className="w-5 h-5 text-emerald-600" />
+              <span className="hidden sm:inline text-sm">סיכום</span>
+            </button>
           </div>
         </div>
       </header>
