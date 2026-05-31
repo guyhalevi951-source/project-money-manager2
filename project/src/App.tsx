@@ -25,6 +25,7 @@ import {
   Search,
   RotateCcw,
   Layers,
+  ChevronUp,
   type LucideIcon
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
@@ -216,6 +217,173 @@ const TABS = [
   { id: 'expenses', label: 'הוצאות', icon: Receipt },
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
+
+interface CollapsibleNavMenuProps {
+  activeTab: TabId;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onTabSelect: (id: TabId) => void;
+  variant: 'mobile' | 'desktop';
+}
+
+// Space-saving collapsible nav: FAB on mobile, compact toggle in header on desktop.
+function CollapsibleNavMenu({
+  activeTab,
+  open,
+  onOpenChange,
+  onTabSelect,
+  variant,
+}: CollapsibleNavMenuProps) {
+  const active = TABS.find((t) => t.id === activeTab) ?? TABS[0];
+  const ActiveIcon = active.icon;
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onOpenChange(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onOpenChange]);
+
+  const toggleOpen = () => onOpenChange(!open);
+
+  const backdrop = (
+    <button
+      type="button"
+      aria-label="סגור תפריט"
+      onClick={() => onOpenChange(false)}
+      className={`fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-all duration-300 ease-in-out ${
+        open ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+      } ${variant === 'desktop' ? 'hidden md:block' : 'md:hidden'}`}
+    />
+  );
+
+  const tabButton = (tab: (typeof TABS)[number], index: number) => {
+    const Icon = tab.icon;
+    const isActive = tab.id === activeTab;
+
+    return (
+      <button
+        key={tab.id}
+        type="button"
+        onClick={() => onTabSelect(tab.id)}
+        style={{ transitionDelay: open ? `${index * 40}ms` : '0ms' }}
+        className={`flex items-center gap-2.5 rounded-2xl border text-sm font-medium transition-all duration-300 ease-in-out outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 ${
+          variant === 'mobile' ? 'w-full px-4 py-3.5' : 'w-full px-3 py-2.5'
+        } ${
+          isActive
+            ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white border-emerald-400/40 shadow-lg shadow-emerald-500/25'
+            : 'bg-slate-800/95 text-slate-200 border-slate-700/80 hover:border-slate-600 hover:bg-slate-700/90'
+        } ${
+          open
+            ? 'opacity-100 translate-y-0 scale-100'
+            : variant === 'mobile'
+              ? 'opacity-0 translate-y-3 scale-95 pointer-events-none'
+              : 'opacity-0 -translate-y-1 scale-95 pointer-events-none'
+        }`}
+        aria-current={isActive ? 'page' : undefined}
+      >
+        <span
+          className={`shrink-0 flex items-center justify-center rounded-xl ${
+            variant === 'mobile' ? 'w-10 h-10' : 'w-9 h-9'
+          } ${isActive ? 'bg-white/15' : 'bg-slate-900/80'}`}
+        >
+          <Icon className={`${variant === 'mobile' ? 'w-5 h-5' : 'w-4 h-4'} ${isActive ? 'text-white' : 'text-emerald-400'}`} />
+        </span>
+        <span className="flex-1 text-right truncate">{tab.label}</span>
+      </button>
+    );
+  };
+
+  if (variant === 'mobile') {
+    return (
+      <>
+        {backdrop}
+        <div
+          className="md:hidden fixed inset-x-0 bottom-0 z-50 flex flex-col items-center pointer-events-none"
+          style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+        >
+          {/* Expanded tab stack (grows upward from FAB) */}
+          <div
+            className={`pointer-events-auto w-[min(100%,20rem)] px-4 mb-3 flex flex-col gap-2 transition-all duration-300 ease-in-out ${
+              open ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'
+            }`}
+            role="menu"
+            aria-hidden={!open}
+          >
+            {[...TABS].reverse().map((tab, i) => tabButton(tab, TABS.length - 1 - i))}
+          </div>
+
+          {/* Collapsed / active FAB pill */}
+          <button
+            type="button"
+            onClick={toggleOpen}
+            aria-expanded={open}
+            aria-haspopup="menu"
+            className={`pointer-events-auto flex items-center gap-2.5 px-5 py-3.5 rounded-full bg-slate-900 border shadow-2xl shadow-black/50 transition-all duration-300 ease-in-out active:scale-[0.98] outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 ${
+              open
+                ? 'border-emerald-500/50 shadow-emerald-500/20'
+                : 'border-slate-700 hover:border-slate-600'
+            }`}
+          >
+            <span className="flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 shadow-lg shadow-emerald-500/30">
+              <ActiveIcon className="w-5 h-5 text-white" />
+            </span>
+            <span className="text-sm font-semibold text-slate-100 max-w-[8rem] truncate">{active.label}</span>
+            <ChevronUp
+              className={`w-5 h-5 text-slate-400 transition-transform duration-300 ease-in-out ${
+                open ? 'rotate-180' : ''
+              }`}
+            />
+          </button>
+        </div>
+      </>
+    );
+  }
+
+  // Desktop: compact toggle in header, dropdown panel below it.
+  return (
+    <>
+      {backdrop}
+      <div className="hidden md:block relative">
+        <button
+          type="button"
+          onClick={toggleOpen}
+          aria-expanded={open}
+          aria-haspopup="menu"
+          className={`flex items-center gap-2 px-3 py-2 rounded-2xl bg-slate-900 border text-sm font-medium transition-all duration-300 ease-in-out outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 ${
+            open
+              ? 'border-emerald-500/50 shadow-lg shadow-emerald-500/15'
+              : 'border-slate-700 hover:border-slate-600 hover:bg-slate-800/80'
+          }`}
+        >
+          <span className="flex items-center justify-center w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600">
+            <ActiveIcon className="w-4 h-4 text-white" />
+          </span>
+          <span className="text-slate-100">{active.label}</span>
+          <ChevronUp
+            className={`w-4 h-4 text-slate-400 transition-transform duration-300 ease-in-out ${
+              open ? 'rotate-180' : ''
+            }`}
+          />
+        </button>
+
+        <div
+          role="menu"
+          aria-hidden={!open}
+          className={`absolute top-full mt-2 end-0 min-w-[12.5rem] p-2 rounded-2xl bg-slate-900/95 border border-slate-700/80 shadow-2xl shadow-black/40 backdrop-blur-md flex flex-col gap-1.5 transition-all duration-300 ease-in-out origin-top ${
+            open
+              ? 'opacity-100 scale-100 translate-y-0 pointer-events-auto'
+              : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'
+          }`}
+        >
+          {TABS.map((tab, i) => tabButton(tab, i))}
+        </div>
+      </div>
+    </>
+  );
+}
 
 interface ExpenseSummaryProps {
   expenses: Expense[];
@@ -1095,6 +1263,12 @@ function App() {
 
   // Active top-level navigation tab.
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
+  const [navOpen, setNavOpen] = useState(false);
+
+  const handleTabSelect = (id: TabId) => {
+    setActiveTab(id);
+    setNavOpen(false);
+  };
 
   // Search query for the Expenses history page.
   const [search, setSearch] = useState('');
@@ -1489,32 +1663,19 @@ function App() {
               </div>
             </div>
 
-            {/* Desktop nav */}
-            <nav className="hidden md:flex items-center gap-1 bg-neutral-800/60 p-1 rounded-2xl">
-              {TABS.map((tab) => {
-                const Icon = tab.icon;
-                const active = activeTab === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all ${
-                      active
-                        ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow shadow-emerald-500/20'
-                        : 'text-neutral-300 hover:text-white hover:bg-neutral-700/60'
-                    }`}
-                  >
-                    <Icon className="w-4 h-4" />
-                    {tab.label}
-                  </button>
-                );
-              })}
-            </nav>
+            {/* Desktop collapsible nav toggle */}
+            <CollapsibleNavMenu
+              variant="desktop"
+              activeTab={activeTab}
+              open={navOpen}
+              onOpenChange={setNavOpen}
+              onTabSelect={handleTabSelect}
+            />
           </div>
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 pb-28 md:pb-10">
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 pb-24 md:pb-10">
         {/* ============================ DASHBOARD ============================ */}
         {activeTab === 'dashboard' && (
           <>
@@ -2006,36 +2167,14 @@ function App() {
         </div>
       </footer>
 
-      {/* Mobile sticky bottom navigation (thumb-friendly) */}
-      <nav
-        className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-neutral-900/95 backdrop-blur border-t border-neutral-800"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
-      >
-        <div className="flex items-stretch justify-around">
-          {TABS.map((tab) => {
-            const Icon = tab.icon;
-            const active = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex-1 flex flex-col items-center gap-1 pt-2.5 pb-1.5 transition-colors active:scale-95 ${
-                  active ? 'text-emerald-400' : 'text-neutral-500'
-                }`}
-                aria-label={tab.label}
-              >
-                <Icon className="w-6 h-6" />
-                <span className="text-[11px] font-medium">{tab.label}</span>
-                <span
-                  className={`h-0.5 w-8 rounded-full transition-colors ${
-                    active ? 'bg-emerald-400' : 'bg-transparent'
-                  }`}
-                />
-              </button>
-            );
-          })}
-        </div>
-      </nav>
+      {/* Mobile floating action menu (collapsed FAB by default) */}
+      <CollapsibleNavMenu
+        variant="mobile"
+        activeTab={activeTab}
+        open={navOpen}
+        onOpenChange={setNavOpen}
+        onTabSelect={handleTabSelect}
+      />
 
       {/* Budget change confirmation modal */}
       <BudgetChangeModal
