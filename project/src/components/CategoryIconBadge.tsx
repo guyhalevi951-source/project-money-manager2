@@ -10,7 +10,9 @@ const SIZE_CLASSES: Record<BadgeSize, { box: string; icon: string; rounded: stri
 
 interface CategoryIconBadgeProps {
   icon: LucideIcon;
-  colorClass: string;
+  colorClass?: string;
+  /** Resolved slice hex (e.g. collision-adjusted); takes precedence over colorClass. */
+  hex?: string;
   size?: BadgeSize;
   className?: string;
 }
@@ -18,7 +20,8 @@ interface CategoryIconBadgeProps {
 /** Colored icon badge matching expense history list styling. */
 export default function CategoryIconBadge({
   icon: Icon,
-  colorClass,
+  colorClass = 'bg-gray-500',
+  hex,
   size = 'default',
   className = '',
 }: CategoryIconBadgeProps) {
@@ -26,7 +29,8 @@ export default function CategoryIconBadge({
 
   return (
     <div
-      className={`shrink-0 flex items-center justify-center text-white ${colorClass} ${s.box} ${s.rounded} ${className}`}
+      className={`shrink-0 flex items-center justify-center text-white ${hex ? '' : colorClass} ${s.box} ${s.rounded} ${className}`}
+      style={hex ? { backgroundColor: hex } : undefined}
       aria-hidden
     >
       <Icon className={s.icon} />

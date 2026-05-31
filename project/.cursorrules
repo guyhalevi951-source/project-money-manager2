@@ -1,0 +1,4 @@
+### Firestore Security Rules Workflow
+- Whenever a new feature modifies the database structure, adds new fields, or changes user data access patterns, you must automatically evaluate the current Firestore Security Rules.
+- If the rules need to be updated, provide the full, production-ready rules text inside a markdown code block (similar to the schema with isValidAppData() we used).
+- Include brief step-by-step instructions on where to paste and publish them in the Firebase Console.

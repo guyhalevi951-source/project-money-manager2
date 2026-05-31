@@ -46,7 +46,7 @@ export default function CategoryBreakdownLegend({
       >
         {visible.map((item) => (
           <div key={item.value} className="flex items-start gap-2 text-sm text-right min-w-0">
-            <CategoryIconBadge icon={item.icon} colorClass={item.color} size="compact" />
+            <CategoryIconBadge icon={item.icon} hex={item.hex} colorClass={item.color} size="compact" />
             <LegendLine item={item} percentageDecimals={percentageDecimals} />
           </div>
         ))}
@@ -58,7 +58,7 @@ export default function CategoryBreakdownLegend({
     <div className="flex-1 min-w-0 space-y-3">
       {visible.map((item) => (
         <div key={item.value} className="flex items-center gap-2.5 text-sm">
-          <CategoryIconBadge icon={item.icon} colorClass={item.color} size="compact" />
+          <CategoryIconBadge icon={item.icon} hex={item.hex} colorClass={item.color} size="compact" />
           <span className="text-neutral-300 truncate flex-1">{item.label}</span>
           <span className="text-neutral-400 font-medium shrink-0 tabular-nums">
             {percentageDecimals > 0

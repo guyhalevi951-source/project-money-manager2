@@ -33,8 +33,11 @@ import {
   lookupCategory,
   type Category,
 } from './categories';
+import CategoryColorPicker from './components/CategoryColorPicker';
+import CreateCategoryForm from './components/CreateCategoryForm';
 import CategoryIconBadge from './components/CategoryIconBadge';
 import CategoryBreakdownLegend from './components/CategoryBreakdownLegend';
+import SubBudgetProgressBar from './components/SubBudgetProgressBar';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { auth, signOutUser } from './firebase';
 import AuthPage from './components/AuthPage';
@@ -179,57 +182,6 @@ const mixHex = (hex: string, target: string, amount: number): string => {
 // Two-tone chart fills: vibrant base for spent, soft tint for remaining budget.
 const spentFill = (hex: string) => hex;
 const remainingFill = (hex: string) => mixHex(hex, '#ffffff', 0.42);
-
-interface CategoryColorPickerProps {
-  value: string;
-  onChange: (colorClass: string) => void;
-  label?: string;
-}
-
-// Touch-friendly premium color grid for dark mode forms.
-function CategoryColorPicker({
-  value,
-  onChange,
-  label = 'צבע',
-}: CategoryColorPickerProps) {
-  return (
-    <div>
-      <label className="block text-xs font-medium text-neutral-300 mb-2">{label}</label>
-      <div className="grid grid-cols-4 sm:grid-cols-7 gap-3">
-        {COLOR_OPTIONS.map((c) => {
-          const selected = value === c.class;
-          const hex = hexForColor(c.class);
-          return (
-            <button
-              key={c.class}
-              type="button"
-              onClick={() => onChange(c.class)}
-              title={c.name}
-              aria-label={c.name}
-              aria-pressed={selected}
-              className={`relative w-11 h-11 sm:w-12 sm:h-12 rounded-full ${c.class} transition-all duration-200 active:scale-95 ${
-                selected
-                  ? 'ring-2 ring-white ring-offset-2 ring-offset-neutral-900 scale-110'
-                  : 'hover:scale-105 opacity-90 hover:opacity-100'
-              }`}
-              style={
-                selected
-                  ? { boxShadow: `0 0 16px ${hex}88, 0 0 0 1px ${hex}40` }
-                  : undefined
-              }
-            >
-              {selected && (
-                <span className="absolute inset-0 flex items-center justify-center">
-                  <Check className="w-5 h-5 sm:w-6 sm:h-6 text-white drop-shadow-md" strokeWidth={3} />
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 // Bright warning color for overspent envelopes.
 const WARNING_COLOR = '#ef4444';
@@ -584,7 +536,12 @@ function AnalyticsDonutPanel({
           legend.slice(0, 6).map((item) => (
             <div key={item.key} className="flex items-center gap-2.5 text-sm min-w-0">
               {item.icon && item.colorClass ? (
-                <CategoryIconBadge icon={item.icon} colorClass={item.colorClass} size="compact" />
+                <CategoryIconBadge
+                  icon={item.icon}
+                  hex={item.hex}
+                  colorClass={item.colorClass}
+                  size="compact"
+                />
               ) : (
                 <span
                   className={`w-3.5 h-3.5 rounded-full shrink-0 ${
@@ -1198,7 +1155,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
           ) : (
             breakdown.map((b) => (
                 <div key={b.value} className="flex items-center gap-3">
-                  <CategoryIconBadge icon={b.icon} colorClass={b.color} size="large" />
+                  <CategoryIconBadge icon={b.icon} hex={b.hex} colorClass={b.color} size="large" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2 mb-1.5">
                       <div className="flex items-baseline gap-2 min-w-0">
@@ -1409,6 +1366,7 @@ function SubBudgetTracker({
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [newSubBudgetColor, setNewSubBudgetColor] = useState(DEFAULT_CATEGORY_COLOR);
+  const [hoveredDonutSliceId, setHoveredDonutSliceId] = useState<string | null>(null);
 
   const spentByCat = monthExpenses.reduce<Record<string, number>>((acc, e) => {
     acc[e.category] = (acc[e.category] || 0) + e.amount;
@@ -1456,26 +1414,89 @@ function SubBudgetTracker({
   }
 
   // Build the flat two-tone donut segments.
-  const segments: { id: string; value: number; fill: string }[] = [];
+  const segments: {
+    id: string;
+    value: number;
+    fill: string;
+    label: string;
+    status: 'נוצל' | 'נותר' | 'הוצאה';
+    amount: number;
+    percentage: number;
+  }[] = [];
   envelopes.forEach((env) => {
     if (env.allocated <= 0 && env.spent <= 0) return;
     const overspent = env.spent > env.allocated;
     if (overspent) {
       // The whole envelope (sized by spending) is shown in the warning color.
-      segments.push({ id: `${env.key}-over`, value: Math.max(env.spent, env.allocated, 1), fill: WARNING_COLOR });
+      const amount = env.spent;
+      segments.push({
+        id: `${env.key}-over`,
+        value: Math.max(env.spent, env.allocated, 1),
+        fill: WARNING_COLOR,
+        label: env.label,
+        status: 'הוצאה',
+        amount,
+        percentage: budget > 0 ? (amount / budget) * 100 : 0,
+      });
       return;
     }
     if (env.spent > 0) {
-      segments.push({ id: `${env.key}-spent`, value: env.spent, fill: spentFill(env.hex) });
+      const amount = env.spent;
+      segments.push({
+        id: `${env.key}-spent`,
+        value: env.spent,
+        fill: spentFill(env.hex),
+        label: env.label,
+        status: 'נוצל',
+        amount,
+        percentage: budget > 0 ? (amount / budget) * 100 : 0,
+      });
     }
     const remaining = env.allocated - env.spent;
     if (remaining > 0) {
-      segments.push({ id: `${env.key}-remaining`, value: remaining, fill: remainingFill(env.hex) });
+      segments.push({
+        id: `${env.key}-remaining`,
+        value: remaining,
+        fill: remainingFill(env.hex),
+        label: env.label,
+        status: 'נותר',
+        amount: remaining,
+        percentage: budget > 0 ? (remaining / budget) * 100 : 0,
+      });
     }
   });
 
   const donutData =
-    segments.length > 0 ? segments : [{ id: 'empty', value: 1, fill: '#262626' }];
+    segments.length > 0
+      ? segments
+      : [
+          {
+            id: 'empty',
+            value: 1,
+            fill: '#262626',
+            label: 'אין נתונים',
+            status: 'הוצאה' as const,
+            amount: 0,
+            percentage: 0,
+          },
+        ];
+
+  const activeDonutSlice = hoveredDonutSliceId
+    ? donutData.find((slice) => slice.id === hoveredDonutSliceId) ?? null
+    : null;
+
+  const handleDonutSliceEnter = (slice: { payload?: { id?: string } }) => {
+    const sliceId = slice.payload?.id;
+    if (sliceId && sliceId !== 'empty') {
+      setHoveredDonutSliceId(sliceId);
+    }
+  };
+
+  const handleDonutSliceClick = (slice: { payload?: { id?: string } }) => {
+    const sliceId = slice.payload?.id;
+    if (!sliceId || sliceId === 'empty') return;
+    setHoveredDonutSliceId((current) => (current === sliceId ? null : sliceId));
+  };
 
   const handleAdd = () => {
     const amt = parseFloat(amount);
@@ -1507,36 +1528,73 @@ function SubBudgetTracker({
         </div>
       ) : (
         <>
-          {/* Two-tone donut */}
-          <div className="relative w-48 h-48 sm:w-56 sm:h-56 mx-auto">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={donutData}
-                  dataKey="value"
-                  nameKey="id"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius="64%"
-                  outerRadius="100%"
-                  paddingAngle={0}
-                  stroke="#0a0a0a"
-                  strokeWidth={2}
-                  isAnimationActive={false}
-                >
-                  {donutData.map((s) => (
-                    <Cell key={s.id} fill={s.fill} />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-2xl font-bold text-neutral-100 leading-none">
-                ₪{totalSpent.toLocaleString()}
-              </span>
-              <span className="text-[11px] text-neutral-500 mt-1">
-                מתוך ₪{budget.toLocaleString()}
-              </span>
+          {/* Donut chart + fixed info panel */}
+          <div className="flex flex-col md:flex-row-reverse items-center justify-center gap-8">
+            <div className="relative w-48 h-48 sm:w-56 sm:h-56 shrink-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={donutData}
+                    dataKey="value"
+                    nameKey="id"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius="64%"
+                    outerRadius="100%"
+                    paddingAngle={0}
+                    stroke="#0a0a0a"
+                    strokeWidth={2}
+                    isAnimationActive={false}
+                    onMouseEnter={handleDonutSliceEnter}
+                    onMouseLeave={() => setHoveredDonutSliceId(null)}
+                    onClick={handleDonutSliceClick}
+                  >
+                    {donutData.map((s) => (
+                      <Cell key={s.id} fill={s.fill} />
+                    ))}
+                  </Pie>
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                <span className="text-2xl font-bold text-neutral-100 leading-none">
+                  ₪{totalSpent.toLocaleString()}
+                </span>
+                <span className="text-[11px] text-neutral-500 mt-1">
+                  מתוך ₪{budget.toLocaleString()}
+                </span>
+              </div>
+            </div>
+
+            <div
+              className="w-64 h-40 shrink-0 flex flex-col justify-center rounded-xl border border-gray-600 bg-neutral-900/80 px-4 py-3 text-right text-white shadow-lg shadow-black/40"
+              aria-live="polite"
+            >
+              {activeDonutSlice ? (
+                <>
+                  <p className="text-sm font-semibold text-white truncate">{activeDonutSlice.label}</p>
+                  <p className="text-xs mt-0.5 text-gray-300">{activeDonutSlice.status}</p>
+                  <p className="text-base font-bold mt-2 text-white tabular-nums">
+                    ₪{activeDonutSlice.amount.toLocaleString()}
+                  </p>
+                  <p className="text-xs mt-0.5 text-gray-300 tabular-nums">
+                    {activeDonutSlice.percentage.toFixed(0)}% מהתקציב
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-semibold text-white tabular-nums whitespace-nowrap">
+                    סה&quot;כ תקציב:{' '}
+                    <span className="text-base font-bold">₪{budget.toLocaleString()}</span>
+                  </p>
+                  <p className="text-xs mt-0.5 text-gray-300 tabular-nums">
+                    הוצא: ₪{totalSpent.toLocaleString()}
+                    {budget > 0 ? ` (${((totalSpent / budget) * 100).toFixed(0)}%)` : ''}
+                  </p>
+                  <p className="text-xs mt-0.5 text-gray-400 whitespace-nowrap">
+                    (רחף מעל פלח לצפייה בפרטים)
+                  </p>
+                </>
+              )}
             </div>
           </div>
 
@@ -1570,7 +1628,6 @@ function SubBudgetTracker({
               envelopes.map((env) => {
                 const Icon = env.icon;
                 const overspent = env.spent > env.allocated;
-                const pct = env.allocated > 0 ? (env.spent / env.allocated) * 100 : env.spent > 0 ? 100 : 0;
                 return (
                   <div key={env.key} className="flex items-center gap-3">
                     {overspent ? (
@@ -1601,15 +1658,13 @@ function SubBudgetTracker({
                           <span className="text-neutral-500"> / ₪{env.allocated.toLocaleString()}</span>
                         </span>
                       </div>
-                      <div className="h-2.5 rounded-full bg-neutral-800 overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all duration-500"
-                          style={{
-                            width: `${Math.min(100, Math.max(pct > 0 ? 3 : 0, pct))}%`,
-                            backgroundColor: overspent ? WARNING_COLOR : env.hex,
-                          }}
-                        />
-                      </div>
+                      <SubBudgetProgressBar
+                        allocated={env.allocated}
+                        spent={env.spent}
+                        usedColor={overspent ? WARNING_COLOR : spentFill(env.hex)}
+                        remainingColor={remainingFill(env.hex)}
+                        overspent={overspent}
+                      />
                     </div>
                     {!env.isGeneral && (
                       <button
@@ -2545,10 +2600,10 @@ function App() {
               />
             </div>
 
-            <div>
+            <div className="min-w-0">
               <label className="block text-sm font-medium text-neutral-300 mb-2">קטגוריה</label>
               <select
-                value={newExpense.category}
+                value={isAddingCategory ? ADD_CUSTOM_VALUE : newExpense.category}
                 onChange={(e) => handleCategoryChange(e.target.value)}
                 className="w-full px-4 py-3 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base"
               >
@@ -2559,106 +2614,28 @@ function App() {
                 ))}
                 <option value={ADD_CUSTOM_VALUE}>+ הוסף קטגוריה חדשה</option>
               </select>
-
-              {isAddingCategory && (
-                <div className="mt-3 p-4 bg-neutral-800/60 border border-emerald-500/30 rounded-xl space-y-4">
-                  {/* Name */}
-                  <div>
-                    <label className="block text-xs font-medium text-neutral-300 mb-1.5">
-                      שם הקטגוריה
-                    </label>
-                    <input
-                      type="text"
-                      value={newCategoryName}
-                      onChange={(e) => {
-                        setNewCategoryName(e.target.value);
-                        if (categoryError) setCategoryError('');
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          handleAddCategory();
-                        }
-                      }}
-                      placeholder="לדוגמה: תחבורה, מתנות"
-                      autoFocus
-                      className="w-full px-3 py-2.5 rounded-lg bg-neutral-900 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base"
-                    />
-                  </div>
-
-                  <CategoryColorPicker value={newCategoryColor} onChange={setNewCategoryColor} />
-
-                  {/* Icon picker */}
-                  <div>
-                    <label className="block text-xs font-medium text-neutral-300 mb-1.5">אייקון</label>
-                    <div className="flex flex-wrap gap-2.5">
-                      {ICON_OPTIONS.map((o) => {
-                        const IconComp = o.icon;
-                        const selected = newCategoryIcon === o.name;
-                        return (
-                          <button
-                            key={o.name}
-                            type="button"
-                            onClick={() => setNewCategoryIcon(o.name)}
-                            aria-label={o.name}
-                            className={`w-11 h-11 rounded-lg flex items-center justify-center transition-all ${
-                              selected
-                                ? 'bg-emerald-500 text-white ring-2 ring-offset-2 ring-offset-neutral-800 ring-emerald-400'
-                                : 'bg-neutral-900 text-neutral-400 border border-neutral-700 hover:border-emerald-500 hover:text-emerald-400 active:scale-95'
-                            }`}
-                          >
-                            <IconComp className="w-5 h-5" />
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Live preview */}
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-neutral-400">תצוגה מקדימה:</span>
-                    {(() => {
-                      const PreviewIcon = resolveIcon(newCategoryIcon);
-                      return (
-                        <span
-                          className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${newCategoryColor} text-white`}
-                        >
-                          <PreviewIcon className="w-4 h-4" />
-                          {newCategoryName.trim() || 'קטגוריה חדשה'}
-                        </span>
-                      );
-                    })()}
-                  </div>
-
-                  {categoryError && (
-                    <p className="text-rose-400 text-xs">{categoryError}</p>
-                  )}
-
-                  {/* Actions */}
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={handleAddCategory}
-                      className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:from-emerald-600 hover:to-teal-700 transition-all flex items-center justify-center gap-1 active:scale-[0.98]"
-                    >
-                      <Plus className="w-4 h-4" />
-                      הוסף קטגוריה
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleCancelAddCategory}
-                      className="shrink-0 text-neutral-400 hover:text-rose-400 hover:bg-rose-500/10 p-2.5 rounded-lg transition-all"
-                      title="ביטול"
-                      aria-label="ביטול"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
 
-            <div className="flex items-end">
+            {isAddingCategory && (
+              <div className="col-span-1 sm:col-span-2 lg:col-span-5 flex justify-start">
+                <CreateCategoryForm
+                  name={newCategoryName}
+                  onNameChange={(v) => {
+                    setNewCategoryName(v);
+                    if (categoryError) setCategoryError('');
+                  }}
+                  color={newCategoryColor}
+                  onColorChange={setNewCategoryColor}
+                  iconName={newCategoryIcon}
+                  onIconChange={setNewCategoryIcon}
+                  error={categoryError}
+                  onSubmit={handleAddCategory}
+                  onCancel={handleCancelAddCategory}
+                />
+              </div>
+            )}
+
+            <div className="flex items-end sm:col-span-2 lg:col-span-1">
               <button
                 type="submit"
                 className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-6 py-3 rounded-xl font-medium hover:from-emerald-600 hover:to-teal-700 transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 active:scale-[0.98]"
