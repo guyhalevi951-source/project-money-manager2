@@ -80,6 +80,9 @@ function CurrencyPinSaveConfirmModal({
   );
 }
 
+const currencyCellClass =
+  'absolute inset-0 flex flex-col items-center justify-center rounded-xl text-sm sm:text-base font-semibold tabular-nums transition-all min-h-0';
+
 function DisplayCurrencySelector() {
   const {
     tr,
@@ -203,7 +206,7 @@ function DisplayCurrencySelector() {
       <motion.div
         layout
         dir="ltr"
-        className={`flex flex-wrap gap-1.5 sm:gap-2 rounded-2xl bg-gray-950/80 border p-1.5 sm:p-2 transition-colors duration-200 ${
+        className={`grid grid-cols-5 gap-1.5 sm:gap-2 rounded-2xl bg-gray-950/80 border p-1.5 sm:p-2 transition-colors duration-200 ${
           editMode ? 'border-amber-500/40 ring-1 ring-amber-500/20' : 'border-gray-700'
         }`}
       >
@@ -214,10 +217,7 @@ function DisplayCurrencySelector() {
           const showRemove = editMode && isCustom;
 
           return (
-            <div
-              key={code}
-              className="relative min-w-[4.25rem] flex-1 basis-[calc(25%-0.5rem)] sm:basis-[calc(20%-0.5rem)]"
-            >
+            <div key={code} className="relative aspect-square min-w-0">
               {showRemove && (
                 <button
                   type="button"
@@ -233,38 +233,37 @@ function DisplayCurrencySelector() {
                 type="button"
                 onClick={() => handleSelect(code)}
                 disabled={editMode}
-                className={`w-full py-3 sm:py-3.5 rounded-xl text-sm sm:text-base font-semibold tabular-nums transition-all ${
+                className={`${currencyCellClass} ${
                   editMode
                     ? 'cursor-default opacity-95 text-gray-200 bg-gray-800/60'
                     : `active:scale-[0.98] ${
                         selected
-                          ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/30'
-                          : 'text-gray-300 hover:text-white hover:bg-gray-800/80'
+                          ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/30 ring-1 ring-emerald-400/40'
+                          : 'text-gray-300 bg-gray-800/40 hover:text-white hover:bg-gray-800/80'
                       }`
                 } ${showRemove ? 'ring-1 ring-amber-500/25' : ''}`}
                 aria-pressed={selected}
               >
-                <span className="block">{meta.symbol}</span>
-                <span className="block text-[10px] sm:text-xs font-medium opacity-80 mt-0.5">{code}</span>
+                <span className="leading-none">{meta.symbol}</span>
+                <span className="text-[10px] sm:text-xs font-medium opacity-80 mt-1 leading-none">{code}</span>
               </button>
             </div>
           );
         })}
 
         {!editMode && (
-          <button
-            type="button"
-            onClick={() => setLibraryOpen(true)}
-            aria-label={tr('currencyLibraryTitle')}
-            className={`min-w-[4.25rem] flex-1 basis-[calc(25%-0.5rem)] sm:basis-[calc(20%-0.5rem)] py-3 sm:py-3.5 rounded-xl text-sm sm:text-base font-semibold transition-all active:scale-[0.98] border border-dashed ${
-              libraryOpen
-                ? 'border-emerald-400/60 bg-emerald-500/10 text-emerald-300'
-                : 'border-gray-600/80 text-gray-300 hover:text-white hover:bg-gray-800/80 hover:border-gray-500'
-            }`}
-          >
-            <Plus className="w-5 h-5 sm:w-6 sm:h-6 mx-auto" strokeWidth={2.25} />
-            <span className="block text-[10px] sm:text-xs font-medium opacity-80 mt-0.5">+</span>
-          </button>
+          <div className="relative aspect-square min-w-0">
+            <button
+              type="button"
+              onClick={() => setLibraryOpen(true)}
+              aria-label={tr('currencyLibraryTitle')}
+              className={`${currencyCellClass} active:scale-[0.98] text-gray-300 bg-gray-800/40 hover:text-white hover:bg-gray-800/80 ${
+                libraryOpen ? 'ring-1 ring-emerald-400/40 text-emerald-300' : ''
+              }`}
+            >
+              <Plus className="w-5 h-5 sm:w-6 sm:h-6" strokeWidth={2.25} />
+            </button>
+          </div>
         )}
       </motion.div>
 
