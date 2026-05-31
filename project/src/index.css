@@ -84,3 +84,18 @@ button:focus {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+/* Recharts tooltips: escape carousel overflow + kill default white box */
+.recharts-tooltip-wrapper {
+  z-index: 80 !important;
+  pointer-events: none !important;
+  visibility: visible !important;
+}
+
+.recharts-default-tooltip {
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}

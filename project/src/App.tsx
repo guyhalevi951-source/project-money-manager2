@@ -303,7 +303,7 @@ type SummaryView = 'week' | 'month' | 'year';
 // Top-level navigation tabs.
 const TABS = [
   { id: 'dashboard', label: 'בית', icon: LayoutDashboard },
-  { id: 'analytics', label: 'אנליטיקה', icon: PieChartIcon },
+  { id: 'analytics', label: 'תובנות', icon: PieChartIcon },
   { id: 'subbudgets', label: 'תקציבים', icon: Wallet },
   { id: 'expenses', label: 'הוצאות', icon: Receipt },
 ] as const;
@@ -652,19 +652,42 @@ const buildContinuousTrendSeries = (
   return { dailySeries: points, periodDayCount: 12 };
 };
 
+// Hebrew date string for trend tooltip (e.g. "31 במאי").
+const formatTooltipHebrewDate = (iso: string): string => {
+  const d = parseISO(iso);
+  return d.toLocaleDateString('he-IL', { day: 'numeric', month: 'long' });
+};
+
 interface TrendLineTooltipProps {
   active?: boolean;
-  payload?: { payload: TrendSeriesPoint }[];
+  payload?: ReadonlyArray<{ payload?: TrendSeriesPoint }>;
 }
 
 function TrendLineTooltip({ active, payload }: TrendLineTooltipProps) {
   if (!active || !payload?.length) return null;
-  const point = payload[0].payload;
+  const point = payload[0]?.payload;
+  if (!point) return null;
+
   return (
-    <div className="rounded-xl border border-neutral-700 bg-neutral-900 px-3.5 py-2.5 shadow-xl shadow-black/60">
-      <p className="text-sm font-medium text-neutral-300">{point.dateLabel}</p>
-      <p className="text-lg font-bold text-neutral-100 mt-1 tabular-nums">
-        ₪{point.amount.toLocaleString()}
+    <div
+      className="!bg-slate-900 !p-4 !rounded-lg !border !border-slate-800 shadow-2xl shadow-black/70"
+      style={{
+        backgroundColor: '#0f172a',
+        padding: '1rem',
+        borderRadius: '0.5rem',
+        border: '1px solid #1e293b',
+        minWidth: '9.5rem',
+      }}
+    >
+      <p className="!text-slate-400 text-sm leading-relaxed">
+        תאריך:{' '}
+        <span className="!text-slate-100 font-medium">{formatTooltipHebrewDate(point.iso)}</span>
+      </p>
+      <p className="!text-slate-400 text-sm leading-relaxed mt-1.5">
+        סכום:{' '}
+        <span className="!text-slate-100 font-bold tabular-nums">
+          ₪{point.amount.toLocaleString()}
+        </span>
       </p>
     </div>
   );
@@ -675,6 +698,15 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
   const [view, setView] = useState<SummaryView>('month');
   const [anchor, setAnchor] = useState<Date>(() => new Date());
   const [chartSlide, setChartSlide] = useState(0);
+  const [touchUi, setTouchUi] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(pointer: coarse)');
+    const update = () => setTouchUi(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
 
   const shift = (dir: number) => {
     setAnchor((a) => {
@@ -849,7 +881,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
       <div>
         <div className="flex items-center gap-2 mb-4 text-neutral-100">
           <PieChartIcon className="w-6 h-6 text-emerald-400" />
-          <h2 className="text-lg sm:text-xl font-bold">אנליטיקה</h2>
+          <h2 className="text-lg sm:text-xl font-bold">תובנות</h2>
         </div>
 
         <div className="flex p-1 bg-neutral-900 border border-neutral-800 rounded-2xl">
@@ -915,12 +947,15 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
 
         {/* Swipeable chart carousel — only mount active slide so Recharts gets real dimensions */}
         <div
-          className="relative mt-6 w-full overflow-hidden touch-pan-y rounded-2xl bg-neutral-950"
+          className={`relative mt-6 w-full touch-pan-y rounded-2xl bg-neutral-950 ${
+            chartSlide === 2 ? 'overflow-visible' : 'overflow-hidden'
+          }`}
           style={{ height: ANALYTICS_CHART_HEIGHT, minHeight: ANALYTICS_CHART_HEIGHT }}
         >
+          {/* Swipe layer disabled on trend slide so hover/tap reaches the chart */}
           <motion.div
-            className="absolute inset-0 z-10"
-            drag="x"
+            className={`absolute inset-0 ${chartSlide === 2 ? 'pointer-events-none z-0' : 'z-10'}`}
+            drag={chartSlide === 2 ? false : 'x'}
             dragConstraints={{ left: 0, right: 0 }}
             dragElastic={0.12}
             dragMomentum={false}
@@ -979,7 +1014,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
             {chartSlide === 2 && (
               <motion.div
                 key={`slide-2-${chartPeriodKey}`}
-                className="absolute inset-0 w-full h-full flex flex-col px-2 pt-2"
+                className="absolute inset-0 w-full h-full flex flex-col px-2 pt-2 overflow-visible z-20"
                 style={{ height: ANALYTICS_CHART_HEIGHT }}
                 initial={{ opacity: 0, x: 24 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -1005,15 +1040,20 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                   </div>
                 ) : (
                   <div
-                    className="w-full flex-1 min-h-0"
+                    className="w-full flex-1 min-h-0 overflow-visible relative z-20"
                     style={{ height: ANALYTICS_LINE_HEIGHT, minHeight: ANALYTICS_LINE_HEIGHT }}
                   >
                     <ResponsiveContainer
                       width="100%"
                       height={ANALYTICS_LINE_HEIGHT}
                       key={`line-chart-${chartPeriodKey}`}
+                      className="overflow-visible"
                     >
-                      <LineChart data={dailySeries} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
+                      <LineChart
+                        data={dailySeries}
+                        margin={{ top: 28, right: 12, left: 4, bottom: 8 }}
+                        style={{ overflow: 'visible' }}
+                      >
                         <CartesianGrid stroke="#262626" strokeDasharray="4 4" vertical={false} />
                         <XAxis
                           dataKey="dayLabel"
@@ -1032,17 +1072,52 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                           tickFormatter={(v) => String(v)}
                         />
                         <Tooltip
-                          content={<TrendLineTooltip />}
-                          cursor={{ stroke: '#525252', strokeWidth: 1, strokeDasharray: '4 4' }}
+                          trigger={touchUi ? 'click' : 'hover'}
+                          content={(props) => <TrendLineTooltip {...props} />}
+                          cursor={{ stroke: '#94a3b8', strokeWidth: 1, strokeDasharray: '4 4' }}
                           isAnimationActive={false}
                           allowEscapeViewBox={{ x: true, y: true }}
+                          wrapperStyle={{
+                            zIndex: 80,
+                            outline: 'none',
+                            pointerEvents: 'none',
+                          }}
+                          contentStyle={{
+                            backgroundColor: 'transparent',
+                            border: 'none',
+                            boxShadow: 'none',
+                            padding: 0,
+                            margin: 0,
+                          }}
+                          labelStyle={{ display: 'none' }}
+                          itemStyle={{ display: 'none' }}
+                          offset={16}
                         />
                         <Line
                           type="monotone"
                           dataKey="amount"
-                          stroke="#525252"
+                          stroke="#64748b"
                           strokeWidth={2}
                           connectNulls
+                          activeDot={(props) => {
+                            const { cx, cy, payload } = props;
+                            if (cx == null || cy == null || !payload) return null;
+                            const p = payload as TrendSeriesPoint;
+                            const fill = p.amount > 0 ? p.hex : '#94a3b8';
+                            return (
+                              <g>
+                                <circle cx={cx} cy={cy} r={14} fill={fill} opacity={0.22} />
+                                <circle
+                                  cx={cx}
+                                  cy={cy}
+                                  r={9}
+                                  fill={fill}
+                                  stroke="#f8fafc"
+                                  strokeWidth={2.5}
+                                />
+                              </g>
+                            );
+                          }}
                           dot={({ cx, cy, payload }) => {
                             if (cx == null || cy == null || !payload) return null;
                             const p = payload as TrendSeriesPoint;
@@ -1051,19 +1126,14 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                               <circle
                                 cx={cx}
                                 cy={cy}
-                                r={isZero ? 3.5 : 5}
-                                fill={isZero ? '#525252' : p.hex}
+                                r={isZero ? 4.5 : 6}
+                                fill={isZero ? '#64748b' : p.hex}
                                 stroke="#0a0a0a"
                                 strokeWidth={2}
-                                opacity={isZero ? 0.65 : 1}
+                                opacity={isZero ? 0.75 : 1}
+                                style={{ cursor: 'pointer' }}
                               />
                             );
-                          }}
-                          activeDot={{
-                            r: 7,
-                            stroke: '#fff',
-                            strokeWidth: 2,
-                            fill: '#10b981',
                           }}
                           isAnimationActive={false}
                         />
@@ -1080,7 +1150,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
         <div
           className="flex justify-center items-center gap-2 mt-5"
           role="tablist"
-          aria-label="תצוגות אנליטיקה"
+          aria-label="תצוגות תובנות"
         >
           {Array.from({ length: ANALYTICS_SLIDE_COUNT }, (_, i) => (
             <button
