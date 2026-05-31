@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { AnimatePresence, motion, type PanInfo } from 'framer-motion';
 import {
   Wallet,
   TrendingDown,
@@ -28,7 +29,18 @@ import {
   ChevronUp,
   type LucideIcon
 } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
+import {
+  PieChart,
+  Pie,
+  Cell,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from 'recharts';
 
 interface Expense {
   id: string;
@@ -266,6 +278,24 @@ function CategoryColorPicker({
 
 // Bright warning color for overspent envelopes.
 const WARNING_COLOR = '#ef4444';
+
+// Distinct slice colors for daily analytics donuts / trend dots.
+const DAILY_SLICE_COLORS = [
+  '#eab308',
+  '#14b8a6',
+  '#f43f5e',
+  '#6366f1',
+  '#10b981',
+  '#f97316',
+  '#ec4899',
+  '#06b6d4',
+  '#8b5cf6',
+];
+
+const ANALYTICS_SLIDE_COUNT = 3;
+const ANALYTICS_CHART_HEIGHT = 320;
+const ANALYTICS_DONUT_SIZE = 192;
+const ANALYTICS_LINE_HEIGHT = 240;
 const GENERAL_KEY = '__general__';
 
 type SummaryView = 'week' | 'month' | 'year';
@@ -451,10 +481,200 @@ interface ExpenseSummaryProps {
   categories: Category[];
 }
 
-// Dark-themed visual breakdown of expenses by category, per week / month / year.
+type DonutLegendItem = {
+  key: string;
+  label: string;
+  hex: string;
+  amount: number;
+  percentage: number;
+  ring?: boolean;
+};
+
+// Reusable donut + side legend block for analytics carousel slides.
+function AnalyticsDonutPanel({
+  total,
+  donutData,
+  legend,
+  paddingSlices,
+  chartKey,
+  donutSize = ANALYTICS_DONUT_SIZE,
+}: {
+  total: number;
+  donutData: { name: string; value: number; hex: string }[];
+  legend: DonutLegendItem[];
+  paddingSlices: boolean;
+  chartKey: string;
+  donutSize?: number;
+}) {
+  return (
+    <div className="flex items-center gap-4 w-full h-full min-h-0">
+      <div
+        className="relative shrink-0"
+        style={{ width: donutSize, height: donutSize, minWidth: donutSize, minHeight: donutSize }}
+      >
+        <ResponsiveContainer width={donutSize} height={donutSize} key={chartKey}>
+          <PieChart>
+            <Pie
+              data={donutData}
+              dataKey="value"
+              nameKey="name"
+              cx="50%"
+              cy="50%"
+              innerRadius="62%"
+              outerRadius="100%"
+              paddingAngle={paddingSlices ? 2 : 0}
+              stroke="none"
+              isAnimationActive={false}
+            >
+              {donutData.map((entry, i) => (
+                <Cell key={i} fill={entry.hex} />
+              ))}
+            </Pie>
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+          <span className="text-xl sm:text-2xl font-bold leading-none">₪{total.toLocaleString()}</span>
+          <span className="text-[11px] text-neutral-500 mt-1">סה"כ</span>
+        </div>
+      </div>
+
+      <div className="flex-1 min-w-0 space-y-3">
+        {legend.length === 0 ? (
+          <p className="text-sm text-neutral-500">אין נתונים</p>
+        ) : (
+          legend.slice(0, 6).map((item) => (
+            <div key={item.key} className="flex items-center gap-2 text-sm">
+              <span
+                className={`w-3.5 h-3.5 rounded-full shrink-0 ${
+                  item.ring ? 'border-[3px] bg-transparent' : ''
+                }`}
+                style={
+                  item.ring
+                    ? { borderColor: item.hex }
+                    : { backgroundColor: item.hex }
+                }
+              />
+              <span className="text-neutral-300 truncate flex-1">{item.label}</span>
+              <span className="text-neutral-400 font-medium shrink-0">
+                {item.percentage > 0 ? `${item.percentage.toFixed(2)}%` : `₪${item.amount.toLocaleString()}`}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+const formatDayLabel = (iso: string): string => {
+  const d = parseISO(iso);
+  return d.toLocaleDateString('he-IL', { day: 'numeric', month: 'short' });
+};
+
+// Tooltip / hover label for trend chart (e.g. "31 במאי" or "31/05/2026").
+const formatTrendDateLabel = (iso: string): string => {
+  const d = parseISO(iso);
+  const short = d.toLocaleDateString('he-IL', { day: 'numeric', month: 'short' });
+  const numeric = `${d.getDate()}/${pad2(d.getMonth() + 1)}`;
+  return `${short} · ${numeric}`;
+};
+
+type TrendSeriesPoint = {
+  iso: string;
+  day: number;
+  dayLabel: string;
+  dateLabel: string;
+  amount: number;
+  hex: string;
+};
+
+// Builds a continuous timeline: every day (or month in year view) with amount 0 when empty.
+const buildContinuousTrendSeries = (
+  view: SummaryView,
+  anchor: Date,
+  amountByDate: Record<string, number>
+): { dailySeries: TrendSeriesPoint[]; periodDayCount: number } => {
+  const points: TrendSeriesPoint[] = [];
+
+  if (view === 'month') {
+    const y = anchor.getFullYear();
+    const m = anchor.getMonth();
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    for (let day = 1; day <= daysInMonth; day++) {
+      const iso = `${y}-${pad2(m + 1)}-${pad2(day)}`;
+      const amount = amountByDate[iso] ?? 0;
+      points.push({
+        iso,
+        day,
+        dayLabel: String(day),
+        dateLabel: formatTrendDateLabel(iso),
+        amount,
+        hex: DAILY_SLICE_COLORS[(day - 1) % DAILY_SLICE_COLORS.length],
+      });
+    }
+    return { dailySeries: points, periodDayCount: daysInMonth };
+  }
+
+  if (view === 'week') {
+    const start = startOfWeek(anchor);
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+      const iso = toISODate(d);
+      const amount = amountByDate[iso] ?? 0;
+      points.push({
+        iso,
+        day: d.getDate(),
+        dayLabel: d.toLocaleDateString('he-IL', { weekday: 'narrow' }),
+        dateLabel: formatTrendDateLabel(iso),
+        amount,
+        hex: DAILY_SLICE_COLORS[i % DAILY_SLICE_COLORS.length],
+      });
+    }
+    return { dailySeries: points, periodDayCount: 7 };
+  }
+
+  const y = anchor.getFullYear();
+  for (let m = 0; m < 12; m++) {
+    const iso = `${y}-${pad2(m + 1)}-01`;
+    const monthKey = `${y}-${pad2(m + 1)}`;
+    const amount = Object.entries(amountByDate).reduce((sum, [date, amt]) => {
+      return date.startsWith(monthKey) ? sum + amt : sum;
+    }, 0);
+    points.push({
+      iso,
+      day: m + 1,
+      dayLabel: new Date(y, m, 1).toLocaleDateString('he-IL', { month: 'short' }),
+      dateLabel: new Date(y, m, 1).toLocaleDateString('he-IL', { month: 'long', year: 'numeric' }),
+      amount,
+      hex: DAILY_SLICE_COLORS[m % DAILY_SLICE_COLORS.length],
+    });
+  }
+  return { dailySeries: points, periodDayCount: 12 };
+};
+
+interface TrendLineTooltipProps {
+  active?: boolean;
+  payload?: { payload: TrendSeriesPoint }[];
+}
+
+function TrendLineTooltip({ active, payload }: TrendLineTooltipProps) {
+  if (!active || !payload?.length) return null;
+  const point = payload[0].payload;
+  return (
+    <div className="rounded-xl border border-neutral-700 bg-neutral-900 px-3.5 py-2.5 shadow-xl shadow-black/60">
+      <p className="text-sm font-medium text-neutral-300">{point.dateLabel}</p>
+      <p className="text-lg font-bold text-neutral-100 mt-1 tabular-nums">
+        ₪{point.amount.toLocaleString()}
+      </p>
+    </div>
+  );
+}
+
+// Dark-themed analytics: swipeable category / daily donuts + daily trend line.
 function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
   const [view, setView] = useState<SummaryView>('month');
   const [anchor, setAnchor] = useState<Date>(() => new Date());
+  const [chartSlide, setChartSlide] = useState(0);
 
   const shift = (dir: number) => {
     setAnchor((a) => {
@@ -466,52 +686,97 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
     });
   };
 
-  // Does the given ISO expense date fall inside the currently selected period?
-  const inPeriod = (iso: string): boolean => {
+  const anchorMonthKey = monthKeyOfDate(anchor);
+
+  const inPeriod = (rawDate: string): boolean => {
+    const iso = normalizeDate(rawDate);
     const d = parseISO(iso);
     if (view === 'year') return d.getFullYear() === anchor.getFullYear();
-    if (view === 'month')
-      return d.getFullYear() === anchor.getFullYear() && d.getMonth() === anchor.getMonth();
+    if (view === 'month') return monthKeyOf(iso) === anchorMonthKey;
     const s = startOfWeek(anchor);
     const e = endOfWeek(anchor);
     return d >= s && d <= new Date(e.getFullYear(), e.getMonth(), e.getDate(), 23, 59, 59);
   };
 
-  const periodExpenses = expenses.filter((e) => inPeriod(e.date));
+  const periodExpenses = useMemo(
+    () =>
+      expenses
+        .filter((e) => inPeriod(e.date))
+        .map((e) => ({ ...e, date: normalizeDate(e.date) })),
+    [expenses, view, anchor, anchorMonthKey]
+  );
+
+  const chartPeriodKey = `${view}-${anchorMonthKey}-${anchor.getFullYear()}-${anchor.getMonth()}-${weekNumber(anchor)}`;
+
   const total = periodExpenses.reduce((sum, e) => sum + e.amount, 0);
 
   const fallbackCat = categories[categories.length - 1];
   const getCat = (value: string): Category =>
     categories.find((c) => c.value === value) || fallbackCat;
 
-  // Aggregate by category, sorted by amount desc.
-  const breakdown = Object.values(
-    periodExpenses.reduce<Record<string, { value: string; amount: number }>>((acc, e) => {
-      acc[e.category] = acc[e.category] || { value: e.category, amount: 0 };
-      acc[e.category].amount += e.amount;
-      return acc;
-    }, {})
-  )
-    .map((g) => {
-      const cat = getCat(g.value);
-      return {
-        value: g.value,
-        label: cat?.label ?? g.value,
-        color: cat?.color ?? 'bg-gray-500',
-        hex: hexForColor(cat?.color ?? 'bg-gray-500'),
-        icon: cat?.icon ?? HelpCircle,
-        amount: g.amount,
-        percentage: total > 0 ? (g.amount / total) * 100 : 0,
-      };
-    })
-    .sort((a, b) => b.amount - a.amount);
+  const breakdown = useMemo(() => {
+    return Object.values(
+      periodExpenses.reduce<Record<string, { value: string; amount: number }>>((acc, e) => {
+        acc[e.category] = acc[e.category] || { value: e.category, amount: 0 };
+        acc[e.category].amount += e.amount;
+        return acc;
+      }, {})
+    )
+      .map((g) => {
+        const cat = getCat(g.value);
+        return {
+          value: g.value,
+          label: cat?.label ?? g.value,
+          color: cat?.color ?? 'bg-gray-500',
+          hex: hexForColor(cat?.color ?? 'bg-gray-500'),
+          icon: cat?.icon ?? HelpCircle,
+          amount: g.amount,
+          percentage: total > 0 ? (g.amount / total) * 100 : 0,
+        };
+      })
+      .sort((a, b) => b.amount - a.amount);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodExpenses, categories, total]);
 
-  const donutData =
+  const categoryDonutData =
     breakdown.length > 0
       ? breakdown.map((b) => ({ name: b.label, value: b.amount, hex: b.hex }))
       : [{ name: '', value: 1, hex: '#27272a' }];
 
-  // Period label + optional subtitle (week date range).
+  const dailyBreakdown = useMemo(() => {
+    const grouped = periodExpenses.reduce<Record<string, number>>((acc, e) => {
+      const iso = normalizeDate(e.date);
+      acc[iso] = (acc[iso] || 0) + e.amount;
+      return acc;
+    }, {});
+    return Object.entries(grouped)
+      .map(([date, amount], i) => ({
+        date,
+        label: formatDayLabel(date),
+        amount,
+        hex: DAILY_SLICE_COLORS[i % DAILY_SLICE_COLORS.length],
+        percentage: total > 0 ? (amount / total) * 100 : 0,
+      }))
+      .sort((a, b) => b.amount - a.amount);
+  }, [periodExpenses, total]);
+
+  const dailyDonutData =
+    dailyBreakdown.length > 0
+      ? dailyBreakdown.map((d) => ({ name: d.label, value: d.amount, hex: d.hex }))
+      : [{ name: '', value: 1, hex: '#27272a' }];
+
+  const { dailySeries, periodDayCount } = useMemo(() => {
+    const amountByDate = periodExpenses.reduce<Record<string, number>>((acc, e) => {
+      const iso = normalizeDate(e.date);
+      acc[iso] = (acc[iso] || 0) + e.amount;
+      return acc;
+    }, {});
+    return buildContinuousTrendSeries(view, anchor, amountByDate);
+  }, [periodExpenses, view, anchor]);
+
+  const average = periodDayCount > 0 ? total / periodDayCount : 0;
+  const trendMax = Math.max(250, ...dailySeries.map((d) => d.amount), 1);
+
   let periodLabel = '';
   let periodSubtitle = '';
   if (view === 'year') {
@@ -523,7 +788,6 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
     periodSubtitle = `${formatShort(startOfWeek(anchor))} - ${formatShort(endOfWeek(anchor))}`;
   }
 
-  // Build the horizontally scrollable period chips around the anchor.
   const chipOffsets = [-3, -2, -1, 0, 1];
   const chips = chipOffsets.map((offset) => {
     const d = new Date(anchor);
@@ -545,22 +809,55 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
     { id: 'year', label: 'שנה' },
   ];
 
+  const handleCarouselDragEnd = (_: unknown, info: PanInfo) => {
+    const offset = info.offset.x;
+    const velocity = info.velocity.x;
+    if (offset < -50 || velocity < -400) {
+      setChartSlide((s) => Math.min(ANALYTICS_SLIDE_COUNT - 1, s + 1));
+    } else if (offset > 50 || velocity > 400) {
+      setChartSlide((s) => Math.max(0, s - 1));
+    }
+  };
+
+  const categoryLegend: DonutLegendItem[] = breakdown.map((b) => ({
+    key: b.value,
+    label: b.label,
+    hex: b.hex,
+    amount: b.amount,
+    percentage: b.percentage,
+    ring: true,
+  }));
+
+  const dailyLegend: DonutLegendItem[] = dailyBreakdown.map((d) => ({
+    key: d.date,
+    label: d.label,
+    hex: d.hex,
+    amount: d.amount,
+    percentage: 0,
+    ring: true,
+  }));
+
+  useEffect(() => {
+    console.log('Chart Data View 1 (categories):', breakdown);
+    console.log('Chart Data View 2 (dailyBreakdown):', dailyBreakdown);
+    console.log('Chart Data View 3 (dailySeries):', dailySeries);
+    console.log('Analytics period expenses:', periodExpenses.length, 'anchorMonthKey:', anchorMonthKey);
+  }, [breakdown, dailyBreakdown, dailySeries, periodExpenses.length, anchorMonthKey]);
+
   return (
     <div className="max-w-2xl mx-auto">
       <div>
-        {/* Page title */}
         <div className="flex items-center gap-2 mb-4 text-neutral-100">
           <PieChartIcon className="w-6 h-6 text-emerald-400" />
           <h2 className="text-lg sm:text-xl font-bold">אנליטיקה</h2>
         </div>
 
-        {/* Week / Month / Year segmented control */}
         <div className="flex p-1 bg-neutral-900 border border-neutral-800 rounded-2xl">
           {views.map((v) => (
             <button
               key={v.id}
               onClick={() => setView(v.id)}
-              className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+              className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 ease-in-out ${
                 view === v.id
                   ? 'bg-white text-neutral-900 shadow'
                   : 'text-neutral-400 hover:text-neutral-200'
@@ -571,7 +868,6 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
           ))}
         </div>
 
-        {/* Period selector: prev/next + scrollable chips */}
         <div className="flex items-center gap-1 mt-4">
           <button
             onClick={() => shift(-1)}
@@ -612,64 +908,199 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
           </button>
         </div>
 
-        {/* Selected period label */}
         <div className="mt-3 text-center">
           <p className="text-base font-semibold capitalize">{periodLabel}</p>
           {periodSubtitle && <p className="text-xs text-neutral-500 mt-0.5">{periodSubtitle}</p>}
         </div>
 
-        {/* Donut + legend */}
-        <div className="mt-6 flex items-center gap-4">
-          <div className="relative w-40 h-40 sm:w-48 sm:h-48 shrink-0">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={donutData}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius="62%"
-                  outerRadius="100%"
-                  paddingAngle={breakdown.length > 1 ? 2 : 0}
-                  stroke="none"
-                  isAnimationActive={false}
-                >
-                  {donutData.map((entry, i) => (
-                    <Cell key={i} fill={entry.hex} />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-xl sm:text-2xl font-bold leading-none">
-                ₪{total.toLocaleString()}
-              </span>
-              <span className="text-[11px] text-neutral-500 mt-1">סה"כ</span>
-            </div>
-          </div>
+        {/* Swipeable chart carousel — only mount active slide so Recharts gets real dimensions */}
+        <div
+          className="relative mt-6 w-full overflow-hidden touch-pan-y rounded-2xl bg-neutral-950"
+          style={{ height: ANALYTICS_CHART_HEIGHT, minHeight: ANALYTICS_CHART_HEIGHT }}
+        >
+          <motion.div
+            className="absolute inset-0 z-10"
+            drag="x"
+            dragConstraints={{ left: 0, right: 0 }}
+            dragElastic={0.12}
+            dragMomentum={false}
+            onDragEnd={handleCarouselDragEnd}
+            aria-hidden
+          />
 
-          <div className="flex-1 min-w-0 space-y-3">
-            {breakdown.length === 0 ? (
-              <p className="text-sm text-neutral-500">אין נתונים</p>
-            ) : (
-              breakdown.slice(0, 5).map((b) => (
-                <div key={b.value} className="flex items-center gap-2 text-sm">
-                  <span
-                    className="w-3.5 h-3.5 rounded-full shrink-0 border-[3px]"
-                    style={{ borderColor: b.hex }}
-                  />
-                  <span className="text-neutral-300 truncate flex-1">{b.label}</span>
-                  <span className="text-neutral-400 font-medium shrink-0">
-                    {b.percentage.toFixed(2)}%
-                  </span>
-                </div>
-              ))
+          <AnimatePresence mode="wait" initial={false}>
+            {chartSlide === 0 && (
+              <motion.div
+                key={`slide-0-${chartPeriodKey}`}
+                className="absolute inset-0 w-full h-full px-1 flex items-center"
+                style={{ height: ANALYTICS_CHART_HEIGHT }}
+                initial={{ opacity: 0, x: 24 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -24 }}
+                transition={{ duration: 0.28, ease: 'easeInOut' }}
+              >
+                <AnalyticsDonutPanel
+                  chartKey={`category-donut-${chartPeriodKey}`}
+                  total={total}
+                  donutData={categoryDonutData}
+                  legend={categoryLegend}
+                  paddingSlices={breakdown.length > 1}
+                />
+              </motion.div>
             )}
-          </div>
+
+            {chartSlide === 1 && (
+              <motion.div
+                key={`slide-1-${chartPeriodKey}`}
+                className="absolute inset-0 w-full h-full px-1 flex items-center"
+                style={{ height: ANALYTICS_CHART_HEIGHT }}
+                initial={{ opacity: 0, x: 24 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -24 }}
+                transition={{ duration: 0.28, ease: 'easeInOut' }}
+              >
+                {dailyBreakdown.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center w-full h-full text-center px-4">
+                    <PieChartIcon className="w-10 h-10 text-neutral-600 mb-2" />
+                    <p className="text-sm text-neutral-400">אין הוצאות לפי תאריך בתקופה זו</p>
+                  </div>
+                ) : (
+                  <AnalyticsDonutPanel
+                    chartKey={`daily-donut-${chartPeriodKey}`}
+                    total={total}
+                    donutData={dailyDonutData}
+                    legend={dailyLegend}
+                    paddingSlices={dailyBreakdown.length > 1}
+                  />
+                )}
+              </motion.div>
+            )}
+
+            {chartSlide === 2 && (
+              <motion.div
+                key={`slide-2-${chartPeriodKey}`}
+                className="absolute inset-0 w-full h-full flex flex-col px-2 pt-2"
+                style={{ height: ANALYTICS_CHART_HEIGHT }}
+                initial={{ opacity: 0, x: 24 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -24 }}
+                transition={{ duration: 0.28, ease: 'easeInOut' }}
+              >
+                <div className="flex items-start justify-between gap-3 mb-2 shrink-0">
+                  <div className="text-sm text-neutral-300 space-y-0.5">
+                    <p>
+                      <span className="text-neutral-500">סה"כ: </span>
+                      <span className="font-semibold text-neutral-100">₪{total.toLocaleString()}</span>
+                    </p>
+                    <p>
+                      <span className="text-neutral-500">ממוצע: </span>
+                      <span className="font-semibold text-neutral-100">₪{average.toFixed(2)}</span>
+                    </p>
+                  </div>
+                </div>
+
+                {dailySeries.length === 0 ? (
+                  <div className="flex flex-1 items-center justify-center">
+                    <p className="text-sm text-neutral-500">אין נתונים לגרף</p>
+                  </div>
+                ) : (
+                  <div
+                    className="w-full flex-1 min-h-0"
+                    style={{ height: ANALYTICS_LINE_HEIGHT, minHeight: ANALYTICS_LINE_HEIGHT }}
+                  >
+                    <ResponsiveContainer
+                      width="100%"
+                      height={ANALYTICS_LINE_HEIGHT}
+                      key={`line-chart-${chartPeriodKey}`}
+                    >
+                      <LineChart data={dailySeries} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
+                        <CartesianGrid stroke="#262626" strokeDasharray="4 4" vertical={false} />
+                        <XAxis
+                          dataKey="dayLabel"
+                          tick={{ fill: '#737373', fontSize: 11 }}
+                          axisLine={false}
+                          tickLine={false}
+                          interval={view === 'month' ? 6 : view === 'year' ? 1 : 0}
+                        />
+                        <YAxis
+                          domain={[0, trendMax]}
+                          ticks={[0, Math.round(trendMax / 2), trendMax]}
+                          tick={{ fill: '#737373', fontSize: 11 }}
+                          axisLine={false}
+                          tickLine={false}
+                          width={40}
+                          tickFormatter={(v) => String(v)}
+                        />
+                        <Tooltip
+                          content={<TrendLineTooltip />}
+                          cursor={{ stroke: '#525252', strokeWidth: 1, strokeDasharray: '4 4' }}
+                          isAnimationActive={false}
+                          allowEscapeViewBox={{ x: true, y: true }}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="amount"
+                          stroke="#525252"
+                          strokeWidth={2}
+                          connectNulls
+                          dot={({ cx, cy, payload }) => {
+                            if (cx == null || cy == null || !payload) return null;
+                            const p = payload as TrendSeriesPoint;
+                            const isZero = p.amount <= 0;
+                            return (
+                              <circle
+                                cx={cx}
+                                cy={cy}
+                                r={isZero ? 3.5 : 5}
+                                fill={isZero ? '#525252' : p.hex}
+                                stroke="#0a0a0a"
+                                strokeWidth={2}
+                                opacity={isZero ? 0.65 : 1}
+                              />
+                            );
+                          }}
+                          activeDot={{
+                            r: 7,
+                            stroke: '#fff',
+                            strokeWidth: 2,
+                            fill: '#10b981',
+                          }}
+                          isAnimationActive={false}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
-        {/* Detailed breakdown list */}
+        {/* Carousel pagination dots */}
+        <div
+          className="flex justify-center items-center gap-2 mt-5"
+          role="tablist"
+          aria-label="תצוגות אנליטיקה"
+        >
+          {Array.from({ length: ANALYTICS_SLIDE_COUNT }, (_, i) => (
+            <button
+              key={i}
+              type="button"
+              role="tab"
+              aria-selected={chartSlide === i}
+              aria-label={`תצוגה ${i + 1}`}
+              onClick={() => setChartSlide(i)}
+              className={`rounded-full transition-all duration-300 ease-in-out ${
+                chartSlide === i
+                  ? 'w-6 h-2 bg-white shadow shadow-white/30'
+                  : 'w-2 h-2 bg-neutral-600 hover:bg-neutral-500'
+              }`}
+            />
+          ))}
+        </div>
+
+        {/* Detailed category list — companion to View 1 only */}
+        {chartSlide === 0 && (
         <div className="mt-8 space-y-5">
           {breakdown.length === 0 ? (
             <div className="text-center py-12">
@@ -712,6 +1143,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
             })
           )}
         </div>
+        )}
       </div>
     </div>
   );
