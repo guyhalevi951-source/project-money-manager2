@@ -44,6 +44,7 @@ import AuthPage from './components/AuthPage';
 import UserProfileMenu from './components/UserProfileMenu';
 import SettingsPage from './components/SettingsPage';
 import ExpenseAmountField from './components/ExpenseAmountField';
+import SelectedDaySummary from './components/SelectedDaySummary';
 import ExpenseAmountDisplay from './components/ExpenseAmountDisplay';
 import DisplayMoney from './components/DisplayMoney';
 import CategoryColorChip from './components/CategoryColorChip';
@@ -79,7 +80,6 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,
   ResponsiveContainer,
 } from 'recharts';
 
@@ -696,44 +696,43 @@ const buildContinuousTrendSeries = (
   return { dailySeries: points, periodDayCount: 12 };
 };
 
-// Hebrew date string for trend tooltip (e.g. "31 במאי").
+// Hebrew date string for the static selected-day summary (e.g. "31 במאי").
 const formatTooltipDate = (iso: string, lang: 'he' | 'en' = 'he'): string => {
   const d = parseISO(iso);
   return d.toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US', { day: 'numeric', month: 'long' });
 };
 
-interface TrendLineTooltipProps {
-  active?: boolean;
-  payload?: ReadonlyArray<{ payload?: TrendSeriesPoint }>;
-}
+const TREND_SELECTED_DOT_FILL = '#2563eb';
+const TREND_TRACK_STROKE = '#3f3f46';
+const TREND_DOT_FILL = '#525252';
+const TREND_DOT_STROKE = '#404040';
 
-function TrendLineTooltip({ active, payload }: TrendLineTooltipProps) {
-  const { tr, lang, formatMoney } = useLanguage();
-  if (!active || !payload?.length) return null;
-  const point = payload[0]?.payload;
-  if (!point) return null;
+function defaultTrendSelectionIso(
+  series: TrendSeriesPoint[],
+  view: SummaryView,
+  anchor: Date,
+): string | null {
+  if (series.length === 0) return null;
 
-  return (
-    <div
-      className="!bg-slate-900 !p-4 !rounded-lg !border !border-slate-800 shadow-2xl shadow-black/70"
-      style={{
-        backgroundColor: '#0f172a',
-        padding: '1rem',
-        borderRadius: '0.5rem',
-        border: '1px solid #1e293b',
-        minWidth: '9.5rem',
-      }}
-    >
-      <p className="!text-slate-400 text-sm leading-relaxed">
-        {tr('date')}:{' '}
-        <span className="!text-slate-100 font-medium">{formatTooltipDate(point.iso, lang)}</span>
-      </p>
-      <p className="!text-slate-400 text-sm leading-relaxed mt-1.5">
-        {tr('amountIls')}:{' '}
-        <LtrNumeric className="!text-slate-100 font-bold">{formatMoney(point.amount)}</LtrNumeric>
-      </p>
-    </div>
-  );
+  const todayIso = toISODate(new Date());
+  const todayInSeries = series.find((p) => p.iso === todayIso);
+
+  if (view === 'month' && monthKeyOf(todayIso) === monthKeyOfDate(anchor) && todayInSeries) {
+    return todayInSeries.iso;
+  }
+  if (view === 'week') {
+    const s = startOfWeek(anchor);
+    const e = endOfWeek(anchor);
+    const t = parseISO(todayIso);
+    if (t >= s && t <= e && todayInSeries) return todayInSeries.iso;
+  }
+  if (view === 'year' && anchor.getFullYear() === new Date().getFullYear()) {
+    const monthPoint = series.find((p) => p.iso.startsWith(todayIso.slice(0, 7)));
+    if (monthPoint) return monthPoint.iso;
+  }
+
+  const lastWithAmount = [...series].reverse().find((p) => p.amount > 0);
+  return lastWithAmount?.iso ?? series[series.length - 1].iso;
 }
 
 // Dark-themed analytics: swipeable category / daily donuts + daily trend line.
@@ -742,15 +741,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
   const [view, setView] = useState<SummaryView>('month');
   const [anchor, setAnchor] = useState<Date>(() => new Date());
   const [chartSlide, setChartSlide] = useState(0);
-  const [touchUi, setTouchUi] = useState(false);
-
-  useEffect(() => {
-    const mq = window.matchMedia('(pointer: coarse)');
-    const update = () => setTouchUi(mq.matches);
-    update();
-    mq.addEventListener('change', update);
-    return () => mq.removeEventListener('change', update);
-  }, []);
+  const [selectedTrendIso, setSelectedTrendIso] = useState<string | null>(null);
 
   const shift = (dir: number) => {
     setAnchor((a) => {
@@ -829,6 +820,15 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
 
   const average = periodDayCount > 0 ? total / periodDayCount : 0;
   const trendMax = Math.max(250, ...dailySeries.map((d) => d.amount), 1);
+
+  useEffect(() => {
+    setSelectedTrendIso(defaultTrendSelectionIso(dailySeries, view, anchor));
+  }, [dailySeries, view, anchor, chartPeriodKey]);
+
+  const selectedTrendPoint = useMemo(
+    () => dailySeries.find((p) => p.iso === selectedTrendIso) ?? null,
+    [dailySeries, selectedTrendIso],
+  );
 
   let periodLabel = '';
   let periodSubtitle = '';
@@ -1071,11 +1071,28 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                         data={dailySeries}
                         margin={{ top: 28, right: 12, left: 4, bottom: 8 }}
                         style={{ overflow: 'visible' }}
+                        onClick={(state) => {
+                          if (!state) return;
+                          const chartState = state as {
+                            activeTooltipIndex?: number;
+                            activeIndex?: number;
+                            activePayload?: ReadonlyArray<{ payload?: TrendSeriesPoint }>;
+                          };
+                          const fromPayload = chartState.activePayload?.[0]?.payload;
+                          if (fromPayload) {
+                            setSelectedTrendIso(fromPayload.iso);
+                            return;
+                          }
+                          const idx = chartState.activeTooltipIndex ?? chartState.activeIndex;
+                          if (typeof idx === 'number' && dailySeries[idx]) {
+                            setSelectedTrendIso(dailySeries[idx].iso);
+                          }
+                        }}
                       >
-                        <CartesianGrid stroke="#262626" strokeDasharray="4 4" vertical={false} />
+                        <CartesianGrid stroke="#2a2a2a" strokeDasharray="3 6" vertical={false} />
                         <XAxis
                           dataKey="dayLabel"
-                          tick={{ fill: '#737373', fontSize: 11 }}
+                          tick={{ fill: '#525252', fontSize: 11 }}
                           axisLine={false}
                           tickLine={false}
                           interval={view === 'month' ? 6 : view === 'year' ? 1 : 0}
@@ -1083,74 +1100,60 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                         <YAxis
                           domain={[0, trendMax]}
                           ticks={[0, Math.round(trendMax / 2), trendMax]}
-                          tick={{ fill: '#737373', fontSize: 11 }}
+                          tick={{ fill: '#525252', fontSize: 11 }}
                           axisLine={false}
                           tickLine={false}
                           width={40}
                           tickFormatter={(v) => String(v)}
                         />
-                        <Tooltip
-                          trigger={touchUi ? 'click' : 'hover'}
-                          content={(props) => <TrendLineTooltip {...props} />}
-                          cursor={{ stroke: '#94a3b8', strokeWidth: 1, strokeDasharray: '4 4' }}
-                          isAnimationActive={false}
-                          allowEscapeViewBox={{ x: true, y: true }}
-                          wrapperStyle={{
-                            zIndex: 80,
-                            outline: 'none',
-                            pointerEvents: 'none',
-                          }}
-                          contentStyle={{
-                            backgroundColor: 'transparent',
-                            border: 'none',
-                            boxShadow: 'none',
-                            padding: 0,
-                            margin: 0,
-                          }}
-                          labelStyle={{ display: 'none' }}
-                          itemStyle={{ display: 'none' }}
-                          offset={16}
-                        />
                         <Line
                           type="monotone"
                           dataKey="amount"
-                          stroke="#64748b"
+                          stroke={TREND_TRACK_STROKE}
                           strokeWidth={2}
                           connectNulls
-                          activeDot={(props) => {
-                            const { cx, cy, payload } = props;
+                          activeDot={false}
+                          dot={({ cx, cy, payload, index }) => {
                             if (cx == null || cy == null || !payload) return null;
                             const p = payload as TrendSeriesPoint;
-                            const fill = p.amount > 0 ? p.hex : '#94a3b8';
+                            const isSelected = p.iso === selectedTrendIso;
+                            const fill = isSelected
+                              ? TREND_SELECTED_DOT_FILL
+                              : p.amount > 0
+                                ? p.hex
+                                : TREND_DOT_FILL;
+                            const visibleR = isSelected ? 8 : p.amount > 0 ? 4 : 3;
+                            const hitR = Math.max(visibleR + 10, 18);
+
                             return (
-                              <g>
-                                <circle cx={cx} cy={cy} r={14} fill={fill} opacity={0.22} />
+                              <g
+                                key={`trend-dot-${index}`}
+                                style={{ cursor: 'pointer' }}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setSelectedTrendIso(p.iso);
+                                }}
+                              >
+                                <circle cx={cx} cy={cy} r={hitR} fill="transparent" />
+                                {isSelected && (
+                                  <circle
+                                    cx={cx}
+                                    cy={cy}
+                                    r={12}
+                                    fill={TREND_SELECTED_DOT_FILL}
+                                    opacity={0.12}
+                                  />
+                                )}
                                 <circle
                                   cx={cx}
                                   cy={cy}
-                                  r={9}
+                                  r={visibleR}
                                   fill={fill}
-                                  stroke="#f8fafc"
-                                  strokeWidth={2.5}
+                                  fillOpacity={isSelected ? 1 : p.amount > 0 ? 0.55 : 0.85}
+                                  stroke={isSelected ? TREND_DOT_STROKE : TREND_DOT_STROKE}
+                                  strokeWidth={isSelected ? 1 : 0.75}
                                 />
                               </g>
-                            );
-                          }}
-                          dot={({ cx, cy, payload }) => {
-                            if (cx == null || cy == null || !payload) return null;
-                            const p = payload as TrendSeriesPoint;
-                            const isZero = p.amount <= 0;
-                            return (
-                              <circle
-                                cx={cx}
-                                cy={cy}
-                                r={isZero ? 4.5 : 6}
-                                fill={isZero ? '#64748b' : p.hex}
-                                stroke="#0a0a0a"
-                                strokeWidth={2}
-                                opacity={isZero ? 0.75 : 1}
-                                style={{ cursor: 'pointer' }}
-                              />
                             );
                           }}
                           isAnimationActive={false}
@@ -1164,9 +1167,13 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
           </AnimatePresence>
         </div>
 
+        {chartSlide === 2 && selectedTrendPoint && (
+          <SelectedDaySummary point={selectedTrendPoint} formatDate={formatTooltipDate} />
+        )}
+
         {/* Carousel pagination dots */}
         <div
-          className="flex justify-center items-center gap-2 mt-5"
+          className={`flex justify-center items-center gap-2 ${chartSlide === 2 && selectedTrendPoint ? 'mt-4' : 'mt-5'}`}
           role="tablist"
           aria-label={tr('analyticsViews')}
         >
@@ -1180,8 +1187,8 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
               onClick={() => setChartSlide(i)}
               className={`rounded-full transition-all duration-300 ease-in-out ${
                 chartSlide === i
-                  ? 'w-6 h-2 bg-white shadow shadow-white/30'
-                  : 'w-2 h-2 bg-neutral-600 hover:bg-neutral-500'
+                  ? 'w-6 h-2 bg-sky-500/90 shadow shadow-sky-500/20'
+                  : 'w-2 h-2 bg-neutral-700 hover:bg-neutral-600'
               }`}
             />
           ))}
