@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check } from 'lucide-react';
 import { clamp01, hexToHsv, hsvToHex } from '../utils/colorUtils';
-import { getSavedColors, saveColor } from '../services/savedColorsService';
 import { isCustomHexColor, normalizeCustomHex } from '../categories';
 import { useLanguage } from '../LanguageContext';
 
@@ -30,25 +29,25 @@ export default function AdvancedColorPickerPopover({
   onCancel,
   anchorRef,
 }: AdvancedColorPickerPopoverProps) {
-  const { tr } = useLanguage();
+  const { tr, savedColors, saveSavedColor } = useLanguage();
   const popoverRef = useRef<HTMLDivElement>(null);
   const sbRef = useRef<HTMLDivElement>(null);
 
   const [hsv, setHsv] = useState(() => hexToHsv(resolvePickerHex(color)));
   const [draftHex, setDraftHex] = useState(() => resolvePickerHex(color));
-  const [savedColors, setSavedColors] = useState<string[]>(() => getSavedColors());
-
-  const hue = Math.round(hsv.h);
-  const pureHueCss = `hsl(${hue} 100% 50%)`;
+  const [savedColorsLocal, setSavedColorsLocal] = useState<string[]>(savedColors);
 
   useEffect(() => {
     if (!open) return;
+    setSavedColorsLocal(savedColors);
     const startHex = resolvePickerHex(color);
     const nextHsv = hexToHsv(startHex);
     setHsv(nextHsv);
     setDraftHex(startHex);
-    setSavedColors(getSavedColors());
-  }, [open, color]);
+  }, [open, color, savedColors]);
+
+  const hue = Math.round(hsv.h);
+  const pureHueCss = `hsl(${hue} 100% 50%)`;
 
   const updateDraft = useCallback((next: { h: number; s: number; v: number }) => {
     const normalized = {
@@ -84,10 +83,10 @@ export default function AdvancedColorPickerPopover({
   }, [draftHex, onApply]);
 
   const handleSave = useCallback(() => {
-    const nextSaved = saveColor(draftHex);
-    setSavedColors(nextSaved);
+    const nextSaved = saveSavedColor(draftHex);
+    setSavedColorsLocal(nextSaved);
     onApply(draftHex);
-  }, [draftHex, onApply]);
+  }, [draftHex, onApply, saveSavedColor]);
 
   const selectSavedColor = useCallback((hex: string) => {
     const normalized = normalizeCustomHex(hex);
@@ -196,11 +195,11 @@ export default function AdvancedColorPickerPopover({
 
             <div className="pt-1 border-t border-gray-700/60">
               <p className="text-xs font-medium text-gray-400 mb-2">{tr('savedColorsTitle')}</p>
-              {savedColors.length === 0 ? (
+              {savedColorsLocal.length === 0 ? (
                 <p className="text-[11px] text-gray-500 leading-relaxed">{tr('savedColorsEmpty')}</p>
               ) : (
                 <div className="flex flex-wrap gap-2">
-                  {savedColors.map((hex) => {
+                  {savedColorsLocal.map((hex) => {
                     const selected = draftHex === hex;
                     return (
                       <button

@@ -2,8 +2,6 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // --- Helpers -------------------------------------------------------------
-
     function isSignedIn() {
       return request.auth != null;
     }
@@ -12,14 +10,41 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Guest (anonymous) sign-in uses localStorage only in the app; block Firestore for them.
     function isPersistedAccount() {
       return isSignedIn()
         && request.auth.token.firebase.sign_in_provider != 'anonymous';
     }
 
-    // Validates the single app document shape written by saveToFirestore().
-    function isValidAppData() {
+    function isValidExpensesDoc() {
+      return request.resource.data.keys().hasAll(['expenses'])
+        && request.resource.data.expenses is list;
+    }
+
+    function isValidCategoriesDoc() {
+      return request.resource.data.keys().hasAll([
+          'customCategories',
+          'budgetsByMonth',
+          'subBudgetsByMonth',
+        ])
+        && request.resource.data.customCategories is list
+        && request.resource.data.budgetsByMonth is map
+        && request.resource.data.subBudgetsByMonth is map;
+    }
+
+    function isValidSettingsDoc() {
+      return request.resource.data.keys().hasAll([
+          'lang',
+          'keepOriginalValues',
+          'displayCurrency',
+          'saved_colors',
+        ])
+        && request.resource.data.lang in ['he', 'en']
+        && request.resource.data.keepOriginalValues is bool
+        && request.resource.data.displayCurrency in ['ILS', 'USD', 'EUR', 'GBP']
+        && request.resource.data.saved_colors is list;
+    }
+
+    function isValidLegacyAppData() {
       return request.resource.data.keys().hasAll([
           'expenses',
           'customCategories',
@@ -32,24 +57,45 @@ service cloud.firestore {
         && request.resource.data.subBudgetsByMonth is map;
     }
 
-    // --- User data: users/{uid}/data/app -------------------------------------
-
     match /users/{userId} {
-      // No direct reads/writes on the user root document (app uses subcollection only).
       allow read, write: if false;
 
+      match /expenses/{docId} {
+        allow read: if isOwner(userId) && isPersistedAccount();
+        allow create, update: if isOwner(userId)
+          && isPersistedAccount()
+          && docId == 'data'
+          && isValidExpensesDoc();
+        allow delete: if isOwner(userId) && isPersistedAccount() && docId == 'data';
+      }
+
+      match /categories/{docId} {
+        allow read: if isOwner(userId) && isPersistedAccount();
+        allow create, update: if isOwner(userId)
+          && isPersistedAccount()
+          && docId == 'data'
+          && isValidCategoriesDoc();
+        allow delete: if isOwner(userId) && isPersistedAccount() && docId == 'data';
+      }
+
+      match /settings/{docId} {
+        allow read: if isOwner(userId) && isPersistedAccount();
+        allow create, update: if isOwner(userId)
+          && isPersistedAccount()
+          && docId == 'data'
+          && isValidSettingsDoc();
+        allow delete: if isOwner(userId) && isPersistedAccount() && docId == 'data';
+      }
+
+      // Legacy path — read-only for migration; writes blocked on new installs.
       match /data/{docId} {
         allow read: if isOwner(userId) && isPersistedAccount();
-
         allow create, update: if isOwner(userId)
           && isPersistedAccount()
           && docId == 'app'
-          && isValidAppData();
-
+          && isValidLegacyAppData();
         allow delete: if isOwner(userId) && isPersistedAccount() && docId == 'app';
       }
     }
-
-    // All other paths are denied by default.
   }
 }

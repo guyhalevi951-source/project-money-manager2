@@ -58,11 +58,18 @@ import {
 } from './services/exchangeRateService';
 import {
   EMPTY_USER_APP_DATA,
-  loadFromFirestore,
   loadFromLocalStorage,
-  saveToFirestore,
   saveToLocalStorage,
 } from './userDataStorage';
+import {
+  ensureCloudDataMigrated,
+  saveCategoriesToCloud,
+  saveExpensesToCloud,
+  saveSettingsToCloud,
+  subscribeCategories,
+  subscribeExpenses,
+  subscribeSettings,
+} from './services/userFirebaseSync';
 import {
   PieChart,
   Pie,
@@ -2025,11 +2032,25 @@ function BudgetChangeModal({
 }
 
 function App() {
-  const { tr, dir, lang, getUserContent, ensureUserContents, keepOriginalValues, formatMoney, displayCurrency } =
-    useLanguage();
+  const {
+    tr,
+    dir,
+    lang,
+    getUserContent,
+    ensureUserContents,
+    keepOriginalValues,
+    formatMoney,
+    displayCurrency,
+    savedColors,
+    setSettingsPersistence,
+    applySettingsFromCloud,
+  } = useLanguage();
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [dataReady, setDataReady] = useState(false);
+  const [settingsCloudReady, setSettingsCloudReady] = useState(false);
+  const suppressCloudSaveRef = useRef(true);
+  const skipNextSettingsSaveRef = useRef(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
@@ -2205,46 +2226,157 @@ function App() {
     setExpenseRatesReady(true);
   };
 
-  // Load persisted data when auth state changes (Firestore for signed-in users, localStorage for guests).
+  // Real-time sync: Firestore for signed-in users, localStorage for guests.
   useEffect(() => {
     if (!authReady) return;
 
     let cancelled = false;
+    let unsubExpenses: (() => void) | undefined;
+    let unsubCategories: (() => void) | undefined;
+    let unsubSettings: (() => void) | undefined;
+    let initialExpenses = false;
+    let initialCategories = false;
+    let initialSettings = false;
 
-    const loadUserData = async () => {
+    const markReadyIfComplete = () => {
+      if (cancelled) return;
+      if (initialExpenses && initialCategories && initialSettings) {
+        suppressCloudSaveRef.current = true;
+        setDataReady(true);
+      }
+    };
+
+    const initUserData = async () => {
       setDataReady(false);
+      setSettingsCloudReady(false);
+      suppressCloudSaveRef.current = true;
 
       if (!user) {
+        setSettingsPersistence('local');
         resetAppData();
-        if (!cancelled) setDataReady(true);
+        setDataReady(true);
         return;
       }
 
       if (user.isAnonymous) {
-        if (!cancelled) applyAppData(loadFromLocalStorage());
-        if (!cancelled) setDataReady(true);
+        setSettingsPersistence('local');
+        applyAppData(loadFromLocalStorage());
+        setDataReady(true);
         return;
       }
 
-      try {
-        const remoteData = await loadFromFirestore(user.uid);
-        if (cancelled) return;
-        applyAppData(remoteData ?? EMPTY_USER_APP_DATA);
-      } catch {
-        if (!cancelled) applyAppData(EMPTY_USER_APP_DATA);
-      }
+      setSettingsPersistence('cloud');
+      const uid = user.uid;
 
-      if (!cancelled) setDataReady(true);
+      try {
+        await ensureCloudDataMigrated(uid);
+        if (cancelled) return;
+
+        unsubExpenses = subscribeExpenses(
+          uid,
+          (items, meta) => {
+            if (cancelled || meta.hasPendingWrites) return;
+            setExpenses((prev) => {
+              const normalized = items.map((e) => ({ ...e, date: normalizeDate(e.date) }));
+              if (JSON.stringify(prev) === JSON.stringify(normalized)) return prev;
+              return normalized;
+            });
+            if (!initialExpenses) {
+              initialExpenses = true;
+              markReadyIfComplete();
+            }
+          },
+          () => {
+            if (!cancelled) {
+              setExpenses([]);
+              if (!initialExpenses) {
+                initialExpenses = true;
+                markReadyIfComplete();
+              }
+            }
+          },
+        );
+
+        unsubCategories = subscribeCategories(
+          uid,
+          (data, meta) => {
+            if (cancelled || meta.hasPendingWrites) return;
+            setCustomCategories((prev) =>
+              JSON.stringify(prev) === JSON.stringify(data.customCategories)
+                ? prev
+                : data.customCategories,
+            );
+            setBudgetsByMonth((prev) =>
+              JSON.stringify(prev) === JSON.stringify(data.budgetsByMonth)
+                ? prev
+                : data.budgetsByMonth,
+            );
+            setSubBudgetsByMonth((prev) =>
+              JSON.stringify(prev) === JSON.stringify(data.subBudgetsByMonth)
+                ? prev
+                : data.subBudgetsByMonth,
+            );
+            if (!initialCategories) {
+              initialCategories = true;
+              markReadyIfComplete();
+            }
+          },
+          () => {
+            if (!cancelled) {
+              setCustomCategories([]);
+              setBudgetsByMonth({});
+              setSubBudgetsByMonth({});
+              if (!initialCategories) {
+                initialCategories = true;
+                markReadyIfComplete();
+              }
+            }
+          },
+        );
+
+        unsubSettings = subscribeSettings(
+          uid,
+          (settings, meta) => {
+            if (cancelled || meta.hasPendingWrites) return;
+            if (meta.exists) {
+              skipNextSettingsSaveRef.current = true;
+              applySettingsFromCloud(settings);
+            }
+            if (!initialSettings) {
+              initialSettings = true;
+              setSettingsCloudReady(true);
+              markReadyIfComplete();
+            }
+          },
+          () => {
+            if (!cancelled) {
+              setSettingsCloudReady(true);
+              if (!initialSettings) {
+                initialSettings = true;
+                markReadyIfComplete();
+              }
+            }
+          },
+        );
+      } catch {
+        if (!cancelled) {
+          resetAppData();
+          setDataReady(true);
+        }
+      }
     };
 
-    void loadUserData();
+    void initUserData();
 
     return () => {
       cancelled = true;
+      unsubExpenses?.();
+      unsubCategories?.();
+      unsubSettings?.();
     };
-  }, [user, authReady]);
+  }, [user, authReady, applySettingsFromCloud, setSettingsPersistence]);
 
-  // Persist changes: Firestore for authenticated users, localStorage for guests.
+  // Persist financial changes: localStorage for guests, debounced Firestore for accounts.
   useEffect(() => {
     if (!dataReady || !user) return;
 
@@ -2260,17 +2392,63 @@ function App() {
       return;
     }
 
+    if (suppressCloudSaveRef.current) {
+      suppressCloudSaveRef.current = false;
+      return;
+    }
+
     const uid = user.uid;
     const timer = window.setTimeout(() => {
       const currentUser = auth.currentUser;
       if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) return;
-      void saveToFirestore(uid, payload).catch(() => {
-        // Sync failures are non-blocking; data remains in local state until the next save.
+      void Promise.all([
+        saveExpensesToCloud(uid, expenses),
+        saveCategoriesToCloud(uid, {
+          customCategories,
+          budgetsByMonth,
+          subBudgetsByMonth,
+        }),
+      ]).catch(() => {
+        // Non-blocking; next edit will retry.
       });
     }, 400);
 
     return () => window.clearTimeout(timer);
   }, [expenses, customCategories, budgetsByMonth, subBudgetsByMonth, dataReady, user]);
+
+  // Persist settings to Firestore for signed-in accounts.
+  useEffect(() => {
+    if (!dataReady || !user || user.isAnonymous || !settingsCloudReady) return;
+
+    if (skipNextSettingsSaveRef.current) {
+      skipNextSettingsSaveRef.current = false;
+      return;
+    }
+
+    const uid = user.uid;
+    const timer = window.setTimeout(() => {
+      const currentUser = auth.currentUser;
+      if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) return;
+      void saveSettingsToCloud(uid, {
+        lang,
+        keepOriginalValues,
+        displayCurrency,
+        saved_colors: savedColors,
+      }).catch(() => {
+        // Non-blocking; next change will retry.
+      });
+    }, 400);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    lang,
+    keepOriginalValues,
+    displayCurrency,
+    savedColors,
+    dataReady,
+    user,
+    settingsCloudReady,
+  ]);
 
   // Budget update entry point. If the active month already has sub-budget
   // allocations, we ask how to reconcile them via the confirmation modal;

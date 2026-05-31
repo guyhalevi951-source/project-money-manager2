@@ -16,6 +16,10 @@ import {
   type ExchangeRates,
 } from './services/exchangeRateService';
 import {
+  appendSavedColor,
+} from './services/userFirebaseSync';
+import { getSavedColors as getLocalSavedColors } from './services/savedColorsService';
+import {
   formatMoneyFromIls,
   resolveExpenseDisplayAmount,
   type ExpenseDisplayAmount,
@@ -29,6 +33,17 @@ interface LanguageContextValue {
   setKeepOriginalValues: (next: boolean) => void;
   displayCurrency: ExpenseCurrency;
   setDisplayCurrency: (next: ExpenseCurrency) => void;
+  savedColors: string[];
+  saveSavedColor: (hex: string) => string[];
+  setSavedColors: (colors: string[]) => void;
+  settingsPersistence: 'local' | 'cloud';
+  setSettingsPersistence: (mode: 'local' | 'cloud') => void;
+  applySettingsFromCloud: (settings: {
+    lang: Lang;
+    keepOriginalValues: boolean;
+    displayCurrency: ExpenseCurrency;
+    saved_colors: string[];
+  }) => void;
   formatMoney: (ilsAmount: number) => string;
   formatExpenseMoney: (
     ilsAmount: number,
@@ -101,6 +116,8 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [displayCurrency, setDisplayCurrency] = useState<ExpenseCurrency>(() =>
     getInitialDisplayCurrency(),
   );
+  const [savedColors, setSavedColors] = useState<string[]>(() => getLocalSavedColors());
+  const [settingsPersistence, setSettingsPersistence] = useState<'local' | 'cloud'>('local');
   const [exchangeRates, setExchangeRates] = useState<ExchangeRates | null>(() =>
     getCachedExchangeRates(),
   );
@@ -109,6 +126,33 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const translatedMapRef = useRef(translatedMap);
   const loadingMapRef = useRef(loadingMap);
   const dir = dirByLang[lang];
+
+  const applySettingsFromCloud = useCallback(
+    (settings: {
+      lang: Lang;
+      keepOriginalValues: boolean;
+      displayCurrency: ExpenseCurrency;
+      saved_colors: string[];
+    }) => {
+      setLang(settings.lang);
+      setKeepOriginalValues(settings.keepOriginalValues);
+      setDisplayCurrency(settings.displayCurrency);
+      setSavedColors(settings.saved_colors);
+    },
+    [],
+  );
+
+  const saveSavedColor = useCallback(
+    (hex: string) => {
+      const next = appendSavedColor(savedColors, hex);
+      setSavedColors(next);
+      if (settingsPersistence === 'local') {
+        window.localStorage.setItem('saved_colors', JSON.stringify(next));
+      }
+      return next;
+    },
+    [savedColors, settingsPersistence],
+  );
 
   useEffect(() => {
     translatedMapRef.current = translatedMap;
@@ -119,16 +163,19 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   }, [loadingMap]);
 
   useEffect(() => {
+    if (settingsPersistence !== 'local') return;
     window.localStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
-  }, [lang]);
+  }, [lang, settingsPersistence]);
 
   useEffect(() => {
+    if (settingsPersistence !== 'local') return;
     window.localStorage.setItem(KEEP_ORIGINAL_VALUES_STORAGE_KEY, String(keepOriginalValues));
-  }, [keepOriginalValues]);
+  }, [keepOriginalValues, settingsPersistence]);
 
   useEffect(() => {
+    if (settingsPersistence !== 'local') return;
     window.localStorage.setItem(DISPLAY_CURRENCY_STORAGE_KEY, displayCurrency);
-  }, [displayCurrency]);
+  }, [displayCurrency, settingsPersistence]);
 
   useEffect(() => {
     const cached = getCachedExchangeRates();
@@ -241,6 +288,12 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       setKeepOriginalValues,
       displayCurrency,
       setDisplayCurrency,
+      savedColors,
+      saveSavedColor,
+      setSavedColors,
+      settingsPersistence,
+      setSettingsPersistence,
+      applySettingsFromCloud,
       formatMoney,
       formatExpenseMoney,
       tr: (key) => t(lang, key),
@@ -254,6 +307,10 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       dir,
       keepOriginalValues,
       displayCurrency,
+      savedColors,
+      saveSavedColor,
+      settingsPersistence,
+      applySettingsFromCloud,
       formatMoney,
       formatExpenseMoney,
       getUserContent,

@@ -1,6 +1,4 @@
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { type User } from 'firebase/auth';
-import { db } from './firebase';
 
 export interface StoredExpense {
   id: string;
@@ -42,9 +40,6 @@ const LS_KEYS = {
   legacySubBudgets: 'subBudgets',
 } as const;
 
-const userDataDocRef = (uid: string) => doc(db, 'users', uid, 'data', 'app');
-
-/** Authenticated (non-guest) users sync via Firestore. */
 export const shouldSyncToFirestore = (user: User | null): user is User =>
   user !== null && !user.isAnonymous;
 
@@ -89,32 +84,4 @@ export function saveToLocalStorage(data: UserAppData): void {
   localStorage.setItem(LS_KEYS.customCategories, JSON.stringify(data.customCategories));
   localStorage.setItem(LS_KEYS.budgetsByMonth, JSON.stringify(data.budgetsByMonth));
   localStorage.setItem(LS_KEYS.subBudgetsByMonth, JSON.stringify(data.subBudgetsByMonth));
-}
-
-export async function loadFromFirestore(uid: string): Promise<UserAppData | null> {
-  const snapshot = await getDoc(userDataDocRef(uid));
-  if (!snapshot.exists()) return null;
-
-  const raw = snapshot.data();
-  return {
-    expenses: (raw.expenses as StoredExpense[] | undefined) ?? [],
-    customCategories: (raw.customCategories as StoredCustomCategory[] | undefined) ?? [],
-    budgetsByMonth: (raw.budgetsByMonth as Record<string, number> | undefined) ?? {},
-    subBudgetsByMonth:
-      (raw.subBudgetsByMonth as Record<string, Record<string, number>> | undefined) ?? {},
-  };
-}
-
-export async function saveToFirestore(uid: string, data: UserAppData): Promise<void> {
-  await setDoc(
-    userDataDocRef(uid),
-    {
-      expenses: data.expenses,
-      customCategories: data.customCategories,
-      budgetsByMonth: data.budgetsByMonth,
-      subBudgetsByMonth: data.subBudgetsByMonth,
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true }
-  );
 }
