@@ -1,6 +1,7 @@
 import { Plus, X, Check } from 'lucide-react';
 import { ICON_OPTIONS, resolveIcon, DEFAULT_CATEGORY_COLOR } from '../categories';
 import CategoryColorPicker from './CategoryColorPicker';
+import { useLanguage } from '../LanguageContext';
 
 interface CreateCategoryFormProps {
   name: string;
@@ -25,12 +26,13 @@ export default function CreateCategoryForm({
   onSubmit,
   onCancel,
 }: CreateCategoryFormProps) {
+  const { tr } = useLanguage();
   const PreviewIcon = resolveIcon(iconName);
 
   return (
     <div className="w-full sm:w-96 max-w-full rounded-2xl border border-emerald-500/30 bg-neutral-800/80 p-5 shadow-lg shadow-black/30 space-y-4">
       <div>
-        <label className="block text-xs font-medium text-neutral-300 mb-2">שם הקטגוריה</label>
+        <label className="block text-xs font-medium text-neutral-300 mb-2">{tr('categoryName')}</label>
         <input
           type="text"
           value={name}
@@ -41,7 +43,7 @@ export default function CreateCategoryForm({
               onSubmit();
             }
           }}
-          placeholder="לדוגמה: תחבורה, מתנות"
+          placeholder={tr('categoryNamePlaceholder')}
           autoFocus
           className="w-full px-4 py-3 rounded-xl bg-neutral-900 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base"
         />
@@ -50,7 +52,7 @@ export default function CreateCategoryForm({
       <CategoryColorPicker value={color} onChange={onColorChange} />
 
       <div>
-        <label className="block text-xs font-medium text-neutral-300 mb-2">אייקון</label>
+        <label className="block text-xs font-medium text-neutral-300 mb-2">{tr('icon')}</label>
         <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
           {ICON_OPTIONS.map((o) => {
             const IconComp = o.icon;
@@ -81,12 +83,12 @@ export default function CreateCategoryForm({
       </div>
 
       <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-neutral-700/80">
-        <span className="text-xs text-neutral-400 w-full sm:w-auto">תצוגה מקדימה:</span>
+        <span className="text-xs text-neutral-400 w-full sm:w-auto">{tr('preview')}</span>
         <span
           className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${color || DEFAULT_CATEGORY_COLOR} text-white`}
         >
           <PreviewIcon className="w-4 h-4" />
-          {name.trim() || 'קטגוריה חדשה'}
+          {name.trim() || tr('newCategory')}
         </span>
       </div>
 
@@ -99,14 +101,14 @@ export default function CreateCategoryForm({
           className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-4 py-3 rounded-xl text-sm font-semibold hover:from-emerald-600 hover:to-teal-700 transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
         >
           <Plus className="w-4 h-4" />
-          הוסף קטגוריה
+          {tr('addCategory')}
         </button>
         <button
           type="button"
           onClick={onCancel}
           className="shrink-0 text-neutral-400 hover:text-rose-400 hover:bg-rose-500/10 p-3 rounded-xl border border-neutral-700 hover:border-rose-500/40 transition-all"
-          title="ביטול"
-          aria-label="ביטול"
+          title={tr('cancel')}
+          aria-label={tr('cancel')}
         >
           <X className="w-5 h-5" />
         </button>

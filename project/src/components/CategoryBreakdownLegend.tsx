@@ -1,5 +1,6 @@
 import type { CategoryBreakdownSlice } from '../categories';
 import CategoryIconBadge from './CategoryIconBadge';
+import { useLanguage } from '../LanguageContext';
 
 interface CategoryBreakdownLegendProps {
   items: CategoryBreakdownSlice[];
@@ -36,12 +37,13 @@ export default function CategoryBreakdownLegend({
   maxItems,
   percentageDecimals = 0,
 }: CategoryBreakdownLegendProps) {
+  const { dir } = useLanguage();
   const visible = maxItems != null ? items.slice(0, maxItems) : items;
 
   if (layout === 'grid') {
     return (
       <div
-        dir="rtl"
+        dir={dir}
         className="flex-1 w-full min-w-0 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4"
       >
         {visible.map((item) => (

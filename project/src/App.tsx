@@ -42,6 +42,8 @@ import { onAuthStateChanged, type User } from 'firebase/auth';
 import { auth, signOutUser } from './firebase';
 import AuthPage from './components/AuthPage';
 import UserProfileMenu from './components/UserProfileMenu';
+import { useLanguage } from './LanguageContext';
+import { localizeCategoryLabel } from './translations';
 import {
   EMPTY_USER_APP_DATA,
   loadFromFirestore,
@@ -122,10 +124,10 @@ const normalizeDate = (raw: string): string => {
 };
 
 // ISO -> localized display date.
-const formatDisplayDate = (iso: string): string => {
+const formatDisplayDate = (iso: string, lang: 'he' | 'en' = 'he'): string => {
   const [y, m, d] = iso.split('-').map((n) => parseInt(n, 10));
   if (!y || !m || !d) return iso;
-  return new Date(y, m - 1, d).toLocaleDateString('he-IL');
+  return new Date(y, m - 1, d).toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US');
 };
 
 // DD/MM/YYYY subtitle for the dashboard category donut.
@@ -209,20 +211,20 @@ type SummaryView = 'week' | 'month' | 'year';
 
 // Top-level navigation tabs.
 const TABS = [
-  { id: 'dashboard', label: 'בית', icon: LayoutDashboard },
-  { id: 'analytics', label: 'תובנות', icon: PieChartIcon },
-  { id: 'subbudgets', label: 'תקציבים', icon: Wallet },
-  { id: 'expenses', label: 'הוצאות', icon: Receipt },
+  { id: 'dashboard', icon: LayoutDashboard },
+  { id: 'analytics', icon: PieChartIcon },
+  { id: 'subbudgets', icon: Wallet },
+  { id: 'expenses', icon: Receipt },
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
 
 type HistoryTimeFilter = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
-const HISTORY_TIME_FILTERS: { id: HistoryTimeFilter; label: string }[] = [
-  { id: 'daily', label: 'יומי' },
-  { id: 'weekly', label: 'שבועי' },
-  { id: 'monthly', label: 'חודשי' },
-  { id: 'yearly', label: 'שנתי' },
+const HISTORY_TIME_FILTERS: { id: HistoryTimeFilter }[] = [
+  { id: 'daily' },
+  { id: 'weekly' },
+  { id: 'monthly' },
+  { id: 'yearly' },
 ];
 
 const expenseMatchesHistoryTimeFilter = (
@@ -272,8 +274,23 @@ function CollapsibleNavMenu({
   userEmail,
   onLogout,
 }: CollapsibleNavMenuProps) {
+  const { tr, dir } = useLanguage();
   const active = TABS.find((t) => t.id === activeTab) ?? TABS[0];
   const ActiveIcon = active.icon;
+  const tabLabel = (tabId: TabId) => {
+    switch (tabId) {
+      case 'dashboard':
+        return tr('tabDashboard');
+      case 'analytics':
+        return tr('tabAnalytics');
+      case 'subbudgets':
+        return tr('tabSubbudgets');
+      case 'expenses':
+        return tr('tabExpenses');
+      default:
+        return tabId;
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -289,7 +306,7 @@ function CollapsibleNavMenu({
   const backdrop = (
     <button
       type="button"
-      aria-label="סגור תפריט"
+      aria-label={tr('closeMenu')}
       onClick={() => onOpenChange(false)}
       className={`fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-all duration-300 ease-in-out ${
         open ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
@@ -329,7 +346,7 @@ function CollapsibleNavMenu({
         >
           <Icon className={`${variant === 'mobile' ? 'w-5 h-5' : 'w-4 h-4'} ${isActive ? 'text-white' : 'text-emerald-400'}`} />
         </span>
-        <span className="flex-1 text-right truncate">{tab.label}</span>
+        <span className={`flex-1 truncate ${dir === 'rtl' ? 'text-right' : 'text-left'}`}>{tabLabel(tab.id)}</span>
       </button>
     );
   };
@@ -369,7 +386,7 @@ function CollapsibleNavMenu({
                 className="w-full flex items-center gap-2.5 px-4 py-3.5 rounded-2xl border border-rose-500/30 bg-rose-500/10 text-rose-300 text-sm font-medium hover:bg-rose-500/20 transition-all active:scale-[0.98]"
               >
                 <LogOut className="w-5 h-5 shrink-0" />
-                <span className="flex-1 text-right">התנתק</span>
+                <span className={`flex-1 ${dir === 'rtl' ? 'text-right' : 'text-left'}`}>{tr('logout')}</span>
               </button>
             )}
           </div>
@@ -389,7 +406,7 @@ function CollapsibleNavMenu({
             <span className="flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 shadow-lg shadow-emerald-500/30">
               <ActiveIcon className="w-5 h-5 text-white" />
             </span>
-            <span className="text-sm font-semibold text-slate-100 max-w-[8rem] truncate">{active.label}</span>
+            <span className="text-sm font-semibold text-slate-100 max-w-[8rem] truncate">{tabLabel(active.id)}</span>
             <ChevronUp
               className={`w-5 h-5 text-slate-400 transition-transform duration-300 ease-in-out ${
                 open ? 'rotate-180' : ''
@@ -420,7 +437,7 @@ function CollapsibleNavMenu({
           <span className="flex items-center justify-center w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600">
             <ActiveIcon className="w-4 h-4 text-white" />
           </span>
-          <span className="text-slate-100">{active.label}</span>
+          <span className="text-slate-100">{tabLabel(active.id)}</span>
           <ChevronUp
             className={`w-4 h-4 text-slate-400 transition-transform duration-300 ease-in-out ${
               open ? 'rotate-180' : ''
@@ -455,7 +472,7 @@ function CollapsibleNavMenu({
                 className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium text-rose-300 hover:bg-rose-500/15 border border-transparent hover:border-rose-500/30 transition-all"
               >
                 <LogOut className="w-4 h-4 shrink-0" />
-                התנתק
+                {tr('logout')}
               </button>
             </>
           )}
@@ -497,6 +514,7 @@ function AnalyticsDonutPanel({
   chartKey: string;
   donutSize?: number;
 }) {
+  const { tr } = useLanguage();
   return (
     <div className="flex items-center gap-4 w-full h-full min-h-0">
       <div
@@ -525,13 +543,13 @@ function AnalyticsDonutPanel({
         </ResponsiveContainer>
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
           <span className="text-xl sm:text-2xl font-bold leading-none">₪{total.toLocaleString()}</span>
-          <span className="text-[11px] text-neutral-500 mt-1">סה"כ</span>
+          <span className="text-[11px] text-neutral-500 mt-1">{tr('totalShort')}</span>
         </div>
       </div>
 
       <div className="flex-1 min-w-0 space-y-3">
         {legend.length === 0 ? (
-          <p className="text-sm text-neutral-500">אין נתונים</p>
+          <p className="text-sm text-neutral-500">{tr('noData')}</p>
         ) : (
           legend.slice(0, 6).map((item) => (
             <div key={item.key} className="flex items-center gap-2.5 text-sm min-w-0">
@@ -567,15 +585,15 @@ function AnalyticsDonutPanel({
   );
 }
 
-const formatDayLabel = (iso: string): string => {
+const formatDayLabel = (iso: string, lang: 'he' | 'en' = 'he'): string => {
   const d = parseISO(iso);
-  return d.toLocaleDateString('he-IL', { day: 'numeric', month: 'short' });
+  return d.toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US', { day: 'numeric', month: 'short' });
 };
 
 // Tooltip / hover label for trend chart (e.g. "31 במאי" or "31/05/2026").
-const formatTrendDateLabel = (iso: string): string => {
+const formatTrendDateLabel = (iso: string, lang: 'he' | 'en' = 'he'): string => {
   const d = parseISO(iso);
-  const short = d.toLocaleDateString('he-IL', { day: 'numeric', month: 'short' });
+  const short = d.toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US', { day: 'numeric', month: 'short' });
   const numeric = `${d.getDate()}/${pad2(d.getMonth() + 1)}`;
   return `${short} · ${numeric}`;
 };
@@ -593,7 +611,8 @@ type TrendSeriesPoint = {
 const buildContinuousTrendSeries = (
   view: SummaryView,
   anchor: Date,
-  amountByDate: Record<string, number>
+  amountByDate: Record<string, number>,
+  lang: 'he' | 'en' = 'he'
 ): { dailySeries: TrendSeriesPoint[]; periodDayCount: number } => {
   const points: TrendSeriesPoint[] = [];
 
@@ -608,7 +627,7 @@ const buildContinuousTrendSeries = (
         iso,
         day,
         dayLabel: String(day),
-        dateLabel: formatTrendDateLabel(iso),
+        dateLabel: formatTrendDateLabel(iso, lang),
         amount,
         hex: DAILY_SLICE_COLORS[(day - 1) % DAILY_SLICE_COLORS.length],
       });
@@ -625,8 +644,8 @@ const buildContinuousTrendSeries = (
       points.push({
         iso,
         day: d.getDate(),
-        dayLabel: d.toLocaleDateString('he-IL', { weekday: 'narrow' }),
-        dateLabel: formatTrendDateLabel(iso),
+        dayLabel: d.toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US', { weekday: 'narrow' }),
+        dateLabel: formatTrendDateLabel(iso, lang),
         amount,
         hex: DAILY_SLICE_COLORS[i % DAILY_SLICE_COLORS.length],
       });
@@ -644,8 +663,8 @@ const buildContinuousTrendSeries = (
     points.push({
       iso,
       day: m + 1,
-      dayLabel: new Date(y, m, 1).toLocaleDateString('he-IL', { month: 'short' }),
-      dateLabel: new Date(y, m, 1).toLocaleDateString('he-IL', { month: 'long', year: 'numeric' }),
+      dayLabel: new Date(y, m, 1).toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US', { month: 'short' }),
+      dateLabel: new Date(y, m, 1).toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US', { month: 'long', year: 'numeric' }),
       amount,
       hex: DAILY_SLICE_COLORS[m % DAILY_SLICE_COLORS.length],
     });
@@ -654,9 +673,9 @@ const buildContinuousTrendSeries = (
 };
 
 // Hebrew date string for trend tooltip (e.g. "31 במאי").
-const formatTooltipHebrewDate = (iso: string): string => {
+const formatTooltipDate = (iso: string, lang: 'he' | 'en' = 'he'): string => {
   const d = parseISO(iso);
-  return d.toLocaleDateString('he-IL', { day: 'numeric', month: 'long' });
+  return d.toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US', { day: 'numeric', month: 'long' });
 };
 
 interface TrendLineTooltipProps {
@@ -665,6 +684,7 @@ interface TrendLineTooltipProps {
 }
 
 function TrendLineTooltip({ active, payload }: TrendLineTooltipProps) {
+  const { tr, lang } = useLanguage();
   if (!active || !payload?.length) return null;
   const point = payload[0]?.payload;
   if (!point) return null;
@@ -681,11 +701,11 @@ function TrendLineTooltip({ active, payload }: TrendLineTooltipProps) {
       }}
     >
       <p className="!text-slate-400 text-sm leading-relaxed">
-        תאריך:{' '}
-        <span className="!text-slate-100 font-medium">{formatTooltipHebrewDate(point.iso)}</span>
+        {tr('date')}:{' '}
+        <span className="!text-slate-100 font-medium">{formatTooltipDate(point.iso, lang)}</span>
       </p>
       <p className="!text-slate-400 text-sm leading-relaxed mt-1.5">
-        סכום:{' '}
+        {tr('amountIls')}:{' '}
         <span className="!text-slate-100 font-bold tabular-nums">
           ₪{point.amount.toLocaleString()}
         </span>
@@ -696,6 +716,7 @@ function TrendLineTooltip({ active, payload }: TrendLineTooltipProps) {
 
 // Dark-themed analytics: swipeable category / daily donuts + daily trend line.
 function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
+  const { tr, lang } = useLanguage();
   const [view, setView] = useState<SummaryView>('month');
   const [anchor, setAnchor] = useState<Date>(() => new Date());
   const [chartSlide, setChartSlide] = useState(0);
@@ -762,13 +783,13 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
     return Object.entries(grouped)
       .map(([date, amount], i) => ({
         date,
-        label: formatDayLabel(date),
+        label: formatDayLabel(date, lang),
         amount,
         hex: DAILY_SLICE_COLORS[i % DAILY_SLICE_COLORS.length],
         percentage: total > 0 ? (amount / total) * 100 : 0,
       }))
       .sort((a, b) => b.amount - a.amount);
-  }, [periodExpenses, total]);
+  }, [periodExpenses, total, lang]);
 
   const dailyDonutData =
     dailyBreakdown.length > 0
@@ -781,8 +802,8 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
       acc[iso] = (acc[iso] || 0) + e.amount;
       return acc;
     }, {});
-    return buildContinuousTrendSeries(view, anchor, amountByDate);
-  }, [periodExpenses, view, anchor]);
+    return buildContinuousTrendSeries(view, anchor, amountByDate, lang);
+  }, [periodExpenses, view, anchor, lang]);
 
   const average = periodDayCount > 0 ? total / periodDayCount : 0;
   const trendMax = Math.max(250, ...dailySeries.map((d) => d.amount), 1);
@@ -792,9 +813,9 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
   if (view === 'year') {
     periodLabel = `${anchor.getFullYear()}`;
   } else if (view === 'month') {
-    periodLabel = anchor.toLocaleDateString('he-IL', { month: 'long', year: 'numeric' });
+    periodLabel = anchor.toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US', { month: 'long', year: 'numeric' });
   } else {
-    periodLabel = `שבוע ${weekNumber(anchor)}`;
+    periodLabel = `${tr('weekPrefix')} ${weekNumber(anchor)}`;
     periodSubtitle = `${formatShort(startOfWeek(anchor))} - ${formatShort(endOfWeek(anchor))}`;
   }
 
@@ -807,16 +828,16 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
 
     let label: string;
     if (view === 'year') label = `${d.getFullYear()}`;
-    else if (view === 'month') label = d.toLocaleDateString('he-IL', { month: 'short' });
-    else label = `שבוע ${weekNumber(d)}`;
+    else if (view === 'month') label = d.toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US', { month: 'short' });
+    else label = `${tr('weekPrefix')} ${weekNumber(d)}`;
 
     return { offset, date: d, label };
   });
 
   const views: { id: SummaryView; label: string }[] = [
-    { id: 'week', label: 'שבוע' },
-    { id: 'month', label: 'חודש' },
-    { id: 'year', label: 'שנה' },
+    { id: 'week', label: tr('viewWeek') },
+    { id: 'month', label: tr('viewMonth') },
+    { id: 'year', label: tr('viewYear') },
   ];
 
   const handleCarouselDragEnd = (_: unknown, info: PanInfo) => {
@@ -853,7 +874,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
       <div>
         <div className="flex items-center gap-2 mb-4 text-neutral-100">
           <PieChartIcon className="w-6 h-6 text-emerald-400" />
-          <h2 className="text-lg sm:text-xl font-bold">תובנות</h2>
+          <h2 className="text-lg sm:text-xl font-bold">{tr('analyticsTitle')}</h2>
         </div>
 
         <div className="flex p-1 bg-neutral-900 border border-neutral-800 rounded-2xl">
@@ -876,7 +897,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
           <button
             onClick={() => shift(-1)}
             className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl text-neutral-400 hover:bg-neutral-800 active:scale-95 transition-all"
-            aria-label="קודם"
+            aria-label={tr('prev')}
           >
             <ChevronRight className="w-5 h-5" />
           </button>
@@ -906,7 +927,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
           <button
             onClick={() => shift(1)}
             className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl text-neutral-400 hover:bg-neutral-800 active:scale-95 transition-all"
-            aria-label="הבא"
+            aria-label={tr('next')}
           >
             <ChevronLeft className="w-5 h-5" />
           </button>
@@ -969,7 +990,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                 {dailyBreakdown.length === 0 ? (
                   <div className="flex flex-col items-center justify-center w-full h-full text-center px-4">
                     <PieChartIcon className="w-10 h-10 text-neutral-600 mb-2" />
-                    <p className="text-sm text-neutral-400">אין הוצאות לפי תאריך בתקופה זו</p>
+                    <p className="text-sm text-neutral-400">{tr('noDailyBreakdown')}</p>
                   </div>
                 ) : (
                   <AnalyticsDonutPanel
@@ -996,11 +1017,11 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                 <div className="flex items-start justify-between gap-3 mb-2 shrink-0">
                   <div className="text-sm text-neutral-300 space-y-0.5">
                     <p>
-                      <span className="text-neutral-500">סה"כ: </span>
+                      <span className="text-neutral-500">{tr('totalShort')}: </span>
                       <span className="font-semibold text-neutral-100">₪{total.toLocaleString()}</span>
                     </p>
                     <p>
-                      <span className="text-neutral-500">ממוצע: </span>
+                      <span className="text-neutral-500">{tr('average')}: </span>
                       <span className="font-semibold text-neutral-100">₪{average.toFixed(2)}</span>
                     </p>
                   </div>
@@ -1008,7 +1029,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
 
                 {dailySeries.length === 0 ? (
                   <div className="flex flex-1 items-center justify-center">
-                    <p className="text-sm text-neutral-500">אין נתונים לגרף</p>
+                    <p className="text-sm text-neutral-500">{tr('noChartData')}</p>
                   </div>
                 ) : (
                   <div
@@ -1122,7 +1143,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
         <div
           className="flex justify-center items-center gap-2 mt-5"
           role="tablist"
-          aria-label="תצוגות תובנות"
+          aria-label={tr('analyticsViews')}
         >
           {Array.from({ length: ANALYTICS_SLIDE_COUNT }, (_, i) => (
             <button
@@ -1130,7 +1151,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
               type="button"
               role="tab"
               aria-selected={chartSlide === i}
-              aria-label={`תצוגה ${i + 1}`}
+              aria-label={`${tr('viewPrefix')} ${i + 1}`}
               onClick={() => setChartSlide(i)}
               className={`rounded-full transition-all duration-300 ease-in-out ${
                 chartSlide === i
@@ -1149,8 +1170,8 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
               <div className="bg-neutral-900 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
                 <PieChartIcon className="w-8 h-8 text-neutral-600" />
               </div>
-              <p className="text-neutral-400">אין הוצאות בתקופה זו</p>
-              <p className="text-neutral-600 text-sm mt-1">בחר תקופה אחרת או הוסף הוצאות</p>
+              <p className="text-neutral-400">{tr('noExpensesInPeriod')}</p>
+              <p className="text-neutral-600 text-sm mt-1">{tr('choosePeriodOrAdd')}</p>
             </div>
           ) : (
             breakdown.map((b) => (
@@ -1210,6 +1231,7 @@ function SpendingDonut({
   onPreviousDay,
   onNextDay,
 }: SpendingDonutProps) {
+  const { tr, dir } = useLanguage();
   const total = dayExpenses.reduce((s, e) => s + e.amount, 0);
   const breakdown = aggregateByCategory(dayExpenses, categories);
 
@@ -1222,18 +1244,18 @@ function SpendingDonut({
     <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 mb-6 sm:mb-8">
       <h2 className="text-base sm:text-lg font-semibold text-neutral-100 flex items-center gap-2 mb-3">
         <PieChartIcon className="w-5 h-5 text-emerald-400" />
-        הוצאות לפי קטגוריה
+        {tr('expenseByCategory')}
       </h2>
 
       <div
-        dir="ltr"
+        dir={dir === 'rtl' ? 'ltr' : 'rtl'}
         className="flex items-center justify-center gap-2 sm:gap-3 mb-4"
       >
         <button
           type="button"
           onClick={onPreviousDay}
-          aria-label="יום קודם"
-          title="יום קודם"
+          aria-label={tr('prevDay')}
+          title={tr('prevDay')}
           className="shrink-0 w-9 h-9 flex items-center justify-center rounded-xl text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 border border-transparent hover:border-neutral-700 active:scale-95 transition-all"
         >
           <ChevronLeft className="w-5 h-5" />
@@ -1244,8 +1266,8 @@ function SpendingDonut({
         <button
           type="button"
           onClick={onNextDay}
-          aria-label="יום הבא"
-          title="יום הבא"
+          aria-label={tr('nextDay')}
+          title={tr('nextDay')}
           className="shrink-0 w-9 h-9 flex items-center justify-center rounded-xl text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 border border-transparent hover:border-neutral-700 active:scale-95 transition-all"
         >
           <ChevronRight className="w-5 h-5" />
@@ -1257,8 +1279,8 @@ function SpendingDonut({
           <div className="bg-neutral-800 w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3">
             <TrendingDown className="w-7 h-7 text-neutral-500" />
           </div>
-          <p className="text-neutral-400">אין הוצאות בתאריך זה</p>
-          <p className="text-neutral-500 text-sm mt-1">הוסף הוצאה כדי לראות את הפילוח</p>
+          <p className="text-neutral-400">{tr('noExpensesOnDate')}</p>
+          <p className="text-neutral-500 text-sm mt-1">{tr('addExpenseToSeeBreakdown')}</p>
         </div>
       ) : (
         <div className="flex flex-col sm:flex-row items-center gap-6">
@@ -1288,7 +1310,7 @@ function SpendingDonut({
               <span className="text-xl font-bold text-neutral-100 leading-none">
                 ₪{total.toLocaleString()}
               </span>
-              <span className="text-[11px] text-neutral-500 mt-1">סה"כ</span>
+              <span className="text-[11px] text-neutral-500 mt-1">{tr('totalShort')}</span>
             </div>
           </div>
 
@@ -1363,6 +1385,7 @@ function SubBudgetTracker({
   onSetSubBudget,
   onRemoveSubBudget,
 }: SubBudgetTrackerProps) {
+  const { tr, lang } = useLanguage();
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [newSubBudgetColor, setNewSubBudgetColor] = useState(DEFAULT_CATEGORY_COLOR);
@@ -1389,7 +1412,7 @@ function SubBudgetTracker({
       const cat = lookupCategory(v, categories);
       return {
         key: v,
-        label: cat.label,
+        label: localizeCategoryLabel(cat.value, lang),
         icon: cat.icon,
         color: cat.color,
         hex: hexForColor(cat.color),
@@ -1403,7 +1426,7 @@ function SubBudgetTracker({
   if (generalAllocated > 0 || unbudgetedSpent > 0) {
     envelopes.push({
       key: GENERAL_KEY,
-      label: 'כללי / לא מוקצה',
+      label: tr('generalUnallocated'),
       icon: Wallet,
       color: 'bg-gray-500',
       hex: '#737373',
@@ -1419,7 +1442,7 @@ function SubBudgetTracker({
     value: number;
     fill: string;
     label: string;
-    status: 'נוצל' | 'נותר' | 'הוצאה';
+    status: string;
     amount: number;
     percentage: number;
   }[] = [];
@@ -1434,7 +1457,7 @@ function SubBudgetTracker({
         value: Math.max(env.spent, env.allocated, 1),
         fill: WARNING_COLOR,
         label: env.label,
-        status: 'הוצאה',
+        status: tr('spentLabel'),
         amount,
         percentage: budget > 0 ? (amount / budget) * 100 : 0,
       });
@@ -1447,7 +1470,7 @@ function SubBudgetTracker({
         value: env.spent,
         fill: spentFill(env.hex),
         label: env.label,
-        status: 'נוצל',
+        status: tr('spentLabel'),
         amount,
         percentage: budget > 0 ? (amount / budget) * 100 : 0,
       });
@@ -1459,7 +1482,7 @@ function SubBudgetTracker({
         value: remaining,
         fill: remainingFill(env.hex),
         label: env.label,
-        status: 'נותר',
+        status: tr('remainingLabel'),
         amount: remaining,
         percentage: budget > 0 ? (remaining / budget) * 100 : 0,
       });
@@ -1474,8 +1497,8 @@ function SubBudgetTracker({
             id: 'empty',
             value: 1,
             fill: '#262626',
-            label: 'אין נתונים',
-            status: 'הוצאה' as const,
+            label: tr('noData'),
+            status: tr('spentLabel'),
             amount: 0,
             percentage: 0,
           },
@@ -1513,9 +1536,9 @@ function SubBudgetTracker({
       <div className="mb-4">
         <h2 className="text-base sm:text-lg font-semibold text-neutral-100 flex items-center gap-2">
           <PieChartIcon className="w-5 h-5 text-violet-400" />
-          תקציבי משנה
+          {tr('subBudgetsTitle')}
         </h2>
-        <p className="text-sm text-neutral-500 mt-1">חלוקת התקציב לקטגוריות • {monthLabel}</p>
+        <p className="text-sm text-neutral-500 mt-1">{tr('subBudgetsSubtitle')} • {monthLabel}</p>
       </div>
 
       {budget <= 0 ? (
@@ -1523,8 +1546,8 @@ function SubBudgetTracker({
           <div className="bg-neutral-800 w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3">
             <Wallet className="w-7 h-7 text-neutral-500" />
           </div>
-          <p className="text-neutral-300">הגדר תחילה תקציב חודשי</p>
-          <p className="text-neutral-500 text-sm mt-1">לאחר מכן תוכל לחלק אותו לתקציבי משנה</p>
+          <p className="text-neutral-300">{tr('setMonthlyBudgetFirst')}</p>
+          <p className="text-neutral-500 text-sm mt-1">{tr('thenSplitSubBudgets')}</p>
         </div>
       ) : (
         <>
@@ -1577,21 +1600,21 @@ function SubBudgetTracker({
                     ₪{activeDonutSlice.amount.toLocaleString()}
                   </p>
                   <p className="text-xs mt-0.5 text-gray-300 tabular-nums">
-                    {activeDonutSlice.percentage.toFixed(0)}% מהתקציב
+                    {activeDonutSlice.percentage.toFixed(0)}%
                   </p>
                 </>
               ) : (
                 <>
                   <p className="text-sm font-semibold text-white tabular-nums whitespace-nowrap">
-                    סה&quot;כ תקציב:{' '}
+                    {tr('totalBudgetLabel')}:{' '}
                     <span className="text-base font-bold">₪{budget.toLocaleString()}</span>
                   </p>
                   <p className="text-xs mt-0.5 text-gray-300 tabular-nums">
-                    הוצא: ₪{totalSpent.toLocaleString()}
+                    {tr('spentLabel')}: ₪{totalSpent.toLocaleString()}
                     {budget > 0 ? ` (${((totalSpent / budget) * 100).toFixed(0)}%)` : ''}
                   </p>
                   <p className="text-xs mt-0.5 text-gray-400 whitespace-nowrap">
-                    (רחף מעל פלח לצפייה בפרטים)
+                    {tr('cardHintHoverSlice')}
                   </p>
                 </>
               )}
@@ -1605,25 +1628,25 @@ function SubBudgetTracker({
                 className="w-3 h-3 rounded-sm"
                 style={{ backgroundColor: spentFill(hexForColor(DEFAULT_CATEGORY_COLOR)) }}
               />
-              הוצא
+              {tr('spentLabel')}
             </span>
             <span className="flex items-center gap-1.5">
               <span
                 className="w-3 h-3 rounded-sm"
                 style={{ backgroundColor: remainingFill(hexForColor(DEFAULT_CATEGORY_COLOR)) }}
               />
-              נותר
+              {tr('remainingLabel')}
             </span>
             <span className="flex items-center gap-1.5">
               <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: WARNING_COLOR }} />
-              חריגה
+              {tr('overspentLabel')}
             </span>
           </div>
 
           {/* Breakdown list with progress bars */}
           <div className="mt-6 space-y-4">
             {envelopes.length === 0 ? (
-              <p className="text-sm text-neutral-500 text-center">הוסף תקציב משנה כדי להתחיל</p>
+              <p className="text-sm text-neutral-500 text-center">{tr('startByAddingSubBudget')}</p>
             ) : (
               envelopes.map((env) => {
                 const Icon = env.icon;
@@ -1647,7 +1670,7 @@ function SubBudgetTracker({
                           {overspent && (
                             <span className="shrink-0 flex items-center gap-1 text-[10px] font-semibold text-rose-400 bg-rose-500/10 px-1.5 py-0.5 rounded-full">
                               <AlertTriangle className="w-3 h-3" />
-                              חריגה
+                              {tr('overspentLabel')}
                             </span>
                           )}
                         </div>
@@ -1670,8 +1693,8 @@ function SubBudgetTracker({
                       <button
                         onClick={() => onRemoveSubBudget(env.key)}
                         className="shrink-0 text-neutral-500 hover:text-rose-400 hover:bg-rose-500/10 p-2 rounded-lg transition-all"
-                        title="הסר תקציב משנה"
-                        aria-label="הסר תקציב משנה"
+                        title={tr('removeSubBudget')}
+                        aria-label={tr('removeSubBudget')}
                       >
                         <X className="w-4 h-4" />
                       </button>
@@ -1684,7 +1707,7 @@ function SubBudgetTracker({
 
           {/* Management: add / edit sub-budgets */}
           <div className="mt-6 pt-5 border-t border-neutral-800">
-            <p className="text-xs font-medium text-neutral-400 mb-2">הוסף או עדכן תקציב משנה</p>
+            <p className="text-xs font-medium text-neutral-400 mb-2">{tr('addOrUpdateSubBudget')}</p>
             <datalist id="subbudget-categories">
               {categories.map((c) => (
                 <option key={c.value} value={c.label} />
@@ -1696,7 +1719,7 @@ function SubBudgetTracker({
                 list="subbudget-categories"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="שם קטגוריה (תיווצר אוטומטית אם חדשה)"
+                placeholder={tr('addSubBudgetPlaceholder')}
                 className="flex-1 min-w-0 px-3 py-2.5 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/30 outline-none transition-all text-sm"
               />
               <div className="flex gap-2">
@@ -1711,7 +1734,7 @@ function SubBudgetTracker({
                       handleAdd();
                     }
                   }}
-                  placeholder="₪ סכום"
+                  placeholder={tr('amountPlaceholder')}
                   min="0"
                   step="10"
                   className="w-28 sm:w-32 px-3 py-2.5 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/30 outline-none transition-all text-sm"
@@ -1722,7 +1745,7 @@ function SubBudgetTracker({
                   className="shrink-0 bg-gradient-to-r from-violet-500 to-indigo-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:from-violet-600 hover:to-indigo-700 transition-all flex items-center justify-center gap-1 active:scale-[0.98]"
                 >
                   <Plus className="w-4 h-4" />
-                  הוסף
+                  {tr('add')}
                 </button>
               </div>
             </div>
@@ -1731,10 +1754,10 @@ function SubBudgetTracker({
               <CategoryColorPicker
                 value={newSubBudgetColor}
                 onChange={setNewSubBudgetColor}
-                label="צבע לקטגוריה חדשה"
+                label={tr('newCategoryColor')}
               />
               <p className="text-[11px] text-neutral-500 mt-2">
-                צבע נשמר בקטגוריה ומשמש בגרפים ובפסי התקדמות. לקטגוריה קיימת נשמר הצבע המקורי.
+                {tr('categoryColorHint')}
               </p>
             </div>
 
@@ -1766,12 +1789,12 @@ function SubBudgetTracker({
                 })}
                 <div className="flex items-center justify-between pt-1 text-xs">
                   <span className="text-neutral-500">
-                    מוקצה: ₪{allocatedTotal.toLocaleString()} מתוך ₪{budget.toLocaleString()}
+                    {tr('allocated')}: ₪{allocatedTotal.toLocaleString()} / ₪{budget.toLocaleString()}
                   </span>
                   <span className={allocatedTotal > budget ? 'text-rose-400 font-medium' : 'text-neutral-500'}>
                     {allocatedTotal > budget
-                      ? `חריגה מהתקציב ב-₪${(allocatedTotal - budget).toLocaleString()}`
-                      : `לא מוקצה: ₪${generalAllocated.toLocaleString()}`}
+                      ? `${tr('overBudget')}: ₪${(allocatedTotal - budget).toLocaleString()}`
+                      : `${tr('unallocated')}: ₪${generalAllocated.toLocaleString()}`}
                   </span>
                 </div>
               </div>
@@ -1805,6 +1828,7 @@ function BudgetChangeModal({
   onSelect,
   onClose,
 }: BudgetChangeModalProps) {
+  const { tr, dir } = useLanguage();
   // Close on Escape for keyboard users.
   useEffect(() => {
     if (!open) return;
@@ -1829,8 +1853,8 @@ function BudgetChangeModal({
     {
       mode: 'keep',
       icon: Check,
-      title: 'השאר את תתי-התקציבים כפי שהם',
-      desc: 'תתי-התקציבים שהגיעו מהחודש הקודם יישארו ללא שינוי.',
+      title: tr('budgetOptionKeepTitle'),
+      desc: tr('budgetOptionKeepDesc'),
       accent: 'hover:border-emerald-500/60 hover:bg-emerald-500/5',
       ring: 'focus-visible:ring-emerald-500/40',
       iconBg: 'bg-emerald-500/15 text-emerald-400',
@@ -1838,8 +1862,8 @@ function BudgetChangeModal({
     {
       mode: 'reset',
       icon: RotateCcw,
-      title: 'אפס את תתי-התקציבים לחודש זה',
-      desc: 'סכומי ההקצאה לחודש זה יתאפסו, ותוכל להגדיר אותם מחדש.',
+      title: tr('budgetOptionResetTitle'),
+      desc: tr('budgetOptionResetDesc'),
       accent: 'hover:border-amber-500/60 hover:bg-amber-500/5',
       ring: 'focus-visible:ring-amber-500/40',
       iconBg: 'bg-amber-500/15 text-amber-400',
@@ -1848,7 +1872,7 @@ function BudgetChangeModal({
 
   return (
     <div
-      dir="rtl"
+      dir={dir}
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
       role="dialog"
       aria-modal="true"
@@ -1858,7 +1882,7 @@ function BudgetChangeModal({
       <button
         type="button"
         onClick={onClose}
-        aria-label="סגור"
+        aria-label={tr('close')}
         className="absolute inset-0 bg-black/70 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out]"
       />
 
@@ -1876,21 +1900,21 @@ function BudgetChangeModal({
           </div>
           <div className="min-w-0">
             <h2 id="budget-modal-title" className="text-base sm:text-lg font-bold text-neutral-100 leading-snug">
-              שינית את התקציב החודשי, מה לגבי תתי-התקציבים?
+              {tr('budgetChangeTitle')}
             </h2>
           </div>
           <button
             type="button"
             onClick={onClose}
             className="shrink-0 -mt-1 -ml-1 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 p-2 rounded-lg transition-all"
-            aria-label="סגור"
+            aria-label={tr('close')}
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         <p className="text-sm text-neutral-400 leading-relaxed mb-4">
-          זיהינו עדכון בתקציב הכללי. כיצד תרצה לנהל את תתי-התקציבים והקטגוריות שלך לחודש זה?
+          {tr('budgetChangeDesc')}
         </p>
 
         {/* Old -> new budget summary */}
@@ -1932,7 +1956,7 @@ function BudgetChangeModal({
           onClick={onClose}
           className="mt-4 w-full py-3 rounded-xl text-sm font-medium text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 transition-all"
         >
-          ביטול
+          {tr('cancel')}
         </button>
       </div>
     </div>
@@ -1940,6 +1964,7 @@ function BudgetChangeModal({
 }
 
 function App() {
+  const { tr, dir, lang } = useLanguage();
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [dataReady, setDataReady] = useState(false);
@@ -1964,7 +1989,7 @@ function App() {
   const [newExpense, setNewExpense] = useState({
     description: '',
     amount: '',
-    category: 'אוכל',
+    category: CATEGORIES[0]?.value ?? '',
     date: toISODate(new Date()),
   });
   const [showBudgetSaved, setShowBudgetSaved] = useState(false);
@@ -2018,7 +2043,7 @@ function App() {
 
   // The full list of selectable categories: built-ins + user-created.
   const allCategories: Category[] = [
-    ...CATEGORIES,
+    ...CATEGORIES.map((c) => ({ ...c, label: localizeCategoryLabel(c.value, lang) })),
     ...customCategories.map((c) => ({
       value: c.value,
       label: c.label,
@@ -2079,7 +2104,7 @@ function App() {
     setNewExpense({
       description: '',
       amount: '',
-      category: 'אוכל',
+      category: CATEGORIES[0]?.value ?? '',
       date: toISODate(new Date()),
     });
   };
@@ -2206,7 +2231,7 @@ function App() {
       };
 
       setExpenses([expense, ...expenses]);
-      setNewExpense({ description: '', amount: '', category: 'אוכל', date: toISODate(new Date()) });
+      setNewExpense({ description: '', amount: '', category: CATEGORIES[0]?.value ?? '', date: toISODate(new Date()) });
 
       chartDateSetterRef.current?.(isoDate);
 
@@ -2237,17 +2262,17 @@ function App() {
     const name = newCategoryName.trim();
 
     if (!name) {
-      setCategoryError('יש להזין שם קטגוריה');
+      setCategoryError(tr('categoryNameRequired'));
       return;
     }
     if (name === ADD_CUSTOM_VALUE) {
-      setCategoryError('שם לא חוקי');
+      setCategoryError(tr('invalidCategoryName'));
       return;
     }
 
     const exists = allCategories.some((c) => c.value === name);
     if (exists) {
-      setCategoryError('קטגוריה בשם זה כבר קיימת');
+      setCategoryError(tr('categoryAlreadyExists'));
       return;
     }
 
@@ -2325,7 +2350,7 @@ function App() {
   };
 
   // Month navigation (selectedMonthKey is derived above with budget/subBudgets).
-  const monthLabel = selectedDate.toLocaleDateString('he-IL', { month: 'long', year: 'numeric' });
+  const monthLabel = selectedDate.toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US', { month: 'long', year: 'numeric' });
   const isCurrentMonth = selectedMonthKey === monthKeyOfDate(new Date());
   const goToMonth = (offset: number) =>
     setSelectedDate((d) => new Date(d.getFullYear(), d.getMonth() + offset, 1));
@@ -2372,8 +2397,8 @@ function App() {
         <button
           onClick={() => goToMonth(-1)}
           className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl text-neutral-400 hover:bg-neutral-800 active:scale-95 transition-all"
-          aria-label="חודש קודם"
-          title="חודש קודם"
+          aria-label={tr('prevMonth')}
+          title={tr('prevMonth')}
         >
           <ChevronRight className="w-6 h-6" />
         </button>
@@ -2390,7 +2415,7 @@ function App() {
               onClick={goToCurrentMonth}
               className="mt-0.5 text-xs font-medium text-emerald-400 hover:text-emerald-300 active:opacity-70 transition-colors"
             >
-              חזרה לחודש הנוכחי
+              {tr('backToCurrentMonth')}
             </button>
           )}
         </div>
@@ -2398,8 +2423,8 @@ function App() {
         <button
           onClick={() => goToMonth(1)}
           className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl text-neutral-400 hover:bg-neutral-800 active:scale-95 transition-all"
-          aria-label="חודש הבא"
-          title="חודש הבא"
+          aria-label={tr('nextMonth')}
+          title={tr('nextMonth')}
         >
           <ChevronLeft className="w-6 h-6" />
         </button>
@@ -2410,10 +2435,10 @@ function App() {
   if (!authReady || (user && !dataReady)) {
     return (
       <div
-        dir="rtl"
+        dir={dir}
         className="min-h-screen bg-slate-950 flex items-center justify-center text-neutral-100"
       >
-        <Loader2 className="w-9 h-9 text-emerald-500 animate-spin" aria-label="טוען" />
+        <Loader2 className="w-9 h-9 text-emerald-500 animate-spin" aria-label={tr('loading')} />
       </div>
     );
   }
@@ -2422,14 +2447,14 @@ function App() {
     return <AuthPage />;
   }
 
-  const userDisplayLabel = user.isAnonymous ? 'אורח' : (user.email ?? '');
+  const userDisplayLabel = user.isAnonymous ? tr('guest') : (user.email ?? '');
   const userName = user.isAnonymous
-    ? 'אורח'
-    : (user.displayName || user.email?.split('@')[0] || 'משתמש');
+    ? tr('guest')
+    : (user.displayName || user.email?.split('@')[0] || tr('user'));
 
   return (
     <motion.div
-      dir="rtl"
+      dir={dir}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.45, ease: 'easeOut' }}
@@ -2447,8 +2472,8 @@ function App() {
                 <Wallet className="w-6 h-6 text-white" />
               </div>
               <div className="min-w-0">
-                <h1 className="text-lg sm:text-2xl font-bold text-neutral-100 truncate">מנהל התקציב שלי</h1>
-                <p className="text-neutral-400 text-xs truncate hidden sm:block">נהל את ההוצאות שלך בצורה חכמה</p>
+                <h1 className="text-lg sm:text-2xl font-bold text-neutral-100 truncate">{tr('appName')}</h1>
+                <p className="text-neutral-400 text-xs truncate hidden sm:block">{tr('appTagline')}</p>
               </div>
             </div>
 
@@ -2477,19 +2502,19 @@ function App() {
           {/* Total Budget Card */}
           <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 hover:border-neutral-700 transition-colors">
             <div className="flex items-center justify-between mb-3 sm:mb-4">
-              <span className="text-sm font-medium text-neutral-400">תקציב חודשי</span>
+              <span className="text-sm font-medium text-neutral-400">{tr('monthlyBudget')}</span>
               <div className="bg-emerald-500/15 p-2 rounded-lg">
                 <Wallet className="w-5 h-5 text-emerald-400" />
               </div>
             </div>
             <p className="text-2xl sm:text-3xl font-bold text-neutral-100">₪{budget.toLocaleString()}</p>
-            <p className="text-sm text-neutral-500 mt-2">הסכום שהוקצב להוצאות</p>
+            <p className="text-sm text-neutral-500 mt-2">{tr('budgetAllocatedHint')}</p>
           </div>
 
           {/* Total Expenses Card */}
           <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 hover:border-neutral-700 transition-colors">
             <div className="flex items-center justify-between mb-3 sm:mb-4">
-              <span className="text-sm font-medium text-neutral-400">סה"כ הוצאות</span>
+              <span className="text-sm font-medium text-neutral-400">{tr('totalExpenses')}</span>
               <div className="bg-rose-500/15 p-2 rounded-lg">
                 <TrendingDown className="w-5 h-5 text-rose-400" />
               </div>
@@ -2498,7 +2523,7 @@ function App() {
               ₪{totalExpenses.toLocaleString()}
             </p>
             <p className="text-sm text-neutral-500 mt-2">
-              {monthExpenses.length} הוצאות ב{monthLabel}
+              {monthExpenses.length} • {monthLabel}
             </p>
           </div>
 
@@ -2509,7 +2534,7 @@ function App() {
               : 'bg-neutral-900 border-neutral-800 hover:border-neutral-700'
           }`}>
             <div className="flex items-center justify-between mb-3 sm:mb-4">
-              <span className="text-sm font-medium text-neutral-400">מצב התקציב</span>
+              <span className="text-sm font-medium text-neutral-400">{tr('budgetStatus')}</span>
               <div className={`p-2 rounded-lg ${isOverBudget ? 'bg-rose-500/20' : 'bg-indigo-500/15'}`}>
                 {isOverBudget ? (
                   <AlertTriangle className="w-5 h-5 text-rose-400" />
@@ -2521,7 +2546,7 @@ function App() {
 
             {isOverBudget && (
               <div className="bg-rose-500 text-white text-xs font-medium px-2 py-1 rounded-full inline-block mb-3">
-                חרגת מהתקציב!
+                {tr('overBudgetBadge')}
               </div>
             )}
 
@@ -2529,13 +2554,13 @@ function App() {
               {remaining >= 0 ? `₪${remaining.toLocaleString()}` : `-₪${Math.abs(remaining).toLocaleString()}`}
             </p>
             <p className="text-sm text-neutral-500 mt-2">
-              {remaining >= 0 ? 'נותר בתקציב' : 'חריגה מהתקציב'}
+              {remaining >= 0 ? tr('remainingInBudget') : tr('overBudget')}
             </p>
 
             {/* Progress Bar */}
             <div className="mt-4">
               <div className="flex justify-between text-xs text-neutral-400 mb-1">
-                <span>ניצולת</span>
+                <span>{tr('utilization')}</span>
                 <span>{Math.min(100, budgetPercentage).toFixed(0)}%</span>
               </div>
               <div className="h-3 bg-neutral-800 rounded-full overflow-hidden">
@@ -2558,24 +2583,24 @@ function App() {
         <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 mb-6 sm:mb-8">
           <h2 className="text-base sm:text-lg font-semibold text-neutral-100 mb-4 sm:mb-6 flex items-center gap-2">
             <Plus className="w-5 h-5 text-emerald-400" />
-            הוסף הוצאה חדשה
+            {tr('addExpenseTitle')}
           </h2>
 
           <form onSubmit={handleAddExpense} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <div>
-              <label className="block text-sm font-medium text-neutral-300 mb-2">תיאור</label>
+              <label className="block text-sm font-medium text-neutral-300 mb-2">{tr('description')}</label>
               <input
                 type="text"
                 value={newExpense.description}
                 onChange={(e) => setNewExpense({ ...newExpense, description: e.target.value })}
-                placeholder="לדוגמה: סופר, דלק"
+                placeholder={tr('exampleExpensePlaceholder')}
                 className="w-full px-4 py-3 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base"
                 required
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-neutral-300 mb-2">סכום (₪)</label>
+              <label className="block text-sm font-medium text-neutral-300 mb-2">{tr('amountIls')}</label>
               <input
                 type="number"
                 inputMode="decimal"
@@ -2590,7 +2615,7 @@ function App() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-neutral-300 mb-2">תאריך</label>
+              <label className="block text-sm font-medium text-neutral-300 mb-2">{tr('date')}</label>
               <input
                 type="date"
                 value={newExpense.date}
@@ -2601,7 +2626,7 @@ function App() {
             </div>
 
             <div className="min-w-0">
-              <label className="block text-sm font-medium text-neutral-300 mb-2">קטגוריה</label>
+              <label className="block text-sm font-medium text-neutral-300 mb-2">{tr('category')}</label>
               <select
                 value={isAddingCategory ? ADD_CUSTOM_VALUE : newExpense.category}
                 onChange={(e) => handleCategoryChange(e.target.value)}
@@ -2612,7 +2637,7 @@ function App() {
                     {cat.label}
                   </option>
                 ))}
-                <option value={ADD_CUSTOM_VALUE}>+ הוסף קטגוריה חדשה</option>
+                <option value={ADD_CUSTOM_VALUE}>{tr('addNewCategory')}</option>
               </select>
             </div>
 
@@ -2641,7 +2666,7 @@ function App() {
                 className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-6 py-3 rounded-xl font-medium hover:from-emerald-600 hover:to-teal-700 transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 active:scale-[0.98]"
               >
                 <Plus className="w-5 h-5" />
-                הוסף הוצאה
+                {tr('addExpense')}
               </button>
             </div>
           </form>
@@ -2668,16 +2693,16 @@ function App() {
 
             {/* Global budget setter */}
             <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 mb-6 sm:mb-8">
-              <h2 className="text-base sm:text-lg font-semibold text-neutral-100 mb-4">הגדר תקציב חודשי</h2>
+              <h2 className="text-base sm:text-lg font-semibold text-neutral-100 mb-4">{tr('setMonthlyBudget')}</h2>
               <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 sm:items-end">
                 <div className="flex-1 sm:max-w-xs">
-                  <label className="block text-sm font-medium text-neutral-300 mb-2">סכום התקציב (₪)</label>
+                  <label className="block text-sm font-medium text-neutral-300 mb-2">{tr('budgetAmountLabel')}</label>
                   <input
                     type="number"
                     inputMode="decimal"
                     value={budgetInput}
                     onChange={(e) => setBudgetInput(e.target.value)}
-                    placeholder={budget > 0 ? `נוכחי: ₪${budget.toLocaleString()}` : 'הזן סכום'}
+                    placeholder={budget > 0 ? `${tr('currentAmountPrefix')}: ₪${budget.toLocaleString()}` : tr('enterAmount')}
                     className="w-full px-4 py-3 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base sm:text-lg"
                     min="0"
                     step="100"
@@ -2690,10 +2715,10 @@ function App() {
                   {showBudgetSaved ? (
                     <>
                       <Check className="w-5 h-5" />
-                      נשמר!
+                      {tr('budgetSaved')}
                     </>
                   ) : (
-                    'עדכן תקציב'
+                    tr('updateBudget')
                   )}
                 </button>
               </div>
@@ -2716,15 +2741,15 @@ function App() {
         {activeTab === 'expenses' && (
         <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 overflow-hidden">
           <div className="p-4 sm:p-6 border-b border-neutral-800">
-            <h2 className="text-base sm:text-lg font-semibold text-neutral-100">היסטוריית הוצאות</h2>
+            <h2 className="text-base sm:text-lg font-semibold text-neutral-100">{tr('expenseHistoryTitle')}</h2>
             <p className="text-sm text-neutral-500 mt-1">
-              {historyExpenses.length} הוצאות • סה"כ ₪{historyTotal.toLocaleString()}
+              {historyExpenses.length} • {tr('totalShort')} ₪{historyTotal.toLocaleString()}
             </p>
 
             <div
               className="flex p-1 rounded-2xl bg-neutral-950/80 border border-neutral-800 mt-4"
               role="tablist"
-              aria-label="סינון לפי תקופה"
+              aria-label={tr('periodFilterLabel')}
             >
               {HISTORY_TIME_FILTERS.map((filter) => {
                 const isActive = timeFilter === filter.id;
@@ -2747,7 +2772,12 @@ function App() {
                         aria-hidden
                       />
                     )}
-                    <span className="relative z-10">{filter.label}</span>
+                    <span className="relative z-10">{({
+                      daily: tr('filterDaily'),
+                      weekly: tr('filterWeekly'),
+                      monthly: tr('filterMonthly'),
+                      yearly: tr('filterYearly'),
+                    })[filter.id]}</span>
                   </button>
                 );
               })}
@@ -2759,14 +2789,14 @@ function App() {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="חיפוש לפי תיאור או קטגוריה"
+                placeholder={tr('searchByDescriptionOrCategory')}
                 className="w-full pr-11 pl-9 py-3 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base"
               />
               {search && (
                 <button
                   onClick={() => setSearch('')}
                   className="absolute left-2 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300 p-1.5 rounded-lg"
-                  aria-label="נקה חיפוש"
+                  aria-label={tr('clearSearch')}
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -2780,14 +2810,14 @@ function App() {
                 <TrendingDown className="w-8 h-8 text-neutral-500" />
               </div>
               <p className="text-neutral-300 text-base sm:text-lg">
-                {search ? 'לא נמצאו תוצאות' : expenses.length === 0 ? 'אין הוצאות עדיין' : 'אין הוצאות בתקופה הנבחרת'}
+                {search ? tr('noResults') : expenses.length === 0 ? tr('noExpensesYet') : tr('noExpensesForPeriod')}
               </p>
               <p className="text-neutral-500 text-sm mt-1">
                 {search
-                  ? 'נסה מונח חיפוש אחר'
+                  ? tr('tryAnotherTerm')
                   : expenses.length === 0
-                    ? 'הוסף את ההוצאה הראשונה שלך בעמוד הבית'
-                    : 'נסה תקופת זמן אחרת או הוסף הוצאה חדשה'}
+                    ? tr('addFirstExpense')
+                    : tr('tryAnotherPeriod')}
               </p>
             </div>
           ) : (
@@ -2810,7 +2840,7 @@ function App() {
                           <div className="flex items-center gap-2 mt-0.5 text-xs text-neutral-500">
                             <span className="truncate">{expense.category}</span>
                             <span className="text-neutral-600">•</span>
-                            <span className="shrink-0">{formatDisplayDate(expense.date)}</span>
+                            <span className="shrink-0">{formatDisplayDate(expense.date, lang)}</span>
                           </div>
                         </div>
                         <div className="shrink-0 text-left">
@@ -2821,8 +2851,8 @@ function App() {
                         <button
                           onClick={() => handleDeleteExpense(expense.id)}
                           className="shrink-0 text-neutral-500 hover:text-rose-400 active:bg-rose-500/10 p-2.5 rounded-lg transition-all"
-                          title="מחק"
-                          aria-label="מחק הוצאה"
+                          title={tr('delete')}
+                          aria-label={tr('deleteExpense')}
                         >
                           <Trash2 className="w-5 h-5" />
                         </button>
@@ -2837,11 +2867,11 @@ function App() {
                 <table className="w-full">
                   <thead className="bg-neutral-800/50">
                     <tr>
-                      <th className="text-right px-6 py-4 text-sm font-semibold text-neutral-400">תיאור</th>
-                      <th className="text-right px-6 py-4 text-sm font-semibold text-neutral-400">סכום</th>
-                      <th className="text-right px-6 py-4 text-sm font-semibold text-neutral-400">קטגוריה</th>
-                      <th className="text-right px-6 py-4 text-sm font-semibold text-neutral-400">תאריך</th>
-                      <th className="px-6 py-4 text-sm font-semibold text-neutral-400">פעולות</th>
+                      <th className="text-right px-6 py-4 text-sm font-semibold text-neutral-400">{tr('description')}</th>
+                      <th className="text-right px-6 py-4 text-sm font-semibold text-neutral-400">{tr('amountIls')}</th>
+                      <th className="text-right px-6 py-4 text-sm font-semibold text-neutral-400">{tr('category')}</th>
+                      <th className="text-right px-6 py-4 text-sm font-semibold text-neutral-400">{tr('date')}</th>
+                      <th className="px-6 py-4 text-sm font-semibold text-neutral-400">{tr('actions')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-neutral-800">
@@ -2866,13 +2896,13 @@ function App() {
                             </span>
                           </td>
                           <td className="px-6 py-4 text-neutral-400">
-                            {formatDisplayDate(expense.date)}
+                            {formatDisplayDate(expense.date, lang)}
                           </td>
                           <td className="px-6 py-4">
                             <button
                               onClick={() => handleDeleteExpense(expense.id)}
                               className="text-neutral-500 hover:text-rose-400 hover:bg-rose-500/10 p-2 rounded-lg transition-all"
-                              title="מחק"
+                              title={tr('delete')}
                             >
                               <Trash2 className="w-5 h-5" />
                             </button>
@@ -2894,7 +2924,7 @@ function App() {
       <footer className="hidden md:block border-t border-neutral-800 bg-neutral-900 mt-8 sm:mt-12">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <p className="text-center text-sm text-neutral-500">
-            מנהל התקציב שלי - נהל את הכסף שלך בצורה חכמה
+            {tr('appName')} - {tr('appTagline')}
           </p>
         </div>
       </footer>

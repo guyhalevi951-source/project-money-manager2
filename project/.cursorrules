@@ -2,3 +2,5 @@
 - Whenever a new feature modifies the database structure, adds new fields, or changes user data access patterns, you must automatically evaluate the current Firestore Security Rules.
 - If the rules need to be updated, provide the full, production-ready rules text inside a markdown code block (similar to the schema with isValidAppData() we used).
 - Include brief step-by-step instructions on where to paste and publish them in the Firebase Console.
+
+GLOBAL RULE: This app is localized. NEVER hardcode text. Always add new strings to `src/translations.ts` and use the LanguageContext. All UI elements must support both RTL and LTR layouts.

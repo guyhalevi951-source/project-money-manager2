@@ -1,5 +1,7 @@
 import { Check } from 'lucide-react';
 import { COLOR_OPTIONS, hexForColor } from '../categories';
+import { useLanguage } from '../LanguageContext';
+import { localizeColorName } from '../translations';
 
 interface CategoryColorPickerProps {
   value: string;
@@ -10,11 +12,14 @@ interface CategoryColorPickerProps {
 export default function CategoryColorPicker({
   value,
   onChange,
-  label = 'צבע',
+  label,
 }: CategoryColorPickerProps) {
+  const { lang, tr } = useLanguage();
+  const resolvedLabel = label ?? tr('color');
+
   return (
     <div>
-      <label className="block text-xs font-medium text-neutral-300 mb-2">{label}</label>
+      <label className="block text-xs font-medium text-neutral-300 mb-2">{resolvedLabel}</label>
       <div className="flex flex-wrap gap-2">
         {COLOR_OPTIONS.map((c) => {
           const selected = value === c.class;
@@ -24,8 +29,8 @@ export default function CategoryColorPicker({
               key={c.class}
               type="button"
               onClick={() => onChange(c.class)}
-              title={c.name}
-              aria-label={c.name}
+              title={localizeColorName(c.name, lang)}
+              aria-label={localizeColorName(c.name, lang)}
               aria-pressed={selected}
               className={`relative shrink-0 w-10 h-10 rounded-full ${c.class} transition-all duration-200 active:scale-95 ${
                 selected

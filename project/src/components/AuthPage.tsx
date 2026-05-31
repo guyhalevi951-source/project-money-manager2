@@ -11,6 +11,7 @@ import {
   signUpWithEmail,
 } from '../firebase';
 import { mapAuthError, validateAuthForm } from '../authErrors';
+import { useLanguage } from '../LanguageContext';
 
 type AuthMode = 'login' | 'signup';
 type LoadingAction = 'email' | 'google' | 'facebook' | 'twitter' | 'guest' | null;
@@ -107,6 +108,7 @@ interface SocialButtonProps {
   className: string;
   signInWithIcon?: boolean;
   ariaLabel?: string;
+  signInWithText?: string;
 }
 
 function SocialButton({
@@ -118,6 +120,7 @@ function SocialButton({
   className,
   signInWithIcon = false,
   ariaLabel,
+  signInWithText,
 }: SocialButtonProps) {
   return (
     <button
@@ -130,7 +133,7 @@ function SocialButton({
     >
       {signInWithIcon ? (
         <>
-          Sign in with {loading ? <Loader2 className="w-5 h-5 animate-spin shrink-0" /> : icon}
+          {signInWithText} {loading ? <Loader2 className="w-5 h-5 animate-spin shrink-0" /> : icon}
         </>
       ) : (
         <>
@@ -143,6 +146,7 @@ function SocialButton({
 }
 
 export default function AuthPage() {
+  const { dir, tr, lang } = useLanguage();
   const [mode, setMode] = useState<AuthMode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -160,14 +164,14 @@ export default function AuthPage() {
   const runAuth = async (action: LoadingAction, fn: () => Promise<unknown>) => {
     setError('');
     if (!firebaseReady) {
-      setError('Firebase לא מוגדר. הוסף את משתני הסביבה בקובץ .env');
+      setError(tr('authFirebaseMissing'));
       return;
     }
     setLoadingAction(action);
     try {
       await fn();
     } catch (err) {
-      setError(mapAuthError(err));
+      setError(mapAuthError(err, lang));
     } finally {
       setLoadingAction(null);
     }
@@ -177,7 +181,7 @@ export default function AuthPage() {
     e.preventDefault();
     setError('');
 
-    const validation = validateAuthForm(mode, email, password);
+    const validation = validateAuthForm(mode, email, password, lang);
     if (validation) {
       setError(validation);
       return;
@@ -194,7 +198,7 @@ export default function AuthPage() {
 
   return (
     <div
-      dir="rtl"
+      dir={dir}
       className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-4 py-10"
       style={{ paddingTop: 'max(2.5rem, env(safe-area-inset-top))', paddingBottom: 'max(2.5rem, env(safe-area-inset-bottom))' }}
     >
@@ -216,8 +220,8 @@ export default function AuthPage() {
             <div className="bg-gradient-to-br from-emerald-500 to-teal-600 p-3 rounded-2xl shadow-lg shadow-emerald-500/25 mb-4">
               <Wallet className="w-8 h-8 text-white" />
             </div>
-            <h1 className="text-2xl font-bold text-slate-100">מנהל התקציב שלי</h1>
-            <p className="text-sm text-slate-400 mt-1">נהל הוצאות בצורה חכמה ובטוחה</p>
+            <h1 className="text-2xl font-bold text-slate-100">{tr('appName')}</h1>
+            <p className="text-sm text-slate-400 mt-1">{tr('authSubtitle')}</p>
           </div>
 
           {/* Login / Sign up toggle */}
@@ -238,7 +242,7 @@ export default function AuthPage() {
                     transition={{ type: 'spring', stiffness: 400, damping: 32 }}
                   />
                 )}
-                <span className="relative z-10">{m === 'login' ? 'כניסה' : 'הרשמה'}</span>
+                <span className="relative z-10">{m === 'login' ? tr('authLogin') : tr('authSignup')}</span>
               </button>
             ))}
           </div>
@@ -256,7 +260,7 @@ export default function AuthPage() {
               <FloatingField
                 id="auth-email"
                 type="email"
-                label="אימייל"
+                label={tr('authEmail')}
                 value={email}
                 onChange={setEmail}
                 autoComplete="email"
@@ -265,7 +269,7 @@ export default function AuthPage() {
               <FloatingField
                 id="auth-password"
                 type="password"
-                label="סיסמה"
+                label={tr('authPassword')}
                 value={password}
                 onChange={setPassword}
                 autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
@@ -273,7 +277,7 @@ export default function AuthPage() {
               />
 
               {mode === 'signup' && (
-                <p className="text-xs text-slate-500 -mt-1">הסיסמה חייבת להכיל לפחות 6 תווים</p>
+                <p className="text-xs text-slate-500 -mt-1">{tr('authPasswordHint')}</p>
               )}
 
               <button
@@ -284,12 +288,12 @@ export default function AuthPage() {
                 {loadingAction === 'email' ? (
                   <>
                     <Loader2 className="w-5 h-5 animate-spin" />
-                    ממתין...
+                    {tr('authWaiting')}
                   </>
                 ) : mode === 'login' ? (
-                  'כניסה לחשבון'
+                  tr('authLoginCta')
                 ) : (
-                  'יצירת חשבון'
+                  tr('authCreateAccount')
                 )}
               </button>
             </motion.form>
@@ -303,7 +307,7 @@ export default function AuthPage() {
 
           <div className="flex items-center gap-3 my-6">
             <div className="flex-1 h-px bg-slate-800" />
-            <span className="text-xs text-slate-500 shrink-0">או</span>
+            <span className="text-xs text-slate-500 shrink-0">{tr('authOr')}</span>
             <div className="flex-1 h-px bg-slate-800" />
           </div>
 
@@ -314,7 +318,8 @@ export default function AuthPage() {
               loading={loadingAction === 'google'}
               icon={<GoogleIcon className="w-5 h-5 shrink-0" />}
               signInWithIcon
-              ariaLabel="Sign in with Google"
+              ariaLabel={`${tr('signInWith')} Google`}
+              signInWithText={tr('signInWith')}
               className="bg-slate-950 border border-slate-700 text-slate-100 hover:bg-slate-900 hover:border-slate-600"
             />
 
@@ -324,7 +329,8 @@ export default function AuthPage() {
               loading={loadingAction === 'facebook'}
               icon={<FacebookIcon className="w-5 h-5 shrink-0 text-white" />}
               signInWithIcon
-              ariaLabel="Sign in with Facebook"
+              ariaLabel={`${tr('signInWith')} Facebook`}
+              signInWithText={tr('signInWith')}
               className="bg-[#1877F2] border border-[#1877F2] text-white hover:bg-[#166FE5] hover:border-[#166FE5] shadow-md shadow-[#1877F2]/20"
             />
 
@@ -334,7 +340,8 @@ export default function AuthPage() {
               loading={loadingAction === 'twitter'}
               icon={<XIcon className="w-5 h-5 shrink-0 text-white" />}
               signInWithIcon
-              ariaLabel="Sign in with X"
+              ariaLabel={`${tr('signInWith')} X`}
+              signInWithText={tr('signInWith')}
               className="bg-black border border-neutral-800 text-white hover:bg-neutral-900 hover:border-neutral-700 shadow-md shadow-black/30"
             />
 
@@ -343,14 +350,14 @@ export default function AuthPage() {
               disabled={loading}
               loading={loadingAction === 'guest'}
               icon={<UserRound className="w-5 h-5 shrink-0 text-slate-400" />}
-              label="המשך כאורח"
+              label={tr('authGuest')}
               className="border border-slate-700/80 bg-slate-900/30 text-slate-300 hover:bg-slate-900/60 hover:border-emerald-500/40 hover:text-slate-100"
             />
           </div>
 
           {!firebaseReady && (
             <p className="mt-4 text-xs text-amber-400/90 text-center leading-relaxed">
-              הגדר את משתני VITE_FIREBASE_* בקובץ .env (ראה .env.example)
+              {tr('authFirebaseHint')}
             </p>
           )}
         </div>
