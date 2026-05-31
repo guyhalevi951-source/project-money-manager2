@@ -1,5 +1,6 @@
 import type { CategoryBreakdownSlice } from '../categories';
 import CategoryIconBadge from './CategoryIconBadge';
+import DisplayMoney from './DisplayMoney';
 import { LocalizedUserText, LtrNumeric, useLanguage } from '../LanguageContext';
 
 interface CategoryBreakdownLegendProps {
@@ -22,9 +23,7 @@ function LegendLine({
         <LocalizedUserText text={item.value} />
       </span>
       <span className="text-neutral-500">: </span>
-      <LtrNumeric className="text-neutral-100 font-semibold whitespace-nowrap">
-        ₪{item.amount.toLocaleString()}
-      </LtrNumeric>
+      <DisplayMoney amount={item.amount} className="text-neutral-100 font-semibold inline-block" />
       <span className="text-neutral-500 whitespace-nowrap">
         {' '}
         (<LtrNumeric>{item.percentage.toFixed(percentageDecimals)}%</LtrNumeric>)
@@ -66,11 +65,13 @@ export default function CategoryBreakdownLegend({
           <span className="text-neutral-300 truncate flex-1">
             <LocalizedUserText text={item.value} />
           </span>
-          <LtrNumeric className="text-neutral-400 font-medium shrink-0">
-            {percentageDecimals > 0
-              ? `${item.percentage.toFixed(percentageDecimals)}%`
-              : `₪${item.amount.toLocaleString()}`}
-          </LtrNumeric>
+          {percentageDecimals > 0 ? (
+            <LtrNumeric className="text-neutral-400 font-medium shrink-0">
+              {item.percentage.toFixed(percentageDecimals)}%
+            </LtrNumeric>
+          ) : (
+            <DisplayMoney amount={item.amount} className="text-neutral-400 font-medium shrink-0 inline-block" />
+          )}
         </div>
       ))}
     </div>

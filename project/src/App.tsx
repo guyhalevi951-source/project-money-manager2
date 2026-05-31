@@ -42,8 +42,19 @@ import { onAuthStateChanged, type User } from 'firebase/auth';
 import { auth, signOutUser } from './firebase';
 import AuthPage from './components/AuthPage';
 import UserProfileMenu from './components/UserProfileMenu';
+import SettingsPage from './components/SettingsPage';
+import ExpenseAmountField from './components/ExpenseAmountField';
+import ExpenseAmountDisplay from './components/ExpenseAmountDisplay';
+import DisplayMoney from './components/DisplayMoney';
 import { LocalizedUserText, LtrNumeric, useLanguage } from './LanguageContext';
 import { localizeCategoryLabel } from './translations';
+import {
+  convertForeignToIls,
+  currencySymbol,
+  fetchExchangeRates,
+  getCachedExchangeRates,
+  type ExpenseCurrency,
+} from './services/exchangeRateService';
 import {
   EMPTY_USER_APP_DATA,
   loadFromFirestore,
@@ -71,6 +82,8 @@ interface Expense {
   category: string;
   // Canonical date stored as ISO 'YYYY-MM-DD' for reliable month filtering.
   date: string;
+  originalAmount?: number;
+  originalCurrency?: string;
 }
 
 // Sentinel value used by the category <select> to trigger the "add custom" flow
@@ -514,7 +527,7 @@ function AnalyticsDonutPanel({
   chartKey: string;
   donutSize?: number;
 }) {
-  const { tr } = useLanguage();
+  const { tr, formatMoney } = useLanguage();
   return (
     <div className="flex items-center gap-4 w-full h-full min-h-0">
       <div
@@ -542,7 +555,7 @@ function AnalyticsDonutPanel({
           </PieChart>
         </ResponsiveContainer>
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-          <span className="text-xl sm:text-2xl font-bold leading-none">₪{total.toLocaleString()}</span>
+          <DisplayMoney amount={total} className="text-xl sm:text-2xl font-bold leading-none" />
           <span className="text-[11px] text-neutral-500 mt-1">{tr('totalShort')}</span>
         </div>
       </div>
@@ -575,7 +588,11 @@ function AnalyticsDonutPanel({
               )}
               <span className="text-neutral-300 truncate flex-1">{item.label}</span>
               <span className="text-neutral-400 font-medium shrink-0 tabular-nums">
-                {item.percentage > 0 ? `${item.percentage.toFixed(2)}%` : `₪${item.amount.toLocaleString()}`}
+                {item.percentage > 0 ? (
+                  `${item.percentage.toFixed(2)}%`
+                ) : (
+                  formatMoney(item.amount)
+                )}
               </span>
             </div>
           ))
@@ -684,7 +701,7 @@ interface TrendLineTooltipProps {
 }
 
 function TrendLineTooltip({ active, payload }: TrendLineTooltipProps) {
-  const { tr, lang } = useLanguage();
+  const { tr, lang, formatMoney } = useLanguage();
   if (!active || !payload?.length) return null;
   const point = payload[0]?.payload;
   if (!point) return null;
@@ -706,9 +723,7 @@ function TrendLineTooltip({ active, payload }: TrendLineTooltipProps) {
       </p>
       <p className="!text-slate-400 text-sm leading-relaxed mt-1.5">
         {tr('amountIls')}:{' '}
-        <span className="!text-slate-100 font-bold tabular-nums">
-          ₪{point.amount.toLocaleString()}
-        </span>
+        <LtrNumeric className="!text-slate-100 font-bold">{formatMoney(point.amount)}</LtrNumeric>
       </p>
     </div>
   );
@@ -1018,11 +1033,11 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                   <div className="text-sm text-neutral-300 space-y-0.5">
                     <p>
                       <span className="text-neutral-500">{tr('totalShort')}: </span>
-                      <span className="font-semibold text-neutral-100">₪{total.toLocaleString()}</span>
+                      <DisplayMoney amount={total} className="font-semibold text-neutral-100 inline-block" />
                     </p>
                     <p>
                       <span className="text-neutral-500">{tr('average')}: </span>
-                      <span className="font-semibold text-neutral-100">₪{average.toFixed(2)}</span>
+                      <DisplayMoney amount={average} className="font-semibold text-neutral-100 inline-block" />
                     </p>
                   </div>
                 </div>
@@ -1188,7 +1203,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                         </span>
                       </div>
                       <LtrNumeric className="font-semibold shrink-0">
-                        ₪{b.amount.toLocaleString()}
+                        <DisplayMoney amount={b.amount} className="inline-block" />
                       </LtrNumeric>
                     </div>
                     <div className="h-2 rounded-full bg-neutral-800 overflow-hidden">
@@ -1311,9 +1326,7 @@ function SpendingDonut({
               </PieChart>
             </ResponsiveContainer>
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <LtrNumeric className="text-xl font-bold text-neutral-100 leading-none">
-                ₪{total.toLocaleString()}
-              </LtrNumeric>
+              <DisplayMoney amount={total} className="text-xl font-bold leading-none" />
               <span className="text-[11px] text-neutral-500 mt-1">{tr('totalShort')}</span>
             </div>
           </div>
@@ -1389,7 +1402,7 @@ function SubBudgetTracker({
   onSetSubBudget,
   onRemoveSubBudget,
 }: SubBudgetTrackerProps) {
-  const { tr, ensureUserContents } = useLanguage();
+  const { tr, ensureUserContents, formatMoney } = useLanguage();
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [newSubBudgetColor, setNewSubBudgetColor] = useState(DEFAULT_CATEGORY_COLOR);
@@ -1600,12 +1613,10 @@ function SubBudgetTracker({
                 </PieChart>
               </ResponsiveContainer>
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <LtrNumeric className="text-2xl font-bold text-neutral-100 leading-none">
-                  ₪{totalSpent.toLocaleString()}
-                </LtrNumeric>
+                <DisplayMoney amount={totalSpent} className="text-2xl font-bold text-neutral-100 leading-none" />
                 <span className="text-[11px] text-neutral-500 mt-1">
                   <LtrNumeric>
-                    {tr('outOf')} ₪{budget.toLocaleString()}
+                    {tr('outOf')} {formatMoney(budget)}
                   </LtrNumeric>
                 </span>
               </div>
@@ -1626,7 +1637,7 @@ function SubBudgetTracker({
                   </p>
                   <p className="text-xs mt-0.5 text-gray-300">{activeDonutSlice.status}</p>
                   <p className="text-base font-bold mt-2 text-white">
-                    <LtrNumeric>₪{activeDonutSlice.amount.toLocaleString()}</LtrNumeric>
+                    <DisplayMoney amount={activeDonutSlice.amount} className="inline-block" />
                   </p>
                   <p className="text-xs mt-0.5 text-gray-300">
                     <LtrNumeric>{activeDonutSlice.percentage.toFixed(0)}%</LtrNumeric>
@@ -1636,14 +1647,12 @@ function SubBudgetTracker({
                 <>
                   <p className="text-sm font-semibold text-white whitespace-nowrap">
                     {tr('totalBudgetLabel')}:{' '}
-                    <LtrNumeric className="text-base font-bold">
-                      ₪{budget.toLocaleString()}
-                    </LtrNumeric>
+                    <DisplayMoney amount={budget} className="text-base font-bold inline-block" />
                   </p>
                   <p className="text-xs mt-0.5 text-gray-300">
                     {tr('spentLabel')}:{' '}
                     <LtrNumeric>
-                      ₪{totalSpent.toLocaleString()}
+                      {formatMoney(totalSpent)}
                       {budget > 0 ? ` (${((totalSpent / budget) * 100).toFixed(0)}%)` : ''}
                     </LtrNumeric>
                   </p>
@@ -1717,9 +1726,9 @@ function SubBudgetTracker({
                         <span className="text-sm shrink-0 text-neutral-300">
                           <LtrNumeric>
                             <span className={overspent ? 'text-rose-400 font-semibold' : 'text-neutral-100 font-semibold'}>
-                              ₪{env.spent.toLocaleString()}
+                              {formatMoney(env.spent)}
                             </span>
-                            <span className="text-neutral-500"> / ₪{env.allocated.toLocaleString()}</span>
+                            <span className="text-neutral-500"> / {formatMoney(env.allocated)}</span>
                           </LtrNumeric>
                         </span>
                       </div>
@@ -1836,14 +1845,18 @@ function SubBudgetTracker({
                   );
                 })}
                 <div className="flex items-center justify-between pt-1 text-xs">
-                  <span className="text-neutral-500">
-                    {tr('allocated')}: ₪{allocatedTotal.toLocaleString()} / ₪{budget.toLocaleString()}
-                  </span>
-                  <span className={allocatedTotal > budget ? 'text-rose-400 font-medium' : 'text-neutral-500'}>
+                  <LtrNumeric className="text-neutral-500">
+                    {tr('allocated')}: {formatMoney(allocatedTotal)} / {formatMoney(budget)}
+                  </LtrNumeric>
+                  <LtrNumeric
+                    className={
+                      allocatedTotal > budget ? 'text-rose-400 font-medium' : 'text-neutral-500'
+                    }
+                  >
                     {allocatedTotal > budget
-                      ? `${tr('overBudget')}: ₪${(allocatedTotal - budget).toLocaleString()}`
-                      : `${tr('unallocated')}: ₪${generalAllocated.toLocaleString()}`}
-                  </span>
+                      ? `${tr('overBudget')}: ${formatMoney(allocatedTotal - budget)}`
+                      : `${tr('unallocated')}: ${formatMoney(generalAllocated)}`}
+                  </LtrNumeric>
                 </div>
               </div>
             )}
@@ -1876,8 +1889,7 @@ function BudgetChangeModal({
   onSelect,
   onClose,
 }: BudgetChangeModalProps) {
-  const { tr, dir } = useLanguage();
-  // Close on Escape for keyboard users.
+  const { tr, dir, formatMoney } = useLanguage();
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -1969,9 +1981,9 @@ function BudgetChangeModal({
         <div className="flex items-center justify-between gap-3 bg-neutral-800/60 border border-neutral-700/60 rounded-2xl px-4 py-3 mb-5">
           <span className="text-xs text-neutral-500 capitalize truncate">{monthLabel}</span>
           <div className="flex items-center gap-2 shrink-0">
-            <span className="text-sm text-neutral-500 line-through">₪{currentBudget.toLocaleString()}</span>
+            <LtrNumeric className="text-sm text-neutral-500 line-through">{formatMoney(currentBudget)}</LtrNumeric>
             <ChevronLeft className="w-4 h-4 text-neutral-600" />
-            <span className="text-base font-bold text-emerald-400">₪{newBudget.toLocaleString()}</span>
+            <DisplayMoney amount={newBudget} className="text-base font-bold text-emerald-400 inline-block" />
           </div>
         </div>
 
@@ -2012,7 +2024,8 @@ function BudgetChangeModal({
 }
 
 function App() {
-  const { tr, dir, lang, getUserContent, ensureUserContents, keepOriginalValues } = useLanguage();
+  const { tr, dir, lang, getUserContent, ensureUserContents, keepOriginalValues, formatMoney, displayCurrency } =
+    useLanguage();
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [dataReady, setDataReady] = useState(false);
@@ -2037,19 +2050,35 @@ function App() {
   const [newExpense, setNewExpense] = useState({
     description: '',
     amount: '',
+    currency: 'ILS' as ExpenseCurrency,
     category: CATEGORIES[0]?.value ?? '',
     date: toISODate(new Date()),
   });
+  const [expenseRatesReady, setExpenseRatesReady] = useState(true);
   const [showBudgetSaved, setShowBudgetSaved] = useState(false);
 
   // Active top-level navigation tab.
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsReturnTabRef = useRef<TabId>('dashboard');
   const [navOpen, setNavOpen] = useState(false);
   const chartDateSetterRef = useRef<((iso: string) => void) | null>(null);
 
   const handleTabSelect = (id: TabId) => {
     setActiveTab(id);
     setNavOpen(false);
+    setSettingsOpen(false);
+  };
+
+  const openSettings = () => {
+    settingsReturnTabRef.current = activeTab;
+    setNavOpen(false);
+    setSettingsOpen(true);
+  };
+
+  const closeSettings = () => {
+    setSettingsOpen(false);
+    setActiveTab(settingsReturnTabRef.current);
   };
 
   const handleLogout = async () => {
@@ -2168,9 +2197,11 @@ function App() {
     setNewExpense({
       description: '',
       amount: '',
+      currency: 'ILS',
       category: CATEGORIES[0]?.value ?? '',
       date: toISODate(new Date()),
     });
+    setExpenseRatesReady(true);
   };
 
   // Load persisted data when auth state changes (Firestore for signed-in users, localStorage for guests).
@@ -2282,28 +2313,57 @@ function App() {
   // Add new expense
   const handleAddExpense = (e: React.FormEvent) => {
     e.preventDefault();
-    const amount = parseFloat(newExpense.amount);
+    const foreignAmount = parseFloat(newExpense.amount);
 
-    if (newExpense.description.trim() && !isNaN(amount) && amount > 0) {
+    if (!newExpense.description.trim() || isNaN(foreignAmount) || !(foreignAmount > 0)) return;
+
+    const resolveIlsAmount = async (): Promise<number | null> => {
+      if (newExpense.currency === 'ILS') return foreignAmount;
+
+      const rates = getCachedExchangeRates() ?? (await fetchExchangeRates().catch(() => null));
+      if (!rates) return null;
+
+      const converted = convertForeignToIls(foreignAmount, newExpense.currency, rates);
+      if (converted == null) return null;
+
+      return Math.round(converted * 100) / 100;
+    };
+
+    void resolveIlsAmount().then((ilsAmount) => {
+      if (ilsAmount == null || !(ilsAmount > 0)) return;
+
       const isoDate = normalizeDate(newExpense.date);
       const expense: Expense = {
         id: Date.now().toString(),
         description: newExpense.description.trim(),
-        amount: amount,
+        amount: ilsAmount,
         category: newExpense.category,
         date: isoDate,
+        ...(newExpense.currency !== 'ILS' && {
+          originalAmount: foreignAmount,
+          originalCurrency: currencySymbol(newExpense.currency),
+        }),
       };
 
       setExpenses([expense, ...expenses]);
-      setNewExpense({ description: '', amount: '', category: CATEGORIES[0]?.value ?? '', date: toISODate(new Date()) });
+      setNewExpense({
+        description: '',
+        amount: '',
+        currency: 'ILS',
+        category: CATEGORIES[0]?.value ?? '',
+        date: toISODate(new Date()),
+      });
+      setExpenseRatesReady(true);
 
       chartDateSetterRef.current?.(isoDate);
 
-      // Jump the view to the month of the new expense so it's immediately visible.
       const [y, m] = isoDate.split('-').map((n) => parseInt(n, 10));
       setSelectedDate(new Date(y, m - 1, 1));
-    }
+    });
   };
+
+  const expenseSubmitBlocked =
+    newExpense.currency !== 'ILS' && !expenseRatesReady;
 
   // Delete expense
   const handleDeleteExpense = (id: string) => {
@@ -2542,7 +2602,12 @@ function App() {
             </div>
 
             <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-              <UserProfileMenu user={user} userName={userName} onLogout={handleLogout} />
+              <UserProfileMenu
+                user={user}
+                userName={userName}
+                onLogout={handleLogout}
+                onOpenSettings={openSettings}
+              />
               <CollapsibleNavMenu
                 variant="desktop"
                 activeTab={activeTab}
@@ -2556,6 +2621,10 @@ function App() {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 pb-24 md:pb-10">
+        {settingsOpen ? (
+          <SettingsPage onBack={closeSettings} />
+        ) : (
+          <>
         {/* ============================ DASHBOARD ============================ */}
         {activeTab === 'dashboard' && (
           <>
@@ -2571,7 +2640,7 @@ function App() {
                 <Wallet className="w-5 h-5 text-emerald-400" />
               </div>
             </div>
-            <p className="text-2xl sm:text-3xl font-bold text-neutral-100">₪{budget.toLocaleString()}</p>
+            <DisplayMoney amount={budget} className="text-2xl sm:text-3xl font-bold text-neutral-100" />
             <p className="text-sm text-neutral-500 mt-2">{tr('budgetAllocatedHint')}</p>
           </div>
 
@@ -2583,9 +2652,10 @@ function App() {
                 <TrendingDown className="w-5 h-5 text-rose-400" />
               </div>
             </div>
-            <p className={`text-2xl sm:text-3xl font-bold ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}>
-              ₪{totalExpenses.toLocaleString()}
-            </p>
+            <DisplayMoney
+              amount={totalExpenses}
+              className={`text-2xl sm:text-3xl font-bold ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}
+            />
             <p className="text-sm text-neutral-500 mt-2">
               {monthExpenses.length} • {monthLabel}
             </p>
@@ -2614,9 +2684,10 @@ function App() {
               </div>
             )}
 
-            <p className={`text-2xl font-bold ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}>
-              {remaining >= 0 ? `₪${remaining.toLocaleString()}` : `-₪${Math.abs(remaining).toLocaleString()}`}
-            </p>
+            <DisplayMoney
+              amount={remaining}
+              className={`text-2xl font-bold ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}
+            />
             <p className="text-sm text-neutral-500 mt-2">
               {remaining >= 0 ? tr('remainingInBudget') : tr('overBudget')}
             </p>
@@ -2663,20 +2734,13 @@ function App() {
               />
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-neutral-300 mb-2">{tr('amountIls')}</label>
-              <input
-                type="number"
-                inputMode="decimal"
-                value={newExpense.amount}
-                onChange={(e) => setNewExpense({ ...newExpense, amount: e.target.value })}
-                placeholder="0.00"
-                className="w-full px-4 py-3 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base"
-                min="0"
-                step="0.01"
-                required
-              />
-            </div>
+            <ExpenseAmountField
+              amount={newExpense.amount}
+              currency={newExpense.currency}
+              onAmountChange={(amount) => setNewExpense({ ...newExpense, amount })}
+              onCurrencyChange={(currency) => setNewExpense({ ...newExpense, currency })}
+              onRatesReadyChange={setExpenseRatesReady}
+            />
 
             <div>
               <label className="block text-sm font-medium text-neutral-300 mb-2">{tr('date')}</label>
@@ -2727,7 +2791,8 @@ function App() {
             <div className="flex items-end sm:col-span-2 lg:col-span-1">
               <button
                 type="submit"
-                className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-6 py-3 rounded-xl font-medium hover:from-emerald-600 hover:to-teal-700 transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 active:scale-[0.98]"
+                disabled={expenseSubmitBlocked}
+                className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-6 py-3 rounded-xl font-medium hover:from-emerald-600 hover:to-teal-700 transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:from-emerald-500 disabled:hover:to-teal-600"
               >
                 <Plus className="w-5 h-5" />
                 {tr('addExpense')}
@@ -2766,7 +2831,11 @@ function App() {
                     inputMode="decimal"
                     value={budgetInput}
                     onChange={(e) => setBudgetInput(e.target.value)}
-                    placeholder={budget > 0 ? `${tr('currentAmountPrefix')}: ₪${budget.toLocaleString()}` : tr('enterAmount')}
+                    placeholder={
+                      budget > 0
+                        ? `${tr('currentAmountPrefix')}: ${formatMoney(budget)}`
+                        : tr('enterAmount')
+                    }
                     className="w-full px-4 py-3 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base sm:text-lg"
                     min="0"
                     step="100"
@@ -2807,7 +2876,8 @@ function App() {
           <div className="p-4 sm:p-6 border-b border-neutral-800">
             <h2 className="text-base sm:text-lg font-semibold text-neutral-100">{tr('expenseHistoryTitle')}</h2>
             <p className="text-sm text-neutral-500 mt-1">
-              {historyExpenses.length} • {tr('totalShort')} ₪{historyTotal.toLocaleString()}
+              {historyExpenses.length} • {tr('totalShort')}{' '}
+              <DisplayMoney amount={historyTotal} className="inline-block font-medium" />
             </p>
 
             <div
@@ -2913,9 +2983,12 @@ function App() {
                           </div>
                         </div>
                         <div className="shrink-0 text-left">
-                          <p className="text-base font-semibold text-neutral-100 whitespace-nowrap">
-                            ₪{expense.amount.toLocaleString()}
-                          </p>
+                          <ExpenseAmountDisplay
+                            amount={expense.amount}
+                            originalAmount={expense.originalAmount}
+                            originalCurrency={expense.originalCurrency}
+                            variant="card"
+                          />
                         </div>
                         <button
                           onClick={() => handleDeleteExpense(expense.id)}
@@ -2937,7 +3010,9 @@ function App() {
                   <thead className="bg-neutral-800/50">
                     <tr>
                       <th className="text-right px-6 py-4 text-sm font-semibold text-neutral-400">{tr('description')}</th>
-                      <th className="text-right px-6 py-4 text-sm font-semibold text-neutral-400">{tr('amountIls')}</th>
+                      <th className="text-right px-6 py-4 text-sm font-semibold text-neutral-400">
+                        {tr('amountLabel')} ({currencySymbol(displayCurrency)})
+                      </th>
                       <th className="text-right px-6 py-4 text-sm font-semibold text-neutral-400">{tr('category')}</th>
                       <th className="text-right px-6 py-4 text-sm font-semibold text-neutral-400">{tr('date')}</th>
                       <th className="px-6 py-4 text-sm font-semibold text-neutral-400">{tr('actions')}</th>
@@ -2954,9 +3029,11 @@ function App() {
                             <LocalizedUserText text={expense.description} className="font-medium text-neutral-100" />
                           </td>
                           <td className="px-6 py-4">
-                            <span className="text-lg font-semibold text-neutral-100">
-                              ₪{expense.amount.toLocaleString()}
-                            </span>
+                            <ExpenseAmountDisplay
+                              amount={expense.amount}
+                              originalAmount={expense.originalAmount}
+                              originalCurrency={expense.originalCurrency}
+                            />
                           </td>
                           <td className="px-6 py-4">
                             <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium text-white ${categoryInfo.color}`}>
@@ -2987,9 +3064,12 @@ function App() {
 
         </div>
         )}
+          </>
+        )}
       </main>
 
       {/* Footer (desktop only; mobile uses the bottom nav) */}
+      {!settingsOpen && (
       <footer className="hidden md:block border-t border-neutral-800 bg-neutral-900 mt-8 sm:mt-12">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <p className="text-center text-sm text-neutral-500">
@@ -2997,8 +3077,10 @@ function App() {
           </p>
         </div>
       </footer>
+      )}
 
       {/* Mobile floating action menu (collapsed FAB by default) */}
+      {!settingsOpen && (
       <CollapsibleNavMenu
         variant="mobile"
         activeTab={activeTab}
@@ -3008,6 +3090,7 @@ function App() {
         userEmail={userDisplayLabel}
         onLogout={handleLogout}
       />
+      )}
 
       {/* Budget change confirmation modal */}
       <BudgetChangeModal

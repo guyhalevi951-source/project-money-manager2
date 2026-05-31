@@ -8,6 +8,8 @@ export interface StoredExpense {
   amount: number;
   category: string;
   date: string;
+  originalAmount?: number;
+  originalCurrency?: string;
 }
 
 export interface StoredCustomCategory {

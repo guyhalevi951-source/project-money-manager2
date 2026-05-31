@@ -9,6 +9,17 @@ import {
 } from 'react';
 import { dirByLang, localizeCategoryLabel, t, type Dir, type Lang, type TranslationKey } from './translations';
 import { lookupFallbackTranslation, translateText } from './services/translationService';
+import {
+  fetchExchangeRates,
+  getCachedExchangeRates,
+  type ExpenseCurrency,
+  type ExchangeRates,
+} from './services/exchangeRateService';
+import {
+  formatMoneyFromIls,
+  resolveExpenseDisplayAmount,
+  type ExpenseDisplayAmount,
+} from './services/displayCurrencyUtils';
 
 interface LanguageContextValue {
   lang: Lang;
@@ -16,6 +27,14 @@ interface LanguageContextValue {
   setLang: (next: Lang) => void;
   keepOriginalValues: boolean;
   setKeepOriginalValues: (next: boolean) => void;
+  displayCurrency: ExpenseCurrency;
+  setDisplayCurrency: (next: ExpenseCurrency) => void;
+  formatMoney: (ilsAmount: number) => string;
+  formatExpenseMoney: (
+    ilsAmount: number,
+    originalAmount?: number,
+    originalCurrency?: string,
+  ) => ExpenseDisplayAmount;
   tr: (key: TranslationKey) => string;
   getUserContent: (text: string) => string;
   isUserContentLoading: (text: string) => boolean;
@@ -27,6 +46,17 @@ const LanguageContext = createContext<LanguageContextValue | null>(null);
 
 const LANGUAGE_STORAGE_KEY = 'money-manager-language';
 const KEEP_ORIGINAL_VALUES_STORAGE_KEY = 'money-manager-keep-original-values';
+const DISPLAY_CURRENCY_STORAGE_KEY = 'money-manager-display-currency';
+
+const VALID_DISPLAY_CURRENCIES: ExpenseCurrency[] = ['ILS', 'USD', 'EUR', 'GBP'];
+
+function getInitialDisplayCurrency(): ExpenseCurrency {
+  const fromStorage = window.localStorage.getItem(DISPLAY_CURRENCY_STORAGE_KEY);
+  if (fromStorage && VALID_DISPLAY_CURRENCIES.includes(fromStorage as ExpenseCurrency)) {
+    return fromStorage as ExpenseCurrency;
+  }
+  return 'ILS';
+}
 
 const hasHebrew = (text: string) => /[\u0590-\u05FF]/.test(text);
 const detectSourceLang = (text: string): Lang => (hasHebrew(text) ? 'he' : 'en');
@@ -68,6 +98,12 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     const fromStorage = window.localStorage.getItem(KEEP_ORIGINAL_VALUES_STORAGE_KEY);
     return fromStorage === 'true';
   });
+  const [displayCurrency, setDisplayCurrency] = useState<ExpenseCurrency>(() =>
+    getInitialDisplayCurrency(),
+  );
+  const [exchangeRates, setExchangeRates] = useState<ExchangeRates | null>(() =>
+    getCachedExchangeRates(),
+  );
   const [translatedMap, setTranslatedMap] = useState<Record<string, string>>({});
   const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({});
   const translatedMapRef = useRef(translatedMap);
@@ -91,9 +127,52 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   }, [keepOriginalValues]);
 
   useEffect(() => {
+    window.localStorage.setItem(DISPLAY_CURRENCY_STORAGE_KEY, displayCurrency);
+  }, [displayCurrency]);
+
+  useEffect(() => {
+    const cached = getCachedExchangeRates();
+    if (cached) {
+      setExchangeRates(cached);
+      return;
+    }
+
+    let cancelled = false;
+    void fetchExchangeRates()
+      .then((rates) => {
+        if (!cancelled) setExchangeRates(rates);
+      })
+      .catch(() => {
+        // Keep showing ILS fallback via formatMoneyFromIls when rates are unavailable.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     document.documentElement.lang = lang;
     document.documentElement.dir = dir;
   }, [lang, dir]);
+
+  const formatMoney = useCallback(
+    (ilsAmount: number) =>
+      formatMoneyFromIls(ilsAmount, displayCurrency, exchangeRates ?? getCachedExchangeRates()),
+    [displayCurrency, exchangeRates],
+  );
+
+  const formatExpenseMoney = useCallback(
+    (ilsAmount: number, originalAmount?: number, originalCurrency?: string) =>
+      resolveExpenseDisplayAmount(
+        ilsAmount,
+        displayCurrency,
+        exchangeRates ?? getCachedExchangeRates(),
+        originalAmount,
+        originalCurrency,
+      ),
+    [displayCurrency, exchangeRates],
+  );
 
   const ensureUserContent = useCallback(
     async (text: string) => {
@@ -160,6 +239,10 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       setLang,
       keepOriginalValues,
       setKeepOriginalValues,
+      displayCurrency,
+      setDisplayCurrency,
+      formatMoney,
+      formatExpenseMoney,
       tr: (key) => t(lang, key),
       getUserContent,
       isUserContentLoading,
@@ -170,6 +253,9 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       lang,
       dir,
       keepOriginalValues,
+      displayCurrency,
+      formatMoney,
+      formatExpenseMoney,
       getUserContent,
       isUserContentLoading,
       ensureUserContent,
