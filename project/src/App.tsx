@@ -26,9 +26,9 @@ import {
   CATEGORIES,
   ICON_OPTIONS,
   resolveIcon,
-  COLOR_OPTIONS,
   DEFAULT_CATEGORY_COLOR,
   hexForColor,
+  isValidCategoryColor,
   aggregateByCategory,
   lookupCategory,
   type Category,
@@ -46,6 +46,7 @@ import SettingsPage from './components/SettingsPage';
 import ExpenseAmountField from './components/ExpenseAmountField';
 import ExpenseAmountDisplay from './components/ExpenseAmountDisplay';
 import DisplayMoney from './components/DisplayMoney';
+import CategoryColorChip from './components/CategoryColorChip';
 import { LocalizedUserText, LtrNumeric, useLanguage } from './LanguageContext';
 import { localizeCategoryLabel } from './translations';
 import {
@@ -1704,7 +1705,7 @@ function SubBudgetTracker({
                         <Icon className="w-5 h-5" />
                       </div>
                     ) : (
-                      <CategoryIconBadge icon={Icon} colorClass={env.color} size="large" />
+                      <CategoryIconBadge icon={Icon} hex={env.hex} colorClass={env.color} size="large" />
                     )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2 mb-1.5">
@@ -2430,9 +2431,7 @@ function App() {
     const trimmed = rawName.trim();
     if (!trimmed || trimmed === ADD_CUSTOM_VALUE || !(amount > 0)) return;
 
-    const chosenColor = COLOR_OPTIONS.some((c) => c.class === colorClass)
-      ? colorClass
-      : DEFAULT_CATEGORY_COLOR;
+    const chosenColor = isValidCategoryColor(colorClass) ? colorClass : DEFAULT_CATEGORY_COLOR;
 
     const existing = allCategories.find(
       (c) =>
@@ -3036,10 +3035,9 @@ function App() {
                             />
                           </td>
                           <td className="px-6 py-4">
-                            <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium text-white ${categoryInfo.color}`}>
-                              <IconComponent className="w-4 h-4" />
+                            <CategoryColorChip color={categoryInfo.color} icon={IconComponent}>
                               <LocalizedUserText text={expense.category} />
-                            </span>
+                            </CategoryColorChip>
                           </td>
                           <td className="px-6 py-4 text-neutral-400">
                             {formatDisplayDate(expense.date, lang)}

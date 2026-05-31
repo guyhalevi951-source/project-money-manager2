@@ -1,4 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
+import { hexForColor } from '../categories';
 
 type BadgeSize = 'compact' | 'default' | 'large';
 
@@ -26,11 +27,12 @@ export default function CategoryIconBadge({
   className = '',
 }: CategoryIconBadgeProps) {
   const s = SIZE_CLASSES[size];
+  const backgroundColor = hex ?? hexForColor(colorClass);
 
   return (
     <div
-      className={`shrink-0 flex items-center justify-center text-white ${hex ? '' : colorClass} ${s.box} ${s.rounded} ${className}`}
-      style={hex ? { backgroundColor: hex } : undefined}
+      className={`shrink-0 flex items-center justify-center text-white ${s.box} ${s.rounded} ${className}`}
+      style={{ backgroundColor }}
       aria-hidden
     >
       <Icon className={s.icon} />

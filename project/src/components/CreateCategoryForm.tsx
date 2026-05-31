@@ -1,6 +1,7 @@
 import { Plus, X, Check } from 'lucide-react';
 import { ICON_OPTIONS, resolveIcon, DEFAULT_CATEGORY_COLOR } from '../categories';
 import CategoryColorPicker from './CategoryColorPicker';
+import CategoryColorChip from './CategoryColorChip';
 import { useLanguage } from '../LanguageContext';
 
 interface CreateCategoryFormProps {
@@ -84,12 +85,9 @@ export default function CreateCategoryForm({
 
       <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-neutral-700/80">
         <span className="text-xs text-neutral-400 w-full sm:w-auto">{tr('preview')}</span>
-        <span
-          className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${color || DEFAULT_CATEGORY_COLOR} text-white`}
-        >
-          <PreviewIcon className="w-4 h-4" />
+        <CategoryColorChip color={color || DEFAULT_CATEGORY_COLOR} icon={PreviewIcon}>
           {name.trim() || tr('newCategory')}
-        </span>
+        </CategoryColorChip>
       </div>
 
       {error && <p className="text-rose-400 text-xs">{error}</p>}

@@ -66,6 +66,23 @@ export const COLOR_OPTIONS: { name: string; class: string }[] = [
   { name: 'ורוד בהיר', class: 'bg-pink-500' },
 ];
 
+/** Curated quick-select palette for category / sub-budget pickers. */
+export const THEME_COLOR_PRESETS = [
+  COLOR_OPTIONS.find((c) => c.class === 'bg-emerald-500')!,
+  COLOR_OPTIONS.find((c) => c.class === 'bg-violet-500')!,
+  COLOR_OPTIONS.find((c) => c.class === 'bg-blue-500')!,
+  COLOR_OPTIONS.find((c) => c.class === 'bg-rose-500')!,
+  COLOR_OPTIONS.find((c) => c.class === 'bg-amber-500')!,
+  COLOR_OPTIONS.find((c) => c.class === 'bg-cyan-500')!,
+];
+
+const CUSTOM_HEX_PATTERN = /^#[0-9A-Fa-f]{6}$/;
+
+export const isCustomHexColor = (value: string): boolean =>
+  CUSTOM_HEX_PATTERN.test(value.trim());
+
+export const normalizeCustomHex = (value: string): string => value.trim().toUpperCase();
+
 const TAILWIND_HEX: Record<string, string> = {
   'bg-amber-500': '#f59e0b',
   'bg-orange-500': '#f97316',
@@ -85,7 +102,13 @@ const TAILWIND_HEX: Record<string, string> = {
   'bg-lime-600': '#65a30d',
 };
 
-export const hexForColor = (colorClass: string): string => TAILWIND_HEX[colorClass] ?? '#64748b';
+export const hexForColor = (colorValue: string): string => {
+  if (isCustomHexColor(colorValue)) return normalizeCustomHex(colorValue);
+  return TAILWIND_HEX[colorValue] ?? '#64748b';
+};
+
+export const isValidCategoryColor = (value: string): boolean =>
+  isCustomHexColor(value) || Boolean(TAILWIND_HEX[value]);
 
 /** Lighten (+) or darken (-) a hex color by mixing toward white/black. */
 export function adjustColorBrightness(hex: string, percent: number): string {

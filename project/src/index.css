@@ -99,3 +99,29 @@ button:focus {
   padding: 0 !important;
   margin: 0 !important;
 }
+
+.advanced-hue-slider {
+  background-color: transparent;
+}
+
+.advanced-hue-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  border: 2px solid #ffffff;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.45);
+  cursor: pointer;
+}
+
+.advanced-hue-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  border: 2px solid #ffffff;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.45);
+  cursor: pointer;
+}
