@@ -27,8 +27,13 @@ import {
   RotateCcw,
   Layers,
   ChevronUp,
+  LogOut,
+  Loader2,
   type LucideIcon
 } from 'lucide-react';
+import { onAuthStateChanged, type User } from 'firebase/auth';
+import { auth, signOutUser } from './firebase';
+import AuthPage from './components/AuthPage';
 import {
   PieChart,
   Pie,
@@ -315,6 +320,8 @@ interface CollapsibleNavMenuProps {
   onOpenChange: (open: boolean) => void;
   onTabSelect: (id: TabId) => void;
   variant: 'mobile' | 'desktop';
+  userEmail?: string | null;
+  onLogout?: () => void;
 }
 
 // Space-saving collapsible nav: FAB on mobile, compact toggle in header on desktop.
@@ -324,6 +331,8 @@ function CollapsibleNavMenu({
   onOpenChange,
   onTabSelect,
   variant,
+  userEmail,
+  onLogout,
 }: CollapsibleNavMenuProps) {
   const active = TABS.find((t) => t.id === activeTab) ?? TABS[0];
   const ActiveIcon = active.icon;
@@ -403,7 +412,28 @@ function CollapsibleNavMenu({
             role="menu"
             aria-hidden={!open}
           >
+            {userEmail && (
+              <p
+                className="text-center text-xs text-slate-500 truncate px-2 py-1 border-b border-slate-800/80 mb-1"
+                title={userEmail}
+              >
+                {userEmail}
+              </p>
+            )}
             {[...TABS].reverse().map((tab, i) => tabButton(tab, TABS.length - 1 - i))}
+            {onLogout && (
+              <button
+                type="button"
+                onClick={() => {
+                  onLogout();
+                  onOpenChange(false);
+                }}
+                className="w-full flex items-center gap-2.5 px-4 py-3.5 rounded-2xl border border-rose-500/30 bg-rose-500/10 text-rose-300 text-sm font-medium hover:bg-rose-500/20 transition-all active:scale-[0.98]"
+              >
+                <LogOut className="w-5 h-5 shrink-0" />
+                <span className="flex-1 text-right">התנתק</span>
+              </button>
+            )}
           </div>
 
           {/* Collapsed / active FAB pill */}
@@ -470,6 +500,27 @@ function CollapsibleNavMenu({
           }`}
         >
           {TABS.map((tab, i) => tabButton(tab, i))}
+          {onLogout && (
+            <>
+              <div className="h-px bg-slate-700/80 my-1" />
+              {userEmail && (
+                <p className="px-2 py-1 text-[11px] text-slate-500 truncate" title={userEmail}>
+                  {userEmail}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  onLogout();
+                  onOpenChange(false);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium text-rose-300 hover:bg-rose-500/15 border border-transparent hover:border-rose-500/30 transition-all"
+              >
+                <LogOut className="w-4 h-4 shrink-0" />
+                התנתק
+              </button>
+            </>
+          )}
         </div>
       </div>
     </>
@@ -1827,6 +1878,17 @@ function BudgetChangeModal({
 }
 
 function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      setUser(firebaseUser);
+      setAuthReady(true);
+    });
+    return unsubscribe;
+  }, []);
+
   // Monthly budget is scoped per month ('YYYY-MM' -> amount) so changing one
   // month never affects another month's history.
   const [budgetsByMonth, setBudgetsByMonth] = useState<Record<string, number>>({});
@@ -1851,6 +1913,16 @@ function App() {
   const handleTabSelect = (id: TabId) => {
     setActiveTab(id);
     setNavOpen(false);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOutUser();
+      setNavOpen(false);
+      setActiveTab('dashboard');
+    } catch {
+      // sign-out errors are rare; user state will sync via onAuthStateChanged
+    }
   };
 
   // Search query for the Expenses history page.
@@ -2230,8 +2302,29 @@ function App() {
     </div>
   );
 
+  if (!authReady) {
+    return (
+      <div
+        dir="rtl"
+        className="min-h-screen bg-slate-950 flex items-center justify-center text-neutral-100"
+      >
+        <Loader2 className="w-9 h-9 text-emerald-500 animate-spin" aria-label="טוען" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <AuthPage />;
+  }
+
   return (
-    <div dir="rtl" className="min-h-screen bg-neutral-950 text-neutral-100">
+    <motion.div
+      dir="rtl"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.45, ease: 'easeOut' }}
+      className="min-h-screen bg-neutral-950 text-neutral-100"
+    >
       {/* Header + desktop nav */}
       <header
         className="bg-neutral-900/80 backdrop-blur shadow-lg shadow-black/20 border-b border-neutral-800 sticky top-0 z-20"
@@ -2249,14 +2342,33 @@ function App() {
               </div>
             </div>
 
-            {/* Desktop collapsible nav toggle */}
-            <CollapsibleNavMenu
-              variant="desktop"
-              activeTab={activeTab}
-              open={navOpen}
-              onOpenChange={setNavOpen}
-              onTabSelect={handleTabSelect}
-            />
+            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+              <div className="hidden sm:flex items-center gap-2 max-w-[200px]">
+                <span
+                  className="text-xs text-slate-400 truncate"
+                  title={user.email ?? undefined}
+                >
+                  {user.email}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-rose-300 border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 transition-colors"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  התנתק
+                </button>
+              </div>
+              <CollapsibleNavMenu
+                variant="desktop"
+                activeTab={activeTab}
+                open={navOpen}
+                onOpenChange={setNavOpen}
+                onTabSelect={handleTabSelect}
+                userEmail={user.email}
+                onLogout={handleLogout}
+              />
+            </div>
           </div>
         </div>
       </header>
@@ -2741,6 +2853,8 @@ function App() {
         open={navOpen}
         onOpenChange={setNavOpen}
         onTabSelect={handleTabSelect}
+        userEmail={user.email}
+        onLogout={handleLogout}
       />
 
       {/* Budget change confirmation modal */}
@@ -2754,7 +2868,7 @@ function App() {
         }}
         onClose={handleCloseBudgetModal}
       />
-    </div>
+    </motion.div>
   );
 }
 
