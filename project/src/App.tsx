@@ -76,16 +76,24 @@ const ICON_MAP: Record<string, LucideIcon> = Object.fromEntries(
 
 const resolveIcon = (name: string): LucideIcon => ICON_MAP[name] ?? Tag;
 
-// Pre-defined badge colors the user can pick from when creating a category.
+// Premium swatches for category / sub-budget creation (Tailwind class persisted in state).
+const DEFAULT_CATEGORY_COLOR = 'bg-emerald-500';
+
 const COLOR_OPTIONS: { name: string; class: string }[] = [
   { name: 'אמרלד', class: 'bg-emerald-500' },
+  { name: 'אינדיגו', class: 'bg-indigo-500' },
+  { name: 'סגול עמוק', class: 'bg-violet-500' },
   { name: 'סגול', class: 'bg-purple-500' },
   { name: 'כחול', class: 'bg-blue-500' },
+  { name: 'ציאן', class: 'bg-cyan-500' },
+  { name: 'שמיים', class: 'bg-sky-500' },
   { name: 'ענבר', class: 'bg-amber-500' },
   { name: 'ורוד', class: 'bg-rose-500' },
-  { name: 'טורקיז', class: 'bg-teal-500' },
-  { name: 'אינדיגו', class: 'bg-indigo-500' },
+  { name: 'פוקסיה', class: 'bg-fuchsia-500' },
+  { name: 'אדום', class: 'bg-red-500' },
   { name: 'כתום', class: 'bg-orange-500' },
+  { name: 'טורקיז', class: 'bg-teal-500' },
+  { name: 'ורוד בהיר', class: 'bg-pink-500' },
 ];
 
 // --- Date helpers -----------------------------------------------------------
@@ -184,6 +192,7 @@ const TAILWIND_HEX: Record<string, string> = {
   'bg-fuchsia-500': '#d946ef',
   'bg-sky-500': '#0ea5e9',
   'bg-red-500': '#ef4444',
+  'bg-violet-500': '#8b5cf6',
 };
 const hexForColor = (colorClass: string): string => TAILWIND_HEX[colorClass] ?? '#64748b';
 
@@ -199,10 +208,62 @@ const mixHex = (hex: string, target: string, amount: number): string => {
       .join('')
   );
 };
-// Darker, vivid tone = amount already SPENT.
-const spentShade = (hex: string) => mixHex(hex, '#000000', 0.12);
-// Soft, dimmed tone (toward the dark bg) = REMAINING budget.
-const remainingShade = (hex: string) => mixHex(hex, '#0a0a0a', 0.62);
+
+// Two-tone chart fills: vibrant base for spent, soft tint for remaining budget.
+const spentFill = (hex: string) => hex;
+const remainingFill = (hex: string) => mixHex(hex, '#ffffff', 0.42);
+
+interface CategoryColorPickerProps {
+  value: string;
+  onChange: (colorClass: string) => void;
+  label?: string;
+}
+
+// Touch-friendly premium color grid for dark mode forms.
+function CategoryColorPicker({
+  value,
+  onChange,
+  label = 'צבע',
+}: CategoryColorPickerProps) {
+  return (
+    <div>
+      <label className="block text-xs font-medium text-neutral-300 mb-2">{label}</label>
+      <div className="grid grid-cols-4 sm:grid-cols-7 gap-3">
+        {COLOR_OPTIONS.map((c) => {
+          const selected = value === c.class;
+          const hex = hexForColor(c.class);
+          return (
+            <button
+              key={c.class}
+              type="button"
+              onClick={() => onChange(c.class)}
+              title={c.name}
+              aria-label={c.name}
+              aria-pressed={selected}
+              className={`relative w-11 h-11 sm:w-12 sm:h-12 rounded-full ${c.class} transition-all duration-200 active:scale-95 ${
+                selected
+                  ? 'ring-2 ring-white ring-offset-2 ring-offset-neutral-900 scale-110'
+                  : 'hover:scale-105 opacity-90 hover:opacity-100'
+              }`}
+              style={
+                selected
+                  ? { boxShadow: `0 0 16px ${hex}88, 0 0 0 1px ${hex}40` }
+                  : undefined
+              }
+            >
+              {selected && (
+                <span className="absolute inset-0 flex items-center justify-center">
+                  <Check className="w-5 h-5 sm:w-6 sm:h-6 text-white drop-shadow-md" strokeWidth={3} />
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // Bright warning color for overspent envelopes.
 const WARNING_COLOR = '#ef4444';
 const GENERAL_KEY = '__general__';
@@ -774,7 +835,7 @@ interface SubBudgetTrackerProps {
   monthExpenses: Expense[];
   categories: Category[];
   subBudgets: Record<string, number>;
-  onAddSubBudget: (name: string, amount: number) => void;
+  onAddSubBudget: (name: string, amount: number, colorClass: string) => void;
   onSetSubBudget: (value: string, amount: number) => void;
   onRemoveSubBudget: (value: string) => void;
 }
@@ -793,6 +854,7 @@ function SubBudgetTracker({
 }: SubBudgetTrackerProps) {
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
+  const [newSubBudgetColor, setNewSubBudgetColor] = useState(DEFAULT_CATEGORY_COLOR);
 
   const spentByCat = monthExpenses.reduce<Record<string, number>>((acc, e) => {
     acc[e.category] = (acc[e.category] || 0) + e.amount;
@@ -848,11 +910,11 @@ function SubBudgetTracker({
       return;
     }
     if (env.spent > 0) {
-      segments.push({ id: `${env.key}-spent`, value: env.spent, fill: spentShade(env.hex) });
+      segments.push({ id: `${env.key}-spent`, value: env.spent, fill: spentFill(env.hex) });
     }
     const remaining = env.allocated - env.spent;
     if (remaining > 0) {
-      segments.push({ id: `${env.key}-remaining`, value: remaining, fill: remainingShade(env.hex) });
+      segments.push({ id: `${env.key}-remaining`, value: remaining, fill: remainingFill(env.hex) });
     }
   });
 
@@ -862,9 +924,10 @@ function SubBudgetTracker({
   const handleAdd = () => {
     const amt = parseFloat(amount);
     if (name.trim() && !isNaN(amt) && amt > 0) {
-      onAddSubBudget(name, amt);
+      onAddSubBudget(name, amt, newSubBudgetColor);
       setName('');
       setAmount('');
+      setNewSubBudgetColor(DEFAULT_CATEGORY_COLOR);
     }
   };
 
@@ -924,11 +987,17 @@ function SubBudgetTracker({
           {/* Tone legend */}
           <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 mt-4 text-xs text-neutral-400">
             <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: spentShade('#10b981') }} />
+              <span
+                className="w-3 h-3 rounded-sm"
+                style={{ backgroundColor: spentFill(hexForColor(DEFAULT_CATEGORY_COLOR)) }}
+              />
               הוצא
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: remainingShade('#10b981') }} />
+              <span
+                className="w-3 h-3 rounded-sm"
+                style={{ backgroundColor: remainingFill(hexForColor(DEFAULT_CATEGORY_COLOR)) }}
+              />
               נותר
             </span>
             <span className="flex items-center gap-1.5">
@@ -1043,16 +1112,28 @@ function SubBudgetTracker({
               </div>
             </div>
 
+            <div className="mt-4">
+              <CategoryColorPicker
+                value={newSubBudgetColor}
+                onChange={setNewSubBudgetColor}
+                label="צבע לקטגוריה חדשה"
+              />
+              <p className="text-[11px] text-neutral-500 mt-2">
+                צבע נשמר בקטגוריה ומשמש בגרפים ובפסי התקדמות. לקטגוריה קיימת נשמר הצבע המקורי.
+              </p>
+            </div>
+
             {/* Quick-edit allocations for existing sub-budgets */}
             {budgetedValues.length > 0 && (
               <div className="mt-3 space-y-2">
                 {budgetedValues.map((v) => {
                   const cat = categories.find((c) => c.value === v);
+                  const catHex = hexForColor(cat?.color ?? 'bg-gray-500');
                   return (
                     <div key={v} className="flex items-center gap-2">
                       <span
-                        className="w-2.5 h-2.5 rounded-full shrink-0"
-                        style={{ backgroundColor: hexForColor(cat?.color ?? 'bg-gray-500') }}
+                        className="w-2.5 h-2.5 rounded-full shrink-0 ring-1 ring-white/20"
+                        style={{ backgroundColor: catHex }}
                       />
                       <span className="text-sm text-neutral-300 flex-1 truncate">{cat?.label ?? v}</span>
                       <span className="text-neutral-500 text-sm">₪</span>
@@ -1286,7 +1367,7 @@ function App() {
   >([]);
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
-  const [newCategoryColor, setNewCategoryColor] = useState(COLOR_OPTIONS[0].class);
+  const [newCategoryColor, setNewCategoryColor] = useState(DEFAULT_CATEGORY_COLOR);
   const [newCategoryIcon, setNewCategoryIcon] = useState(ICON_OPTIONS[0].name);
   const [categoryError, setCategoryError] = useState('');
 
@@ -1506,7 +1587,7 @@ function App() {
   // Reset the inline create-category form to its defaults.
   const resetCategoryForm = () => {
     setNewCategoryName('');
-    setNewCategoryColor(COLOR_OPTIONS[0].class);
+    setNewCategoryColor(DEFAULT_CATEGORY_COLOR);
     setNewCategoryIcon(ICON_OPTIONS[0].name);
     setCategoryError('');
   };
@@ -1520,9 +1601,13 @@ function App() {
   // Sub-budget handlers ------------------------------------------------------
   // Adds/updates a sub-budget. If the category doesn't exist yet, it's created
   // on the fly (matching by value or label, case-insensitive).
-  const handleAddSubBudget = (rawName: string, amount: number) => {
+  const handleAddSubBudget = (rawName: string, amount: number, colorClass: string) => {
     const trimmed = rawName.trim();
     if (!trimmed || trimmed === ADD_CUSTOM_VALUE || !(amount > 0)) return;
+
+    const chosenColor = COLOR_OPTIONS.some((c) => c.class === colorClass)
+      ? colorClass
+      : DEFAULT_CATEGORY_COLOR;
 
     const existing = allCategories.find(
       (c) =>
@@ -1532,10 +1617,9 @@ function App() {
 
     let value = existing?.value;
     if (!value) {
-      const color = COLOR_OPTIONS[customCategories.length % COLOR_OPTIONS.length].class;
       setCustomCategories((prev) => [
         ...prev,
-        { value: trimmed, label: trimmed, color, iconName: ICON_OPTIONS[0].name },
+        { value: trimmed, label: trimmed, color: chosenColor, iconName: ICON_OPTIONS[0].name },
       ]);
       value = trimmed;
     }
@@ -1850,26 +1934,7 @@ function App() {
                     />
                   </div>
 
-                  {/* Color picker */}
-                  <div>
-                    <label className="block text-xs font-medium text-neutral-300 mb-1.5">צבע</label>
-                    <div className="flex flex-wrap gap-2.5">
-                      {COLOR_OPTIONS.map((c) => (
-                        <button
-                          key={c.class}
-                          type="button"
-                          onClick={() => setNewCategoryColor(c.class)}
-                          title={c.name}
-                          aria-label={c.name}
-                          className={`w-9 h-9 rounded-full ${c.class} transition-all ${
-                            newCategoryColor === c.class
-                              ? 'ring-2 ring-offset-2 ring-offset-neutral-800 ring-white scale-110'
-                              : 'hover:scale-110 active:scale-95'
-                          }`}
-                        />
-                      ))}
-                    </div>
-                  </div>
+                  <CategoryColorPicker value={newCategoryColor} onChange={setNewCategoryColor} />
 
                   {/* Icon picker */}
                   <div>
