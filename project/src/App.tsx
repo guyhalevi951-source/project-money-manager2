@@ -7,16 +7,7 @@ import {
   Plus,
   Trash2,
   Check,
-  Utensils,
-  Heart,
-  Film,
-  Home,
-  HelpCircle,
-  Tag,
   X,
-  ShoppingBag,
-  Car,
-  Gift,
   ChevronRight,
   ChevronLeft,
   CalendarDays,
@@ -29,8 +20,21 @@ import {
   ChevronUp,
   LogOut,
   Loader2,
-  type LucideIcon
+  type LucideIcon,
 } from 'lucide-react';
+import {
+  CATEGORIES,
+  ICON_OPTIONS,
+  resolveIcon,
+  COLOR_OPTIONS,
+  DEFAULT_CATEGORY_COLOR,
+  hexForColor,
+  aggregateByCategory,
+  lookupCategory,
+  type Category,
+} from './categories';
+import CategoryIconBadge from './components/CategoryIconBadge';
+import CategoryBreakdownLegend from './components/CategoryBreakdownLegend';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { auth, signOutUser } from './firebase';
 import AuthPage from './components/AuthPage';
@@ -64,62 +68,8 @@ interface Expense {
   date: string;
 }
 
-interface Category {
-  value: string;
-  label: string;
-  icon: LucideIcon;
-  color: string;
-}
-
-const CATEGORIES: Category[] = [
-  { value: 'אוכל', label: 'אוכל', icon: Utensils, color: 'bg-amber-500' },
-  { value: 'בריאות', label: 'בריאות', icon: Heart, color: 'bg-rose-500' },
-  { value: 'בילויים', label: 'בילויים', icon: Film, color: 'bg-purple-500' },
-  { value: 'שכר דירה', label: 'שכר דירה', icon: Home, color: 'bg-cyan-500' },
-  { value: 'אחר', label: 'אחר', icon: HelpCircle, color: 'bg-gray-500' },
-];
-
 // Sentinel value used by the category <select> to trigger the "add custom" flow
 const ADD_CUSTOM_VALUE = '__add_custom__';
-
-// Icons can't be serialized to localStorage, so custom categories store an icon
-// *name* and we resolve it back to a component through this registry.
-const ICON_OPTIONS: { name: string; icon: LucideIcon }[] = [
-  { name: 'Tag', icon: Tag },
-  { name: 'Heart', icon: Heart },
-  { name: 'Utensils', icon: Utensils },
-  { name: 'ShoppingBag', icon: ShoppingBag },
-  { name: 'Car', icon: Car },
-  { name: 'Home', icon: Home },
-  { name: 'Gift', icon: Gift },
-  { name: 'Film', icon: Film },
-];
-
-const ICON_MAP: Record<string, LucideIcon> = Object.fromEntries(
-  ICON_OPTIONS.map((o) => [o.name, o.icon])
-);
-
-const resolveIcon = (name: string): LucideIcon => ICON_MAP[name] ?? Tag;
-
-// Premium swatches for category / sub-budget creation (Tailwind class persisted in state).
-const DEFAULT_CATEGORY_COLOR = 'bg-emerald-500';
-
-const COLOR_OPTIONS: { name: string; class: string }[] = [
-  { name: 'אמרלד', class: 'bg-emerald-500' },
-  { name: 'אינדיגו', class: 'bg-indigo-500' },
-  { name: 'סגול עמוק', class: 'bg-violet-500' },
-  { name: 'סגול', class: 'bg-purple-500' },
-  { name: 'כחול', class: 'bg-blue-500' },
-  { name: 'ציאן', class: 'bg-cyan-500' },
-  { name: 'שמיים', class: 'bg-sky-500' },
-  { name: 'ענבר', class: 'bg-amber-500' },
-  { name: 'ורוד', class: 'bg-rose-500' },
-  { name: 'פוקסיה', class: 'bg-fuchsia-500' },
-  { name: 'אדום', class: 'bg-red-500' },
-  { name: 'כתום', class: 'bg-orange-500' },
-  { name: 'טורקיז', class: 'bg-teal-500' },
-  { name: 'ורוד בהיר', class: 'bg-pink-500' },
-];
 
 // --- Date helpers -----------------------------------------------------------
 const pad2 = (n: number) => String(n).padStart(2, '0');
@@ -212,27 +162,6 @@ const weekNumber = (d: Date): number => {
   const thisWeekStart = startOfWeek(d);
   return Math.round((thisWeekStart.getTime() - firstWeekStart.getTime()) / (7 * 86400000)) + 1;
 };
-
-// Maps Tailwind background color classes to hex values for recharts / inline styles.
-const TAILWIND_HEX: Record<string, string> = {
-  'bg-amber-500': '#f59e0b',
-  'bg-rose-500': '#f43f5e',
-  'bg-purple-500': '#a855f7',
-  'bg-cyan-500': '#06b6d4',
-  'bg-gray-500': '#6b7280',
-  'bg-emerald-500': '#10b981',
-  'bg-blue-500': '#3b82f6',
-  'bg-teal-500': '#14b8a6',
-  'bg-indigo-500': '#6366f1',
-  'bg-orange-500': '#f97316',
-  'bg-pink-500': '#ec4899',
-  'bg-lime-600': '#65a30d',
-  'bg-fuchsia-500': '#d946ef',
-  'bg-sky-500': '#0ea5e9',
-  'bg-red-500': '#ef4444',
-  'bg-violet-500': '#8b5cf6',
-};
-const hexForColor = (colorClass: string): string => TAILWIND_HEX[colorClass] ?? '#64748b';
 
 // Linear-interpolate two hex colors by `amount` (0..1).
 const mixHex = (hex: string, target: string, amount: number): string => {
@@ -595,6 +524,8 @@ type DonutLegendItem = {
   hex: string;
   amount: number;
   percentage: number;
+  icon?: Category['icon'];
+  colorClass?: string;
   ring?: boolean;
 };
 
@@ -651,19 +582,24 @@ function AnalyticsDonutPanel({
           <p className="text-sm text-neutral-500">אין נתונים</p>
         ) : (
           legend.slice(0, 6).map((item) => (
-            <div key={item.key} className="flex items-center gap-2 text-sm">
-              <span
-                className={`w-3.5 h-3.5 rounded-full shrink-0 ${
-                  item.ring ? 'border-[3px] bg-transparent' : ''
-                }`}
-                style={
-                  item.ring
-                    ? { borderColor: item.hex }
-                    : { backgroundColor: item.hex }
-                }
-              />
+            <div key={item.key} className="flex items-center gap-2.5 text-sm min-w-0">
+              {item.icon && item.colorClass ? (
+                <CategoryIconBadge icon={item.icon} colorClass={item.colorClass} size="compact" />
+              ) : (
+                <span
+                  className={`w-3.5 h-3.5 rounded-full shrink-0 ${
+                    item.ring ? 'border-[3px] bg-transparent' : ''
+                  }`}
+                  style={
+                    item.ring
+                      ? { borderColor: item.hex }
+                      : { backgroundColor: item.hex }
+                  }
+                  aria-hidden
+                />
+              )}
               <span className="text-neutral-300 truncate flex-1">{item.label}</span>
-              <span className="text-neutral-400 font-medium shrink-0">
+              <span className="text-neutral-400 font-medium shrink-0 tabular-nums">
                 {item.percentage > 0 ? `${item.percentage.toFixed(2)}%` : `₪${item.amount.toLocaleString()}`}
               </span>
             </div>
@@ -850,33 +786,10 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
 
   const total = periodExpenses.reduce((sum, e) => sum + e.amount, 0);
 
-  const fallbackCat = categories[categories.length - 1];
-  const getCat = (value: string): Category =>
-    categories.find((c) => c.value === value) || fallbackCat;
-
-  const breakdown = useMemo(() => {
-    return Object.values(
-      periodExpenses.reduce<Record<string, { value: string; amount: number }>>((acc, e) => {
-        acc[e.category] = acc[e.category] || { value: e.category, amount: 0 };
-        acc[e.category].amount += e.amount;
-        return acc;
-      }, {})
-    )
-      .map((g) => {
-        const cat = getCat(g.value);
-        return {
-          value: g.value,
-          label: cat?.label ?? g.value,
-          color: cat?.color ?? 'bg-gray-500',
-          hex: hexForColor(cat?.color ?? 'bg-gray-500'),
-          icon: cat?.icon ?? HelpCircle,
-          amount: g.amount,
-          percentage: total > 0 ? (g.amount / total) * 100 : 0,
-        };
-      })
-      .sort((a, b) => b.amount - a.amount);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [periodExpenses, categories, total]);
+  const breakdown = useMemo(
+    () => aggregateByCategory(periodExpenses, categories),
+    [periodExpenses, categories]
+  );
 
   const categoryDonutData =
     breakdown.length > 0
@@ -965,7 +878,8 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
     hex: b.hex,
     amount: b.amount,
     percentage: b.percentage,
-    ring: true,
+    icon: b.icon,
+    colorClass: b.color,
   }));
 
   const dailyLegend: DonutLegendItem[] = dailyBreakdown.map((d) => ({
@@ -976,13 +890,6 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
     percentage: 0,
     ring: true,
   }));
-
-  useEffect(() => {
-    console.log('Chart Data View 1 (categories):', breakdown);
-    console.log('Chart Data View 2 (dailyBreakdown):', dailyBreakdown);
-    console.log('Chart Data View 3 (dailySeries):', dailySeries);
-    console.log('Analytics period expenses:', periodExpenses.length, 'anchorMonthKey:', anchorMonthKey);
-  }, [breakdown, dailyBreakdown, dailySeries, periodExpenses.length, anchorMonthKey]);
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -1289,16 +1196,9 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
               <p className="text-neutral-600 text-sm mt-1">בחר תקופה אחרת או הוסף הוצאות</p>
             </div>
           ) : (
-            breakdown.map((b) => {
-              const Icon = b.icon;
-              return (
+            breakdown.map((b) => (
                 <div key={b.value} className="flex items-center gap-3">
-                  <div
-                    className="shrink-0 w-12 h-12 rounded-full flex items-center justify-center text-white"
-                    style={{ backgroundColor: b.hex }}
-                  >
-                    <Icon className="w-6 h-6" />
-                  </div>
+                  <CategoryIconBadge icon={b.icon} colorClass={b.color} size="large" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2 mb-1.5">
                       <div className="flex items-baseline gap-2 min-w-0">
@@ -1317,8 +1217,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                     </div>
                   </div>
                 </div>
-              );
-            })
+              ))
           )}
         </div>
         )}
@@ -1331,6 +1230,7 @@ interface Envelope {
   key: string;
   label: string;
   icon: LucideIcon;
+  color: string;
   hex: string;
   allocated: number;
   spent: number;
@@ -1354,27 +1254,7 @@ function SpendingDonut({
   onNextDay,
 }: SpendingDonutProps) {
   const total = dayExpenses.reduce((s, e) => s + e.amount, 0);
-  const getCat = (value: string) =>
-    categories.find((c) => c.value === value) || categories[categories.length - 1];
-
-  const breakdown = Object.values(
-    dayExpenses.reduce<Record<string, { value: string; amount: number }>>((acc, e) => {
-      acc[e.category] = acc[e.category] || { value: e.category, amount: 0 };
-      acc[e.category].amount += e.amount;
-      return acc;
-    }, {})
-  )
-    .map((g) => {
-      const cat = getCat(g.value);
-      return {
-        value: g.value,
-        label: cat?.label ?? g.value,
-        hex: hexForColor(cat?.color ?? 'bg-gray-500'),
-        amount: g.amount,
-        percentage: total > 0 ? (g.amount / total) * 100 : 0,
-      };
-    })
-    .sort((a, b) => b.amount - a.amount);
+  const breakdown = aggregateByCategory(dayExpenses, categories);
 
   const donutData =
     breakdown.length > 0
@@ -1455,34 +1335,7 @@ function SpendingDonut({
             </div>
           </div>
 
-          <div
-            dir="rtl"
-            className="flex-1 w-full min-w-0 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4"
-          >
-            {breakdown.map((b) => (
-              <div
-                key={b.value}
-                className="flex items-start gap-2 text-sm text-right min-w-0"
-              >
-                <span
-                  className="w-2.5 h-2.5 rounded-full shrink-0 mt-1.5"
-                  style={{ backgroundColor: b.hex }}
-                  aria-hidden
-                />
-                <p className="min-w-0 leading-snug">
-                  <span className="text-neutral-300 font-medium">{b.label}</span>
-                  <span className="text-neutral-500">: </span>
-                  <span className="text-neutral-100 font-semibold tabular-nums whitespace-nowrap">
-                    ₪{b.amount.toLocaleString()}
-                  </span>
-                  <span className="text-neutral-500 tabular-nums whitespace-nowrap">
-                    {' '}
-                    ({b.percentage.toFixed(0)}%)
-                  </span>
-                </p>
-              </div>
-            ))}
-          </div>
+          <CategoryBreakdownLegend items={breakdown} layout="grid" />
         </div>
       )}
     </div>
@@ -1575,12 +1428,13 @@ function SubBudgetTracker({
 
   const envelopes: Envelope[] = budgetedValues
     .map((v) => {
-      const cat = categories.find((c) => c.value === v);
+      const cat = lookupCategory(v, categories);
       return {
         key: v,
-        label: cat?.label ?? v,
-        icon: cat?.icon ?? HelpCircle,
-        hex: hexForColor(cat?.color ?? 'bg-gray-500'),
+        label: cat.label,
+        icon: cat.icon,
+        color: cat.color,
+        hex: hexForColor(cat.color),
         allocated: subBudgets[v],
         spent: spentByCat[v] || 0,
         isGeneral: false,
@@ -1593,6 +1447,7 @@ function SubBudgetTracker({
       key: GENERAL_KEY,
       label: 'כללי / לא מוקצה',
       icon: Wallet,
+      color: 'bg-gray-500',
       hex: '#737373',
       allocated: generalAllocated,
       spent: unbudgetedSpent,
@@ -1718,12 +1573,16 @@ function SubBudgetTracker({
                 const pct = env.allocated > 0 ? (env.spent / env.allocated) * 100 : env.spent > 0 ? 100 : 0;
                 return (
                   <div key={env.key} className="flex items-center gap-3">
-                    <div
-                      className="shrink-0 w-11 h-11 rounded-full flex items-center justify-center text-white"
-                      style={{ backgroundColor: overspent ? WARNING_COLOR : env.hex }}
-                    >
-                      <Icon className="w-5 h-5" />
-                    </div>
+                    {overspent ? (
+                      <div
+                        className="shrink-0 w-11 h-11 rounded-full flex items-center justify-center text-white"
+                        style={{ backgroundColor: WARNING_COLOR }}
+                      >
+                        <Icon className="w-5 h-5" />
+                      </div>
+                    ) : (
+                      <CategoryIconBadge icon={Icon} colorClass={env.color} size="large" />
+                    )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2 mb-1.5">
                         <div className="flex items-center gap-2 min-w-0">
@@ -2430,9 +2289,8 @@ function App() {
   const remaining = budget - totalExpenses;
 
   // Get category info
-  const getCategoryInfo = (categoryValue: string): Category => {
-    return allCategories.find(c => c.value === categoryValue) || CATEGORIES[4];
-  };
+  const getCategoryInfo = (categoryValue: string): Category =>
+    lookupCategory(categoryValue, allCategories);
 
   // Full history for the Expenses page: time range + search, newest-first.
   const historyExpenses = useMemo(() => {
@@ -2966,9 +2824,10 @@ function App() {
                   return (
                     <li key={expense.id} className="p-4 active:bg-neutral-800/60 transition-colors">
                       <div className="flex items-center gap-3">
-                        <div className={`shrink-0 w-11 h-11 rounded-xl flex items-center justify-center ${categoryInfo.color} text-white`}>
-                          <IconComponent className="w-5 h-5" />
-                        </div>
+                        <CategoryIconBadge
+                          icon={IconComponent}
+                          colorClass={categoryInfo.color}
+                        />
                         <div className="min-w-0 flex-1">
                           <p className="font-medium text-neutral-100 truncate">{expense.description}</p>
                           <div className="flex items-center gap-2 mt-0.5 text-xs text-neutral-500">
@@ -3024,7 +2883,7 @@ function App() {
                             </span>
                           </td>
                           <td className="px-6 py-4">
-                            <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${categoryInfo.color} text-white`}>
+                            <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium text-white ${categoryInfo.color}`}>
                               <IconComponent className="w-4 h-4" />
                               {expense.category}
                             </span>
