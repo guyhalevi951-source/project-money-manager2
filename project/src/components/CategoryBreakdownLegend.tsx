@@ -1,6 +1,6 @@
 import type { CategoryBreakdownSlice } from '../categories';
 import CategoryIconBadge from './CategoryIconBadge';
-import { useLanguage } from '../LanguageContext';
+import { LocalizedUserText, LtrNumeric, useLanguage } from '../LanguageContext';
 
 interface CategoryBreakdownLegendProps {
   items: CategoryBreakdownSlice[];
@@ -18,14 +18,16 @@ function LegendLine({
 }) {
   return (
     <p className="min-w-0 leading-snug">
-      <span className="text-neutral-300 font-medium">{item.label}</span>
-      <span className="text-neutral-500">: </span>
-      <span className="text-neutral-100 font-semibold tabular-nums whitespace-nowrap">
-        ₪{item.amount.toLocaleString()}
+      <span className="text-neutral-300 font-medium">
+        <LocalizedUserText text={item.value} />
       </span>
-      <span className="text-neutral-500 tabular-nums whitespace-nowrap">
+      <span className="text-neutral-500">: </span>
+      <LtrNumeric className="text-neutral-100 font-semibold whitespace-nowrap">
+        ₪{item.amount.toLocaleString()}
+      </LtrNumeric>
+      <span className="text-neutral-500 whitespace-nowrap">
         {' '}
-        ({item.percentage.toFixed(percentageDecimals)}%)
+        (<LtrNumeric>{item.percentage.toFixed(percentageDecimals)}%</LtrNumeric>)
       </span>
     </p>
   );
@@ -61,12 +63,14 @@ export default function CategoryBreakdownLegend({
       {visible.map((item) => (
         <div key={item.value} className="flex items-center gap-2.5 text-sm">
           <CategoryIconBadge icon={item.icon} hex={item.hex} colorClass={item.color} size="compact" />
-          <span className="text-neutral-300 truncate flex-1">{item.label}</span>
-          <span className="text-neutral-400 font-medium shrink-0 tabular-nums">
+          <span className="text-neutral-300 truncate flex-1">
+            <LocalizedUserText text={item.value} />
+          </span>
+          <LtrNumeric className="text-neutral-400 font-medium shrink-0">
             {percentageDecimals > 0
               ? `${item.percentage.toFixed(percentageDecimals)}%`
               : `₪${item.amount.toLocaleString()}`}
-          </span>
+          </LtrNumeric>
         </div>
       ))}
     </div>

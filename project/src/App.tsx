@@ -42,7 +42,7 @@ import { onAuthStateChanged, type User } from 'firebase/auth';
 import { auth, signOutUser } from './firebase';
 import AuthPage from './components/AuthPage';
 import UserProfileMenu from './components/UserProfileMenu';
-import { LocalizedUserText, useLanguage } from './LanguageContext';
+import { LocalizedUserText, LtrNumeric, useLanguage } from './LanguageContext';
 import { localizeCategoryLabel } from './translations';
 import {
   EMPTY_USER_APP_DATA,
@@ -893,13 +893,13 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
           ))}
         </div>
 
-        <div className="flex items-center gap-1 mt-4">
+        <div dir="ltr" className="flex items-center gap-1 mt-4">
           <button
             onClick={() => shift(-1)}
             className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl text-neutral-400 hover:bg-neutral-800 active:scale-95 transition-all"
             aria-label={tr('prev')}
           >
-            <ChevronRight className="w-5 h-5" />
+            <ChevronLeft className="w-5 h-5" />
           </button>
 
           <div className="flex-1 overflow-x-auto no-scrollbar">
@@ -929,7 +929,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
             className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl text-neutral-400 hover:bg-neutral-800 active:scale-95 transition-all"
             aria-label={tr('next')}
           >
-            <ChevronLeft className="w-5 h-5" />
+            <ChevronRight className="w-5 h-5" />
           </button>
         </div>
 
@@ -1180,12 +1180,16 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2 mb-1.5">
                       <div className="flex items-baseline gap-2 min-w-0">
-                        <span className="font-semibold truncate">{b.label}</span>
+                        <span className="font-semibold truncate">
+                          <LocalizedUserText text={b.value} />
+                        </span>
                         <span className="text-xs text-neutral-500 shrink-0">
-                          {b.percentage.toFixed(2)}%
+                          <LtrNumeric>{b.percentage.toFixed(2)}%</LtrNumeric>
                         </span>
                       </div>
-                      <span className="font-semibold shrink-0">₪{b.amount.toLocaleString()}</span>
+                      <LtrNumeric className="font-semibold shrink-0">
+                        ₪{b.amount.toLocaleString()}
+                      </LtrNumeric>
                     </div>
                     <div className="h-2 rounded-full bg-neutral-800 overflow-hidden">
                       <div
@@ -1231,7 +1235,7 @@ function SpendingDonut({
   onPreviousDay,
   onNextDay,
 }: SpendingDonutProps) {
-  const { tr, dir } = useLanguage();
+  const { tr } = useLanguage();
   const total = dayExpenses.reduce((s, e) => s + e.amount, 0);
   const breakdown = aggregateByCategory(dayExpenses, categories);
 
@@ -1248,7 +1252,7 @@ function SpendingDonut({
       </h2>
 
       <div
-        dir={dir === 'rtl' ? 'ltr' : 'rtl'}
+        dir="ltr"
         className="flex items-center justify-center gap-2 sm:gap-3 mb-4"
       >
         <button
@@ -1307,9 +1311,9 @@ function SpendingDonut({
               </PieChart>
             </ResponsiveContainer>
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-xl font-bold text-neutral-100 leading-none">
+              <LtrNumeric className="text-xl font-bold text-neutral-100 leading-none">
                 ₪{total.toLocaleString()}
-              </span>
+              </LtrNumeric>
               <span className="text-[11px] text-neutral-500 mt-1">{tr('totalShort')}</span>
             </div>
           </div>
@@ -1385,7 +1389,7 @@ function SubBudgetTracker({
   onSetSubBudget,
   onRemoveSubBudget,
 }: SubBudgetTrackerProps) {
-  const { tr, lang } = useLanguage();
+  const { tr, ensureUserContents } = useLanguage();
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [newSubBudgetColor, setNewSubBudgetColor] = useState(DEFAULT_CATEGORY_COLOR);
@@ -1396,7 +1400,15 @@ function SubBudgetTracker({
     return acc;
   }, {});
 
-  const budgetedValues = Object.keys(subBudgets).filter((v) => subBudgets[v] > 0);
+  const budgetedValues = useMemo(
+    () => Object.keys(subBudgets).filter((v) => subBudgets[v] > 0),
+    [subBudgets],
+  );
+
+  useEffect(() => {
+    void ensureUserContents(budgetedValues);
+  }, [budgetedValues, ensureUserContents]);
+
   const allocatedTotal = budgetedValues.reduce((s, v) => s + subBudgets[v], 0);
   const generalAllocated = Math.max(0, budget - allocatedTotal);
 
@@ -1412,7 +1424,7 @@ function SubBudgetTracker({
       const cat = lookupCategory(v, categories);
       return {
         key: v,
-        label: localizeCategoryLabel(cat.value, lang),
+        label: cat.label,
         icon: cat.icon,
         color: cat.color,
         hex: hexForColor(cat.color),
@@ -1439,27 +1451,30 @@ function SubBudgetTracker({
   // Build the flat two-tone donut segments.
   const segments: {
     id: string;
+    categoryKey: string;
     value: number;
     fill: string;
     label: string;
     status: string;
     amount: number;
     percentage: number;
+    isGeneral: boolean;
   }[] = [];
   envelopes.forEach((env) => {
     if (env.allocated <= 0 && env.spent <= 0) return;
     const overspent = env.spent > env.allocated;
     if (overspent) {
-      // The whole envelope (sized by spending) is shown in the warning color.
       const amount = env.spent;
       segments.push({
         id: `${env.key}-over`,
+        categoryKey: env.key,
         value: Math.max(env.spent, env.allocated, 1),
         fill: WARNING_COLOR,
         label: env.label,
         status: tr('spentLabel'),
         amount,
         percentage: budget > 0 ? (amount / budget) * 100 : 0,
+        isGeneral: env.isGeneral,
       });
       return;
     }
@@ -1467,24 +1482,28 @@ function SubBudgetTracker({
       const amount = env.spent;
       segments.push({
         id: `${env.key}-spent`,
+        categoryKey: env.key,
         value: env.spent,
         fill: spentFill(env.hex),
         label: env.label,
         status: tr('spentLabel'),
         amount,
         percentage: budget > 0 ? (amount / budget) * 100 : 0,
+        isGeneral: env.isGeneral,
       });
     }
     const remaining = env.allocated - env.spent;
     if (remaining > 0) {
       segments.push({
         id: `${env.key}-remaining`,
+        categoryKey: env.key,
         value: remaining,
         fill: remainingFill(env.hex),
         label: env.label,
         status: tr('remainingLabel'),
         amount: remaining,
         percentage: budget > 0 ? (remaining / budget) * 100 : 0,
+        isGeneral: env.isGeneral,
       });
     }
   });
@@ -1495,12 +1514,14 @@ function SubBudgetTracker({
       : [
           {
             id: 'empty',
+            categoryKey: '',
             value: 1,
             fill: '#262626',
             label: tr('noData'),
             status: tr('spentLabel'),
             amount: 0,
             percentage: 0,
+            isGeneral: false,
           },
         ];
 
@@ -1579,11 +1600,13 @@ function SubBudgetTracker({
                 </PieChart>
               </ResponsiveContainer>
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <span className="text-2xl font-bold text-neutral-100 leading-none">
+                <LtrNumeric className="text-2xl font-bold text-neutral-100 leading-none">
                   ₪{totalSpent.toLocaleString()}
-                </span>
+                </LtrNumeric>
                 <span className="text-[11px] text-neutral-500 mt-1">
-                  מתוך ₪{budget.toLocaleString()}
+                  <LtrNumeric>
+                    {tr('outOf')} ₪{budget.toLocaleString()}
+                  </LtrNumeric>
                 </span>
               </div>
             </div>
@@ -1594,24 +1617,35 @@ function SubBudgetTracker({
             >
               {activeDonutSlice ? (
                 <>
-                  <p className="text-sm font-semibold text-white truncate">{activeDonutSlice.label}</p>
-                  <p className="text-xs mt-0.5 text-gray-300">{activeDonutSlice.status}</p>
-                  <p className="text-base font-bold mt-2 text-white tabular-nums">
-                    ₪{activeDonutSlice.amount.toLocaleString()}
+                  <p className="text-sm font-semibold text-white truncate">
+                    {activeDonutSlice.isGeneral ? (
+                      activeDonutSlice.label
+                    ) : (
+                      <LocalizedUserText text={activeDonutSlice.categoryKey} />
+                    )}
                   </p>
-                  <p className="text-xs mt-0.5 text-gray-300 tabular-nums">
-                    {activeDonutSlice.percentage.toFixed(0)}%
+                  <p className="text-xs mt-0.5 text-gray-300">{activeDonutSlice.status}</p>
+                  <p className="text-base font-bold mt-2 text-white">
+                    <LtrNumeric>₪{activeDonutSlice.amount.toLocaleString()}</LtrNumeric>
+                  </p>
+                  <p className="text-xs mt-0.5 text-gray-300">
+                    <LtrNumeric>{activeDonutSlice.percentage.toFixed(0)}%</LtrNumeric>
                   </p>
                 </>
               ) : (
                 <>
-                  <p className="text-sm font-semibold text-white tabular-nums whitespace-nowrap">
+                  <p className="text-sm font-semibold text-white whitespace-nowrap">
                     {tr('totalBudgetLabel')}:{' '}
-                    <span className="text-base font-bold">₪{budget.toLocaleString()}</span>
+                    <LtrNumeric className="text-base font-bold">
+                      ₪{budget.toLocaleString()}
+                    </LtrNumeric>
                   </p>
-                  <p className="text-xs mt-0.5 text-gray-300 tabular-nums">
-                    {tr('spentLabel')}: ₪{totalSpent.toLocaleString()}
-                    {budget > 0 ? ` (${((totalSpent / budget) * 100).toFixed(0)}%)` : ''}
+                  <p className="text-xs mt-0.5 text-gray-300">
+                    {tr('spentLabel')}:{' '}
+                    <LtrNumeric>
+                      ₪{totalSpent.toLocaleString()}
+                      {budget > 0 ? ` (${((totalSpent / budget) * 100).toFixed(0)}%)` : ''}
+                    </LtrNumeric>
                   </p>
                   <p className="text-xs mt-0.5 text-gray-400 whitespace-nowrap">
                     {tr('cardHintHoverSlice')}
@@ -1666,7 +1700,13 @@ function SubBudgetTracker({
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2 mb-1.5">
                         <div className="flex items-center gap-2 min-w-0">
-                          <span className="font-medium text-neutral-100 truncate">{env.label}</span>
+                          <span className="font-medium text-neutral-100 truncate">
+                            {env.isGeneral ? (
+                              env.label
+                            ) : (
+                              <LocalizedUserText text={env.key} />
+                            )}
+                          </span>
                           {overspent && (
                             <span className="shrink-0 flex items-center gap-1 text-[10px] font-semibold text-rose-400 bg-rose-500/10 px-1.5 py-0.5 rounded-full">
                               <AlertTriangle className="w-3 h-3" />
@@ -1675,10 +1715,12 @@ function SubBudgetTracker({
                           )}
                         </div>
                         <span className="text-sm shrink-0 text-neutral-300">
-                          <span className={overspent ? 'text-rose-400 font-semibold' : 'text-neutral-100 font-semibold'}>
-                            ₪{env.spent.toLocaleString()}
-                          </span>
-                          <span className="text-neutral-500"> / ₪{env.allocated.toLocaleString()}</span>
+                          <LtrNumeric>
+                            <span className={overspent ? 'text-rose-400 font-semibold' : 'text-neutral-100 font-semibold'}>
+                              ₪{env.spent.toLocaleString()}
+                            </span>
+                            <span className="text-neutral-500"> / ₪{env.allocated.toLocaleString()}</span>
+                          </LtrNumeric>
                         </span>
                       </div>
                       <SubBudgetProgressBar
@@ -1773,8 +1815,14 @@ function SubBudgetTracker({
                         className="w-2.5 h-2.5 rounded-full shrink-0 ring-1 ring-white/20"
                         style={{ backgroundColor: catHex }}
                       />
-                      <span className="text-sm text-neutral-300 flex-1 truncate">{cat?.label ?? v}</span>
-                      <span className="text-neutral-500 text-sm">₪</span>
+                      <span className="text-sm text-neutral-300 flex-1 truncate">
+                        {v === GENERAL_KEY ? (
+                          tr('generalUnallocated')
+                        ) : (
+                          <LocalizedUserText text={v} />
+                        )}
+                      </span>
+                      <LtrNumeric className="text-neutral-500 text-sm">₪</LtrNumeric>
                       <input
                         type="number"
                         inputMode="decimal"
@@ -2052,15 +2100,27 @@ function App() {
     })),
   ];
 
-  useEffect(() => {
-    void ensureUserContents(customCategories.map((c) => c.label));
-  }, [customCategories, ensureUserContents, lang, keepOriginalValues]);
-
   // The month currently in focus ('YYYY-MM') and its budget + sub-budgets.
   // Deriving these keeps the rest of the component working with simple values.
   const selectedMonthKey = monthKeyOfDate(selectedDate);
   const budget = budgetsByMonth[selectedMonthKey] ?? 0;
   const subBudgets = subBudgetsByMonth[selectedMonthKey] ?? {};
+
+  useEffect(() => {
+    const texts = new Set<string>();
+    customCategories.forEach((c) => {
+      texts.add(c.label);
+      texts.add(c.value);
+    });
+    expenses.forEach((e) => {
+      texts.add(e.category);
+      texts.add(e.description);
+    });
+    Object.values(subBudgetsByMonth).forEach((monthMap) => {
+      Object.keys(monthMap).forEach((key) => texts.add(key));
+    });
+    void ensureUserContents(Array.from(texts));
+  }, [customCategories, expenses, subBudgetsByMonth, ensureUserContents, lang, keepOriginalValues]);
 
   // Automatic month inheritance:
   // When user navigates to a month with no explicit values yet, copy budget +
@@ -2394,21 +2454,17 @@ function App() {
 
   const historyTotal = historyExpenses.reduce((s, e) => s + e.amount, 0);
 
-  useEffect(() => {
-    void ensureUserContents(historyExpenses.map((e) => e.description));
-  }, [historyExpenses, ensureUserContents, lang, keepOriginalValues]);
-
   // Reusable month selector (used on Dashboard & Sub-Budgets pages).
   const monthSelector = (
     <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-3 sm:p-4 mb-6 sm:mb-8">
-      <div className="flex items-center justify-between gap-2">
+      <div dir="ltr" className="flex items-center justify-between gap-2">
         <button
           onClick={() => goToMonth(-1)}
           className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl text-neutral-400 hover:bg-neutral-800 active:scale-95 transition-all"
           aria-label={tr('prevMonth')}
           title={tr('prevMonth')}
         >
-          <ChevronRight className="w-6 h-6" />
+          <ChevronLeft className="w-6 h-6" />
         </button>
 
         <div className="flex flex-col items-center min-w-0">
@@ -2434,7 +2490,7 @@ function App() {
           aria-label={tr('nextMonth')}
           title={tr('nextMonth')}
         >
-          <ChevronLeft className="w-6 h-6" />
+          <ChevronRight className="w-6 h-6" />
         </button>
       </div>
     </div>
@@ -2849,7 +2905,9 @@ function App() {
                             className="font-medium text-neutral-100 truncate block"
                           />
                           <div className="flex items-center gap-2 mt-0.5 text-xs text-neutral-500">
-                            <span className="truncate">{categoryInfo.label}</span>
+                            <span className="truncate">
+                              <LocalizedUserText text={expense.category} />
+                            </span>
                             <span className="text-neutral-600">•</span>
                             <span className="shrink-0">{formatDisplayDate(expense.date, lang)}</span>
                           </div>
@@ -2903,7 +2961,7 @@ function App() {
                           <td className="px-6 py-4">
                             <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium text-white ${categoryInfo.color}`}>
                               <IconComponent className="w-4 h-4" />
-                              {categoryInfo.label}
+                              <LocalizedUserText text={expense.category} />
                             </span>
                           </td>
                           <td className="px-6 py-4 text-neutral-400">

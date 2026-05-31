@@ -1,6 +1,14 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { dirByLang, t, type Dir, type Lang, type TranslationKey } from './translations';
-import { translateText } from './services/translationService';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { dirByLang, localizeCategoryLabel, t, type Dir, type Lang, type TranslationKey } from './translations';
+import { lookupFallbackTranslation, translateText } from './services/translationService';
 
 interface LanguageContextValue {
   lang: Lang;
@@ -32,6 +40,28 @@ function getInitialLang(): Lang {
   return browserLang.startsWith('he') ? 'he' : 'en';
 }
 
+function resolveUserContent(
+  text: string,
+  lang: Lang,
+  keepOriginalValues: boolean,
+  translatedMap: Record<string, string>,
+): string {
+  const raw = text.trim();
+  if (!raw || keepOriginalValues) return text;
+
+  const fromLang = detectSourceLang(raw);
+  if (fromLang === lang) return text;
+
+  const localizedBuiltin = localizeCategoryLabel(raw, lang);
+  if (localizedBuiltin !== raw) return localizedBuiltin;
+
+  const fallback = lookupFallbackTranslation(raw, fromLang, lang);
+  if (fallback) return fallback;
+
+  const key = translationKey(raw, fromLang, lang);
+  return translatedMap[key] ?? text;
+}
+
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [lang, setLang] = useState<Lang>(() => getInitialLang());
   const [keepOriginalValues, setKeepOriginalValues] = useState<boolean>(() => {
@@ -40,7 +70,17 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   });
   const [translatedMap, setTranslatedMap] = useState<Record<string, string>>({});
   const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({});
+  const translatedMapRef = useRef(translatedMap);
+  const loadingMapRef = useRef(loadingMap);
   const dir = dirByLang[lang];
+
+  useEffect(() => {
+    translatedMapRef.current = translatedMap;
+  }, [translatedMap]);
+
+  useEffect(() => {
+    loadingMapRef.current = loadingMap;
+  }, [loadingMap]);
 
   useEffect(() => {
     window.localStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
@@ -63,8 +103,13 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       const fromLang = detectSourceLang(raw);
       if (fromLang === lang) return;
 
+      const localizedBuiltin = localizeCategoryLabel(raw, lang);
+      if (localizedBuiltin !== raw) return;
+
+      if (lookupFallbackTranslation(raw, fromLang, lang)) return;
+
       const key = translationKey(raw, fromLang, lang);
-      if (translatedMap[key] || loadingMap[key]) return;
+      if (translatedMapRef.current[key] || loadingMapRef.current[key]) return;
 
       setLoadingMap((prev) => ({ ...prev, [key]: true }));
       try {
@@ -78,26 +123,19 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
         });
       }
     },
-    [keepOriginalValues, lang, translatedMap, loadingMap],
+    [keepOriginalValues, lang],
   );
 
   const ensureUserContents = useCallback(
     async (texts: string[]) => {
-      const tasks = Array.from(new Set(texts.filter(Boolean))).map((text) => ensureUserContent(text));
+      const tasks = Array.from(new Set(texts.filter(Boolean))).map((item) => ensureUserContent(item));
       await Promise.all(tasks);
     },
     [ensureUserContent],
   );
 
   const getUserContent = useCallback(
-    (text: string) => {
-      const raw = text.trim();
-      if (!raw || keepOriginalValues) return text;
-      const fromLang = detectSourceLang(raw);
-      if (fromLang === lang) return text;
-      const key = translationKey(raw, fromLang, lang);
-      return translatedMap[key] ?? text;
-    },
+    (text: string) => resolveUserContent(text, lang, keepOriginalValues, translatedMap),
     [keepOriginalValues, lang, translatedMap],
   );
 
@@ -107,6 +145,8 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       if (!raw || keepOriginalValues) return false;
       const fromLang = detectSourceLang(raw);
       if (fromLang === lang) return false;
+      if (localizeCategoryLabel(raw, lang) !== raw) return false;
+      if (lookupFallbackTranslation(raw, fromLang, lang)) return false;
       const key = translationKey(raw, fromLang, lang);
       return Boolean(loadingMap[key]);
     },
@@ -165,6 +205,24 @@ export function LocalizedUserText({ text, className = '' }: LocalizedUserTextPro
   return (
     <span className={`${className} ${loading ? 'opacity-80 transition-opacity' : ''}`.trim()}>
       {display}
+    </span>
+  );
+}
+
+/** Keeps currency symbols and numbers in logical order inside RTL layouts. */
+export function LtrNumeric({
+  children,
+  className = '',
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <span
+      dir="ltr"
+      className={`inline-block [unicode-bidi:isolate] tabular-nums ${className}`.trim()}
+    >
+      {children}
     </span>
   );
 }
