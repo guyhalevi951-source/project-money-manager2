@@ -4,3 +4,4 @@
 - Include brief step-by-step instructions on where to paste and publish them in the Firebase Console.
 
 GLOBAL RULE: This app is localized. NEVER hardcode text. Always add new strings to `src/translations.ts` and use the LanguageContext. All UI elements must support both RTL and LTR layouts.
+GLOBAL RULE: User-generated content (categories/descriptions) uses async API translation via `src/services/translationService.ts` with caching. Never hardcode user-content translations; always resolve through LanguageContext and respect `keepOriginalValues`.

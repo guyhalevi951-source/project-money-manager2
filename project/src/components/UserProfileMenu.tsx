@@ -10,7 +10,7 @@ interface UserProfileMenuProps {
 }
 
 export default function UserProfileMenu({ user, userName, onLogout }: UserProfileMenuProps) {
-  const { lang, dir, setLang, tr } = useLanguage();
+  const { lang, dir, setLang, tr, keepOriginalValues, setKeepOriginalValues } = useLanguage();
   const [open, setOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -185,6 +185,37 @@ export default function UserProfileMenu({ user, userName, onLogout }: UserProfil
                 }`}
               >
                 {tr('english')}
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-gray-700/70 bg-gray-900/70 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm text-gray-200 leading-relaxed">
+                {tr('keepOriginalValuesLabel')}
+              </p>
+              <button
+                type="button"
+                onClick={() => setKeepOriginalValues(!keepOriginalValues)}
+                role="switch"
+                aria-checked={keepOriginalValues}
+                className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-all ${
+                  keepOriginalValues
+                    ? 'bg-emerald-500/80 border-emerald-400/70'
+                    : 'bg-gray-800 border-gray-600'
+                }`}
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                    keepOriginalValues
+                      ? dir === 'rtl'
+                        ? '-translate-x-0.5'
+                        : 'translate-x-[1.25rem]'
+                      : dir === 'rtl'
+                        ? '-translate-x-[1.25rem]'
+                        : 'translate-x-0.5'
+                  }`}
+                />
               </button>
             </div>
           </div>

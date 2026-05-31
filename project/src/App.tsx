@@ -42,7 +42,7 @@ import { onAuthStateChanged, type User } from 'firebase/auth';
 import { auth, signOutUser } from './firebase';
 import AuthPage from './components/AuthPage';
 import UserProfileMenu from './components/UserProfileMenu';
-import { useLanguage } from './LanguageContext';
+import { LocalizedUserText, useLanguage } from './LanguageContext';
 import { localizeCategoryLabel } from './translations';
 import {
   EMPTY_USER_APP_DATA,
@@ -1964,7 +1964,7 @@ function BudgetChangeModal({
 }
 
 function App() {
-  const { tr, dir, lang } = useLanguage();
+  const { tr, dir, lang, getUserContent, ensureUserContents, keepOriginalValues } = useLanguage();
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [dataReady, setDataReady] = useState(false);
@@ -2046,11 +2046,15 @@ function App() {
     ...CATEGORIES.map((c) => ({ ...c, label: localizeCategoryLabel(c.value, lang) })),
     ...customCategories.map((c) => ({
       value: c.value,
-      label: c.label,
+      label: getUserContent(c.label),
       color: c.color,
       icon: resolveIcon(c.iconName),
     })),
   ];
+
+  useEffect(() => {
+    void ensureUserContents(customCategories.map((c) => c.label));
+  }, [customCategories, ensureUserContents, lang, keepOriginalValues]);
 
   // The month currently in focus ('YYYY-MM') and its budget + sub-budgets.
   // Deriving these keeps the rest of the component working with simple values.
@@ -2389,6 +2393,10 @@ function App() {
   }, [expenses, search, timeFilter]);
 
   const historyTotal = historyExpenses.reduce((s, e) => s + e.amount, 0);
+
+  useEffect(() => {
+    void ensureUserContents(historyExpenses.map((e) => e.description));
+  }, [historyExpenses, ensureUserContents, lang, keepOriginalValues]);
 
   // Reusable month selector (used on Dashboard & Sub-Budgets pages).
   const monthSelector = (
@@ -2836,9 +2844,12 @@ function App() {
                           colorClass={categoryInfo.color}
                         />
                         <div className="min-w-0 flex-1">
-                          <p className="font-medium text-neutral-100 truncate">{expense.description}</p>
+                          <LocalizedUserText
+                            text={expense.description}
+                            className="font-medium text-neutral-100 truncate block"
+                          />
                           <div className="flex items-center gap-2 mt-0.5 text-xs text-neutral-500">
-                            <span className="truncate">{expense.category}</span>
+                            <span className="truncate">{categoryInfo.label}</span>
                             <span className="text-neutral-600">•</span>
                             <span className="shrink-0">{formatDisplayDate(expense.date, lang)}</span>
                           </div>
@@ -2882,7 +2893,7 @@ function App() {
                       return (
                         <tr key={expense.id} className="hover:bg-neutral-800/40 transition-colors">
                           <td className="px-6 py-4">
-                            <span className="font-medium text-neutral-100">{expense.description}</span>
+                            <LocalizedUserText text={expense.description} className="font-medium text-neutral-100" />
                           </td>
                           <td className="px-6 py-4">
                             <span className="text-lg font-semibold text-neutral-100">
@@ -2892,7 +2903,7 @@ function App() {
                           <td className="px-6 py-4">
                             <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium text-white ${categoryInfo.color}`}>
                               <IconComponent className="w-4 h-4" />
-                              {expense.category}
+                              {categoryInfo.label}
                             </span>
                           </td>
                           <td className="px-6 py-4 text-neutral-400">
