@@ -2,7 +2,7 @@ import { ArrowLeft, ArrowRight, Coins, Languages } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useEffect } from 'react';
 import { useLanguage } from '../LanguageContext';
-import { EXPENSE_CURRENCIES, type ExpenseCurrency } from '../services/exchangeRateService';
+import DisplayCurrencySelector from './DisplayCurrencySelector';
 
 interface SettingsPageProps {
   onBack: () => void;
@@ -16,8 +16,6 @@ export default function SettingsPage({ onBack }: SettingsPageProps) {
     tr,
     keepOriginalValues,
     setKeepOriginalValues,
-    displayCurrency,
-    setDisplayCurrency,
   } = useLanguage();
 
   const BackIcon = dir === 'rtl' ? ArrowRight : ArrowLeft;
@@ -151,27 +149,7 @@ export default function SettingsPage({ onBack }: SettingsPageProps) {
           </div>
         </div>
 
-        <div
-          dir="ltr"
-          className="grid grid-cols-4 gap-1.5 sm:gap-2 rounded-2xl bg-gray-950/80 border border-gray-700 p-1.5 sm:p-2"
-        >
-          {EXPENSE_CURRENCIES.map((item) => (
-            <button
-              key={item.code}
-              type="button"
-              onClick={() => setDisplayCurrency(item.code as ExpenseCurrency)}
-              className={`py-3 sm:py-3.5 rounded-xl text-sm sm:text-base font-semibold tabular-nums transition-all ${
-                displayCurrency === item.code
-                  ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/30'
-                  : 'text-gray-300 hover:text-white hover:bg-gray-800/80'
-              }`}
-              aria-pressed={displayCurrency === item.code}
-            >
-              <span className="block">{item.symbol}</span>
-              <span className="block text-[10px] sm:text-xs font-medium opacity-80 mt-0.5">{item.label}</span>
-            </button>
-          ))}
-        </div>
+        <DisplayCurrencySelector />
       </section>
     </motion.div>
   );

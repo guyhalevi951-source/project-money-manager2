@@ -1,38 +1,35 @@
-export type ExpenseCurrency = 'ILS' | 'USD' | 'EUR' | 'GBP';
+import { currencySymbol, type ExpenseCurrency } from '../constants/currencies';
 
-export const EXPENSE_CURRENCIES: {
-  code: ExpenseCurrency;
-  symbol: string;
-  label: string;
-}[] = [
-  { code: 'ILS', symbol: '₪', label: 'ILS' },
-  { code: 'USD', symbol: '$', label: 'USD' },
-  { code: 'EUR', symbol: '€', label: 'EUR' },
-  { code: 'GBP', symbol: '£', label: 'GBP' },
-];
+export type { ExpenseCurrency, CurrencyCode } from '../constants/currencies';
+export { CORE_DISPLAY_CURRENCIES as EXPENSE_CURRENCIES, currencySymbol } from '../constants/currencies';
 
-export const currencySymbol = (code: ExpenseCurrency): string =>
-  EXPENSE_CURRENCIES.find((c) => c.code === code)?.symbol ?? code;
-
-/** ILS received per 1 unit of a foreign currency. */
-export interface ExchangeRates {
-  date: string;
-  foreignToIls: Partial<Record<ExpenseCurrency, number>>;
-}
-
+const ER_API_URL = 'https://open.er-api.com/v6/latest/ILS';
 const STORAGE_KEY = 'budget_exchange_rates';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-const FRANKFURTER_FROM_TO_URL =
-  'https://api.frankfurter.dev/v1/latest?from=USD,EUR,GBP&to=ILS';
-const FOREIGN_CURRENCIES: ExpenseCurrency[] = ['USD', 'EUR', 'GBP'];
+
+/**
+ * Exchange rates from open.er-api.com with base ILS.
+ * `ilsToForeign[USD]` = how many USD equal 1 ILS.
+ */
+export interface ExchangeRates {
+  date: string;
+  baseCode: 'ILS';
+  ilsToForeign: Record<string, number>;
+  lastFetchedAt: number;
+}
 
 interface StoredExchangeRatesPayload {
   fetchedAt: number;
-  rates: ExchangeRates;
+  last_fetched_timestamp: number;
+  rates: Omit<ExchangeRates, 'lastFetchedAt'>;
 }
 
 let memoryCache: ExchangeRates | null = null;
 let fetchPromise: Promise<ExchangeRates> | null = null;
+
+function isCacheFresh(fetchedAt: number): boolean {
+  return Date.now() - fetchedAt < CACHE_TTL_MS;
+}
 
 function readStorageCache(): ExchangeRates | null {
   try {
@@ -40,25 +37,35 @@ function readStorageCache(): ExchangeRates | null {
     if (!raw) return null;
 
     const parsed = JSON.parse(raw) as StoredExchangeRatesPayload;
-    if (!parsed?.fetchedAt || !parsed?.rates?.foreignToIls) return null;
-    if (Date.now() - parsed.fetchedAt >= CACHE_TTL_MS) return null;
+    const fetchedAt = parsed.last_fetched_timestamp ?? parsed.fetchedAt;
+    if (!fetchedAt || !parsed?.rates?.ilsToForeign) return null;
+    if (!isCacheFresh(fetchedAt)) return null;
 
-    return parsed.rates;
+    return {
+      ...parsed.rates,
+      lastFetchedAt: fetchedAt,
+    };
   } catch {
     return null;
   }
 }
 
 function writeStorageCache(rates: ExchangeRates): void {
+  const fetchedAt = rates.lastFetchedAt;
   const payload: StoredExchangeRatesPayload = {
-    fetchedAt: Date.now(),
-    rates,
+    fetchedAt,
+    last_fetched_timestamp: fetchedAt,
+    rates: {
+      date: rates.date,
+      baseCode: rates.baseCode,
+      ilsToForeign: rates.ilsToForeign,
+    },
   };
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
 }
 
 function hydrateMemoryFromStorage(): ExchangeRates | null {
-  if (memoryCache) return memoryCache;
+  if (memoryCache && isCacheFresh(memoryCache.lastFetchedAt)) return memoryCache;
 
   const fromStorage = readStorageCache();
   if (fromStorage) {
@@ -70,89 +77,57 @@ function hydrateMemoryFromStorage(): ExchangeRates | null {
 hydrateMemoryFromStorage();
 
 export function getCachedExchangeRates(): ExchangeRates | null {
-  return memoryCache ?? readStorageCache();
+  const cached = memoryCache ?? readStorageCache();
+  if (!cached) return null;
+  if (!isCacheFresh(cached.lastFetchedAt)) return null;
+  return cached;
 }
 
-function parseFromToResponse(data: unknown): ExchangeRates | null {
+function parseErApiResponse(data: unknown, fetchedAt: number): ExchangeRates | null {
   if (!data || typeof data !== 'object') return null;
 
   const payload = data as {
-    date?: string;
-    rates?: Record<string, number | Record<string, number>>;
+    result?: string;
+    base_code?: string;
+    time_last_update_utc?: string;
+    rates?: Record<string, number>;
   };
 
-  const foreignToIls: Partial<Record<ExpenseCurrency, number>> = {};
+  if (payload.result !== 'success' || !payload.rates) return null;
 
-  for (const code of FOREIGN_CURRENCIES) {
-    const entry = payload.rates?.[code];
-    if (typeof entry === 'number' && entry > 0) {
-      foreignToIls[code] = entry;
-      continue;
-    }
-    if (entry && typeof entry === 'object') {
-      const ilsRate = (entry as Record<string, number>).ILS;
-      if (typeof ilsRate === 'number' && ilsRate > 0) {
-        foreignToIls[code] = ilsRate;
-      }
+  const ilsToForeign: Record<string, number> = { ILS: 1 };
+  for (const [code, rate] of Object.entries(payload.rates)) {
+    if (typeof rate === 'number' && rate > 0) {
+      ilsToForeign[code] = rate;
     }
   }
 
-  if (FOREIGN_CURRENCIES.every((code) => foreignToIls[code] != null)) {
-    return {
-      date: payload.date ?? new Date().toISOString().slice(0, 10),
-      foreignToIls,
-    };
-  }
-
-  return null;
-}
-
-async function fetchPerCurrencyRates(): Promise<ExchangeRates> {
-  const pairs = await Promise.all(
-    FOREIGN_CURRENCIES.map(async (code) => {
-      const response = await fetch(
-        `https://api.frankfurter.dev/v1/latest?base=${code}&symbols=ILS`,
-      );
-      if (!response.ok) {
-        throw new Error(`Failed to fetch ${code}/ILS rate`);
-      }
-
-      const data = (await response.json()) as {
-        date?: string;
-        rates?: { ILS?: number };
-      };
-
-      const rate = data.rates?.ILS;
-      if (!rate || rate <= 0) {
-        throw new Error(`Missing ${code}/ILS rate`);
-      }
-
-      return { code, rate, date: data.date };
-    }),
-  );
+  if (Object.keys(ilsToForeign).length <= 1) return null;
 
   return {
-    date: pairs.find((pair) => pair.date)?.date ?? new Date().toISOString().slice(0, 10),
-    foreignToIls: Object.fromEntries(pairs.map((pair) => [pair.code, pair.rate])) as Partial<
-      Record<ExpenseCurrency, number>
-    >,
+    date: payload.time_last_update_utc?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
+    baseCode: 'ILS',
+    ilsToForeign,
+    lastFetchedAt: fetchedAt,
   };
 }
 
 async function fetchRatesFromNetwork(): Promise<ExchangeRates> {
-  try {
-    const response = await fetch(FRANKFURTER_FROM_TO_URL);
-    if (response.ok) {
-      const parsed = parseFromToResponse(await response.json());
-      if (parsed) return parsed;
-    }
-  } catch {
-    // Fall through to the supported v1 per-currency fetch shape.
+  const fetchedAt = Date.now();
+  const response = await fetch(ER_API_URL);
+  if (!response.ok) {
+    throw new Error('Failed to fetch exchange rates');
   }
 
-  return fetchPerCurrencyRates();
+  const parsed = parseErApiResponse(await response.json(), fetchedAt);
+  if (!parsed) {
+    throw new Error('Invalid exchange rate payload');
+  }
+
+  return parsed;
 }
 
+/** Returns cached rates or fetches once. Never refetches within the 24-hour TTL. */
 export async function fetchExchangeRates(): Promise<ExchangeRates> {
   const cached = getCachedExchangeRates();
   if (cached) return cached;
@@ -176,37 +151,47 @@ export async function fetchExchangeRates(): Promise<ExchangeRates> {
   }
 }
 
+function getForeignToIls(currency: string, rates: ExchangeRates): number | null {
+  if (currency === 'ILS') return 1;
+  const ilsToForeign = rates.ilsToForeign[currency];
+  if (!ilsToForeign || ilsToForeign <= 0) return null;
+  return 1 / ilsToForeign;
+}
+
 export function convertForeignToIls(
   amount: number,
-  currency: ExpenseCurrency,
+  currency: string,
   rates: ExchangeRates,
 ): number | null {
   if (currency === 'ILS') return amount;
   if (!(amount > 0)) return 0;
 
-  const foreignToIls = rates.foreignToIls[currency];
-  if (!foreignToIls || foreignToIls <= 0) return null;
+  const foreignToIls = getForeignToIls(currency, rates);
+  if (foreignToIls == null) return null;
 
   return amount * foreignToIls;
 }
 
 export function convertIlsToForeign(
   ilsAmount: number,
-  currency: ExpenseCurrency,
+  currency: string,
   rates: ExchangeRates,
 ): number | null {
   if (currency === 'ILS') return ilsAmount;
 
-  const foreignToIls = rates.foreignToIls[currency];
-  if (!foreignToIls || foreignToIls <= 0) return null;
+  const ilsToForeign = rates.ilsToForeign[currency];
+  if (!ilsToForeign || ilsToForeign <= 0) return null;
 
-  return ilsAmount / foreignToIls;
+  return ilsAmount * ilsToForeign;
+}
+
+export function hasExchangeRate(currency: string, rates: ExchangeRates): boolean {
+  if (currency === 'ILS') return true;
+  const rate = rates.ilsToForeign[currency];
+  return typeof rate === 'number' && rate > 0;
 }
 
 export function formatForeignAmount(amount: number, currency: ExpenseCurrency): string {
   const formatted = Number.isInteger(amount) ? String(amount) : amount.toFixed(2);
-  if (currency === 'USD') return `$${formatted}`;
-  if (currency === 'EUR') return `€${formatted}`;
-  if (currency === 'GBP') return `£${formatted}`;
-  return `₪${formatted}`;
+  return `${currencySymbol(currency)}${formatted}`;
 }

@@ -17,7 +17,11 @@ import {
   type UserAppData,
 } from '../userDataStorage';
 import { isCustomHexColor, normalizeCustomHex } from '../categories';
-import type { ExpenseCurrency } from './exchangeRateService';
+import {
+  normalizeCustomCurrencies,
+  normalizeDisplayCurrency,
+  type ExpenseCurrency,
+} from './currencyRegistry';
 
 const DOC_ID = 'data';
 
@@ -26,6 +30,7 @@ export interface UserSettings {
   keepOriginalValues: boolean;
   displayCurrency: ExpenseCurrency;
   saved_colors: string[];
+  custom_currencies: ExpenseCurrency[];
 }
 
 export interface UserCategoriesData {
@@ -39,6 +44,7 @@ export const EMPTY_USER_SETTINGS: UserSettings = {
   keepOriginalValues: false,
   displayCurrency: 'ILS',
   saved_colors: [],
+  custom_currencies: [],
 };
 
 export const EMPTY_USER_CATEGORIES: UserCategoriesData = {
@@ -52,9 +58,8 @@ const SETTINGS_LS_KEYS = {
   keepOriginalValues: 'money-manager-keep-original-values',
   displayCurrency: 'money-manager-display-currency',
   savedColors: 'saved_colors',
+  customCurrencies: 'money-manager-custom-currencies',
 } as const;
-
-const VALID_DISPLAY_CURRENCIES: ExpenseCurrency[] = ['ILS', 'USD', 'EUR', 'GBP'];
 
 export const shouldSyncToFirestore = (user: User | null): user is User =>
   user !== null && !user.isAnonymous;
@@ -81,15 +86,14 @@ function parseSettings(raw: Record<string, unknown> | undefined): UserSettings {
     typeof raw.keepOriginalValues === 'boolean'
       ? raw.keepOriginalValues
       : EMPTY_USER_SETTINGS.keepOriginalValues;
-  const displayCurrency = VALID_DISPLAY_CURRENCIES.includes(raw.displayCurrency as ExpenseCurrency)
-    ? (raw.displayCurrency as ExpenseCurrency)
-    : EMPTY_USER_SETTINGS.displayCurrency;
+  const displayCurrency = normalizeDisplayCurrency(raw.displayCurrency);
 
   return {
     lang,
     keepOriginalValues,
     displayCurrency,
     saved_colors: normalizeSavedColors(raw.saved_colors),
+    custom_currencies: normalizeCustomCurrencies(raw.custom_currencies),
   };
 }
 
@@ -121,7 +125,8 @@ function hasSettingsLocalData(settings: UserSettings): boolean {
     settings.lang !== EMPTY_USER_SETTINGS.lang ||
     settings.keepOriginalValues !== EMPTY_USER_SETTINGS.keepOriginalValues ||
     settings.displayCurrency !== EMPTY_USER_SETTINGS.displayCurrency ||
-    settings.saved_colors.length > 0
+    settings.saved_colors.length > 0 ||
+    settings.custom_currencies.length > 0
   );
 }
 
@@ -134,9 +139,7 @@ export function loadLegacySettingsFromLocalStorage(): UserSettings {
     window.localStorage.getItem(SETTINGS_LS_KEYS.keepOriginalValues) === 'true';
 
   const currencyRaw = window.localStorage.getItem(SETTINGS_LS_KEYS.displayCurrency);
-  const displayCurrency = VALID_DISPLAY_CURRENCIES.includes(currencyRaw as ExpenseCurrency)
-    ? (currencyRaw as ExpenseCurrency)
-    : EMPTY_USER_SETTINGS.displayCurrency;
+  const displayCurrency = normalizeDisplayCurrency(currencyRaw);
 
   let saved_colors: string[] = [];
   try {
@@ -146,7 +149,15 @@ export function loadLegacySettingsFromLocalStorage(): UserSettings {
     saved_colors = [];
   }
 
-  return { lang, keepOriginalValues, displayCurrency, saved_colors };
+  let custom_currencies: ExpenseCurrency[] = [];
+  try {
+    const raw = window.localStorage.getItem(SETTINGS_LS_KEYS.customCurrencies);
+    if (raw) custom_currencies = normalizeCustomCurrencies(JSON.parse(raw));
+  } catch {
+    custom_currencies = [];
+  }
+
+  return { lang, keepOriginalValues, displayCurrency, saved_colors, custom_currencies };
 }
 
 export function clearLegacyLocalStorage(): void {
@@ -160,6 +171,7 @@ export function clearLegacyLocalStorage(): void {
   window.localStorage.removeItem(SETTINGS_LS_KEYS.keepOriginalValues);
   window.localStorage.removeItem(SETTINGS_LS_KEYS.displayCurrency);
   window.localStorage.removeItem(SETTINGS_LS_KEYS.savedColors);
+  window.localStorage.removeItem(SETTINGS_LS_KEYS.customCurrencies);
 }
 
 async function readLegacyFirestoreApp(uid: string): Promise<UserAppData | null> {
@@ -271,6 +283,7 @@ export async function migrateLegacyDataToCloud(uid: string): Promise<void> {
         keepOriginalValues: settings.keepOriginalValues,
         displayCurrency: settings.displayCurrency,
         saved_colors: settings.saved_colors,
+        custom_currencies: settings.custom_currencies,
         updatedAt: serverTimestamp(),
       },
       { merge: true },
@@ -355,6 +368,7 @@ export async function saveSettingsToCloud(uid: string, settings: UserSettings): 
       keepOriginalValues: settings.keepOriginalValues,
       displayCurrency: settings.displayCurrency,
       saved_colors: settings.saved_colors,
+      custom_currencies: settings.custom_currencies,
       updatedAt: serverTimestamp(),
     },
     { merge: true },

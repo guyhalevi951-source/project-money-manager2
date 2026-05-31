@@ -2042,6 +2042,7 @@ function App() {
     formatMoney,
     displayCurrency,
     savedColors,
+    customCurrencies,
     setSettingsPersistence,
     applySettingsFromCloud,
   } = useLanguage();
@@ -2434,6 +2435,7 @@ function App() {
         keepOriginalValues,
         displayCurrency,
         saved_colors: savedColors,
+        custom_currencies: customCurrencies,
       }).catch(() => {
         // Non-blocking; next change will retry.
       });
@@ -2445,6 +2447,7 @@ function App() {
     keepOriginalValues,
     displayCurrency,
     savedColors,
+    customCurrencies,
     dataReady,
     user,
     settingsCloudReady,

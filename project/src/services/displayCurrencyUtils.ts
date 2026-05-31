@@ -1,8 +1,11 @@
 import {
-  convertIlsToForeign,
+  CURRENCY_DICTIONARY,
+  currencySymbol,
+  isSupportedCurrency,
+  type CurrencyCode,
   type ExpenseCurrency,
-  type ExchangeRates,
-} from './exchangeRateService';
+} from '../constants/currencies';
+import { convertIlsToForeign, type ExchangeRates } from './exchangeRateService';
 
 export interface ExpenseDisplayAmount {
   primary: string;
@@ -19,18 +22,19 @@ function formatNumeric(amount: number): string {
 export function formatAmountWithSymbol(amount: number, currency: ExpenseCurrency): string {
   const formatted = formatNumeric(Math.abs(amount));
   const sign = amount < 0 ? '-' : '';
-
-  if (currency === 'USD') return `${sign}$${formatted}`;
-  if (currency === 'EUR') return `${sign}€${formatted}`;
-  if (currency === 'GBP') return `${sign}£${formatted}`;
-  return `${sign}₪${formatted}`;
+  return `${sign}${currencySymbol(currency)}${formatted}`;
 }
 
 export function symbolToCurrency(symbol: string): ExpenseCurrency | null {
-  if (symbol === '₪') return 'ILS';
-  if (symbol === '$') return 'USD';
-  if (symbol === '€') return 'EUR';
-  if (symbol === '£') return 'GBP';
+  const trimmed = symbol.trim();
+  if (isSupportedCurrency(trimmed)) return trimmed;
+
+  for (const [code, meta] of Object.entries(CURRENCY_DICTIONARY) as [
+    CurrencyCode,
+    { symbol: string },
+  ][]) {
+    if (meta.symbol === trimmed) return code;
+  }
   return null;
 }
 

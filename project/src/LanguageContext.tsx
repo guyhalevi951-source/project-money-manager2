@@ -12,9 +12,15 @@ import { lookupFallbackTranslation, translateText } from './services/translation
 import {
   fetchExchangeRates,
   getCachedExchangeRates,
-  type ExpenseCurrency,
   type ExchangeRates,
 } from './services/exchangeRateService';
+import {
+  isSupportedCurrency,
+  normalizeCustomCurrencies,
+  normalizeDisplayCurrency,
+  type CurrencyCode,
+  type ExpenseCurrency,
+} from './services/currencyRegistry';
 import {
   appendSavedColor,
 } from './services/userFirebaseSync';
@@ -31,8 +37,11 @@ interface LanguageContextValue {
   setLang: (next: Lang) => void;
   keepOriginalValues: boolean;
   setKeepOriginalValues: (next: boolean) => void;
-  displayCurrency: ExpenseCurrency;
-  setDisplayCurrency: (next: ExpenseCurrency) => void;
+  displayCurrency: CurrencyCode;
+  setDisplayCurrency: (next: CurrencyCode) => void;
+  customCurrencies: CurrencyCode[];
+  addCustomCurrency: (code: CurrencyCode) => void;
+  replaceCustomCurrencies: (currencies: CurrencyCode[]) => void;
   savedColors: string[];
   saveSavedColor: (hex: string) => string[];
   setSavedColors: (colors: string[]) => void;
@@ -43,6 +52,7 @@ interface LanguageContextValue {
     keepOriginalValues: boolean;
     displayCurrency: ExpenseCurrency;
     saved_colors: string[];
+    custom_currencies: ExpenseCurrency[];
   }) => void;
   formatMoney: (ilsAmount: number) => string;
   formatExpenseMoney: (
@@ -63,14 +73,20 @@ const LANGUAGE_STORAGE_KEY = 'money-manager-language';
 const KEEP_ORIGINAL_VALUES_STORAGE_KEY = 'money-manager-keep-original-values';
 const DISPLAY_CURRENCY_STORAGE_KEY = 'money-manager-display-currency';
 
-const VALID_DISPLAY_CURRENCIES: ExpenseCurrency[] = ['ILS', 'USD', 'EUR', 'GBP'];
+const CUSTOM_CURRENCIES_STORAGE_KEY = 'money-manager-custom-currencies';
 
-function getInitialDisplayCurrency(): ExpenseCurrency {
-  const fromStorage = window.localStorage.getItem(DISPLAY_CURRENCY_STORAGE_KEY);
-  if (fromStorage && VALID_DISPLAY_CURRENCIES.includes(fromStorage as ExpenseCurrency)) {
-    return fromStorage as ExpenseCurrency;
+function getInitialDisplayCurrency(): CurrencyCode {
+  return normalizeDisplayCurrency(window.localStorage.getItem(DISPLAY_CURRENCY_STORAGE_KEY));
+}
+
+function getInitialCustomCurrencies(): ExpenseCurrency[] {
+  try {
+    const raw = window.localStorage.getItem(CUSTOM_CURRENCIES_STORAGE_KEY);
+    if (!raw) return [];
+    return normalizeCustomCurrencies(JSON.parse(raw));
+  } catch {
+    return [];
   }
-  return 'ILS';
 }
 
 const hasHebrew = (text: string) => /[\u0590-\u05FF]/.test(text);
@@ -113,8 +129,11 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     const fromStorage = window.localStorage.getItem(KEEP_ORIGINAL_VALUES_STORAGE_KEY);
     return fromStorage === 'true';
   });
-  const [displayCurrency, setDisplayCurrency] = useState<ExpenseCurrency>(() =>
+  const [displayCurrency, setDisplayCurrencyState] = useState<ExpenseCurrency>(() =>
     getInitialDisplayCurrency(),
+  );
+  const [customCurrencies, setCustomCurrencies] = useState<ExpenseCurrency[]>(() =>
+    getInitialCustomCurrencies(),
   );
   const [savedColors, setSavedColors] = useState<string[]>(() => getLocalSavedColors());
   const [settingsPersistence, setSettingsPersistence] = useState<'local' | 'cloud'>('local');
@@ -133,14 +152,34 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       keepOriginalValues: boolean;
       displayCurrency: ExpenseCurrency;
       saved_colors: string[];
+      custom_currencies: ExpenseCurrency[];
     }) => {
       setLang(settings.lang);
       setKeepOriginalValues(settings.keepOriginalValues);
-      setDisplayCurrency(settings.displayCurrency);
+      setDisplayCurrencyState(settings.displayCurrency);
       setSavedColors(settings.saved_colors);
+      setCustomCurrencies(settings.custom_currencies);
     },
     [],
   );
+
+  const setDisplayCurrency = useCallback((next: CurrencyCode) => {
+    if (!/^[A-Z]{3}$/.test(next)) return;
+    setDisplayCurrencyState(next);
+  }, []);
+
+  const addCustomCurrency = useCallback((code: ExpenseCurrency) => {
+    if (!isSupportedCurrency(code)) return;
+    setCustomCurrencies((prev) => {
+      if (prev.includes(code)) return prev;
+      return [...prev, code];
+    });
+    setDisplayCurrencyState(code);
+  }, []);
+
+  const replaceCustomCurrencies = useCallback((currencies: CurrencyCode[]) => {
+    setCustomCurrencies(normalizeCustomCurrencies(currencies));
+  }, []);
 
   const saveSavedColor = useCallback(
     (hex: string) => {
@@ -176,6 +215,11 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     if (settingsPersistence !== 'local') return;
     window.localStorage.setItem(DISPLAY_CURRENCY_STORAGE_KEY, displayCurrency);
   }, [displayCurrency, settingsPersistence]);
+
+  useEffect(() => {
+    if (settingsPersistence !== 'local') return;
+    window.localStorage.setItem(CUSTOM_CURRENCIES_STORAGE_KEY, JSON.stringify(customCurrencies));
+  }, [customCurrencies, settingsPersistence]);
 
   useEffect(() => {
     const cached = getCachedExchangeRates();
@@ -288,6 +332,9 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       setKeepOriginalValues,
       displayCurrency,
       setDisplayCurrency,
+      customCurrencies,
+      addCustomCurrency,
+      replaceCustomCurrencies,
       savedColors,
       saveSavedColor,
       setSavedColors,
@@ -307,6 +354,9 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       dir,
       keepOriginalValues,
       displayCurrency,
+      customCurrencies,
+      addCustomCurrency,
+      replaceCustomCurrencies,
       savedColors,
       saveSavedColor,
       settingsPersistence,

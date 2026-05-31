@@ -15,6 +15,10 @@ service cloud.firestore {
         && request.auth.token.firebase.sign_in_provider != 'anonymous';
     }
 
+    function isValidIsoCurrencyCode(code) {
+      return code.matches('^[A-Z]{3}$');
+    }
+
     function isValidExpensesDoc() {
       return request.resource.data.keys().hasAll(['expenses'])
         && request.resource.data.expenses is list;
@@ -37,11 +41,14 @@ service cloud.firestore {
           'keepOriginalValues',
           'displayCurrency',
           'saved_colors',
+          'custom_currencies',
         ])
         && request.resource.data.lang in ['he', 'en']
         && request.resource.data.keepOriginalValues is bool
-        && request.resource.data.displayCurrency in ['ILS', 'USD', 'EUR', 'GBP']
-        && request.resource.data.saved_colors is list;
+        && isValidIsoCurrencyCode(request.resource.data.displayCurrency)
+        && request.resource.data.saved_colors is list
+        && request.resource.data.custom_currencies is list
+        && request.resource.data.custom_currencies.size() <= 20;
     }
 
     function isValidLegacyAppData() {
@@ -87,7 +94,6 @@ service cloud.firestore {
         allow delete: if isOwner(userId) && isPersistedAccount() && docId == 'data';
       }
 
-      // Legacy path — read-only for migration; writes blocked on new installs.
       match /data/{docId} {
         allow read: if isOwner(userId) && isPersistedAccount();
         allow create, update: if isOwner(userId)
