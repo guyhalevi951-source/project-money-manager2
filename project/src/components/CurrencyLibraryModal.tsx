@@ -7,6 +7,7 @@ import {
   getCurrencyMeta,
   type CurrencyCode,
 } from '../constants/currencies';
+import CurrencyFlag from './CurrencyFlag';
 
 export type CurrencyLibraryMode = 'display' | 'expense';
 
@@ -175,16 +176,19 @@ export default function CurrencyLibraryModal({
                           onClick={() => handleSelectCurrency(code)}
                           className="w-full text-start rounded-xl border border-gray-700/50 bg-gray-950/40 hover:bg-gray-800/60 hover:border-gray-600/70 px-3.5 py-3 transition-all active:scale-[0.99]"
                         >
-                          <div className="flex items-start gap-3">
+                          <div className="flex items-center gap-3">
                             <span
                               dir="ltr"
-                              className="shrink-0 w-11 h-11 rounded-xl bg-gray-800/80 border border-gray-700/60 flex items-center justify-center text-base font-semibold text-white tabular-nums"
+                              className="shrink-0 w-11 h-11 rounded-xl bg-gray-800/80 border border-gray-700/60 flex flex-col items-center justify-center gap-1 text-white tabular-nums"
                             >
-                              {meta.symbol}
+                              <CurrencyFlag countryCode={meta.countryCode} size="md" alt={meta.name} />
+                              <span className="text-[11px] font-semibold leading-none">{meta.symbol}</span>
                             </span>
                             <div className="min-w-0 flex-1">
-                              <div className="flex items-baseline gap-2 flex-wrap">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <CurrencyFlag countryCode={meta.countryCode} size="sm" alt="" />
                                 <span className="font-semibold text-white tabular-nums">{code}</span>
+                                <span className="text-sm text-gray-400">—</span>
                                 <span className="text-sm text-gray-300">{meta.name}</span>
                               </div>
                               <p className="text-xs text-gray-500 mt-1">
@@ -207,12 +211,16 @@ export default function CurrencyLibraryModal({
                   <div className="flex items-center gap-3">
                     <span
                       dir="ltr"
-                      className="shrink-0 w-14 h-14 rounded-xl bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center text-xl font-bold text-white"
+                      className="shrink-0 w-14 h-14 rounded-xl bg-emerald-500/15 border border-emerald-500/25 flex flex-col items-center justify-center gap-1.5 text-white"
                     >
-                      {selectedMeta.symbol}
+                      <CurrencyFlag countryCode={selectedMeta.countryCode} size="lg" alt={selectedMeta.name} />
+                      <span className="text-sm font-bold leading-none">{selectedMeta.symbol}</span>
                     </span>
                     <div>
-                      <p className="text-lg font-semibold text-white tabular-nums">{selectedCode}</p>
+                      <p className="flex items-center gap-2 text-lg font-semibold text-white tabular-nums">
+                        <CurrencyFlag countryCode={selectedMeta.countryCode} size="sm" alt="" />
+                        {selectedCode}
+                      </p>
                       <p className="text-sm text-gray-300">{selectedMeta.name}</p>
                       <p className="text-xs text-gray-500 mt-1">
                         {tr('currencyCountriesLabel')}: {selectedMeta.countries}

@@ -11,6 +11,7 @@ import {
   type CurrencyCode,
 } from '../constants/currencies';
 import CurrencyLibraryModal from './CurrencyLibraryModal';
+import CurrencyFlag from './CurrencyFlag';
 
 const DEFAULT_DISPLAY_CURRENCY: CoreCurrencyCode = 'ILS';
 
@@ -197,7 +198,14 @@ function DisplayCurrencySelector() {
           dir="ltr"
           className="mb-3 rounded-xl border border-violet-500/30 bg-violet-500/10 px-3.5 py-2.5 text-sm text-violet-100"
         >
-          <span className="font-medium tabular-nums">{displayCurrency}</span>
+          <span className="inline-flex items-center gap-2 font-medium tabular-nums">
+            <CurrencyFlag
+              countryCode={getCurrencyMeta(displayCurrency).countryCode}
+              size="sm"
+              alt={getCurrencyMeta(displayCurrency).name}
+            />
+            {displayCurrency}
+          </span>
           <span className="text-violet-200/90"> — {getCurrencyMeta(displayCurrency).name}</span>
           <span className="block text-xs text-violet-300/80 mt-0.5">{tr('currencyTemporaryActive')}</span>
         </div>
@@ -233,7 +241,7 @@ function DisplayCurrencySelector() {
                 type="button"
                 onClick={() => handleSelect(code)}
                 disabled={editMode}
-                className={`${currencyCellClass} ${
+                className={`${currencyCellClass} ${showRemove ? 'pt-1' : ''} ${
                   editMode
                     ? 'cursor-default opacity-95 text-gray-200 bg-gray-800/60'
                     : `active:scale-[0.98] ${
@@ -244,8 +252,9 @@ function DisplayCurrencySelector() {
                 } ${showRemove ? 'ring-1 ring-amber-500/25' : ''}`}
                 aria-pressed={selected}
               >
-                <span className="leading-none">{meta.symbol}</span>
-                <span className="text-[10px] sm:text-xs font-medium opacity-80 mt-1 leading-none">{code}</span>
+                <CurrencyFlag countryCode={meta.countryCode} size="xs" alt={meta.name} />
+                <span className="text-xs sm:text-sm leading-none mt-0.5">{meta.symbol}</span>
+                <span className="text-[9px] sm:text-[10px] font-medium opacity-80 mt-0.5 leading-none">{code}</span>
               </button>
             </div>
           );

@@ -10,6 +10,7 @@ import {
   type ExchangeRates,
 } from '../services/exchangeRateService';
 import CurrencyLibraryModal from './CurrencyLibraryModal';
+import CurrencyFlag from './CurrencyFlag';
 
 interface ExpenseAmountFieldProps {
   amount: string;
@@ -172,12 +173,13 @@ export default function ExpenseAmountField({
             aria-label={tr('currencyLabel')}
             aria-haspopup="listbox"
             aria-expanded={isCurrencyMenuOpen}
-            className={`flex items-center gap-1.5 px-3 py-3 rounded-xl border text-sm font-medium tabular-nums transition-all active:scale-[0.98] min-w-[5.5rem] ${
+            className={`flex items-center gap-2 px-3 py-3 rounded-xl border text-sm font-medium tabular-nums transition-all active:scale-[0.98] min-w-[6.5rem] ${
               isTemporaryCurrency
                 ? 'bg-neutral-800 border-violet-500/50 text-violet-100 ring-1 ring-violet-500/25'
                 : 'bg-neutral-800 border-neutral-700 text-neutral-100 hover:border-neutral-600'
             } ${isCurrencyMenuOpen ? 'border-emerald-500/60 ring-2 ring-emerald-500/25' : ''}`}
           >
+            <CurrencyFlag countryCode={selectedMeta.countryCode} size="sm" alt={selectedMeta.name} />
             <span className="font-semibold">{selectedMeta.symbol}</span>
             <span className="text-neutral-300">{currency}</span>
             <ChevronDown
@@ -207,7 +209,7 @@ export default function ExpenseAmountField({
                       role="option"
                       aria-selected={selected}
                       onClick={() => handleSelectCurrency(code)}
-                      className={`min-w-[3.25rem] flex-1 basis-[calc(25%-0.5rem)] py-2 rounded-lg text-xs font-semibold tabular-nums transition-all active:scale-[0.98] ${
+                      className={`min-w-[3.25rem] flex-1 basis-[calc(25%-0.5rem)] py-2 rounded-lg text-xs font-semibold tabular-nums transition-all active:scale-[0.98] flex flex-col items-center justify-center ${
                         selected
                           ? isTemp
                             ? 'bg-violet-500 text-white shadow-md shadow-violet-500/30 ring-1 ring-violet-400/40'
@@ -215,8 +217,9 @@ export default function ExpenseAmountField({
                           : 'text-neutral-300 hover:text-white hover:bg-neutral-800/80'
                       }`}
                     >
-                      <span className="block">{meta.symbol}</span>
-                      <span className="block text-[9px] font-medium opacity-80 mt-0.5">{code}</span>
+                      <CurrencyFlag countryCode={meta.countryCode} size="xs" alt={meta.name} />
+                      <span className="block leading-none mt-0.5">{meta.symbol}</span>
+                      <span className="block text-[9px] font-medium opacity-80 mt-0.5 leading-none">{code}</span>
                     </button>
                   );
                 })}
