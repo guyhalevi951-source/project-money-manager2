@@ -95,8 +95,11 @@ export default function CategoryColorPicker({ value, onChange, label }: Category
       <AdvancedColorPickerPopover
         open={customOpen}
         color={customSelected ? customHex : hexForColor(value)}
-        onChange={(hex) => onChange(hex)}
-        onClose={() => setCustomOpen(false)}
+        onApply={(hex) => {
+          onChange(hex);
+          setCustomOpen(false);
+        }}
+        onCancel={() => setCustomOpen(false)}
         anchorRef={customButtonRef}
       />
     </div>
