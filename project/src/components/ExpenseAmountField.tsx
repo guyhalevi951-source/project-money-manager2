@@ -1,16 +1,47 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, Loader2, Plus } from 'lucide-react';
 import { LtrNumeric, useLanguage } from '../LanguageContext';
 import { getCurrencyMeta, type CurrencyCode } from '../constants/currencies';
 import { usePinnedCurrencies } from '../hooks/usePinnedCurrencies';
+import { formatAmountWithSymbol } from '../services/displayCurrencyUtils';
 import {
-  convertForeignToIls,
+  convertAmountViaIls,
   fetchExchangeRates,
   getCachedExchangeRates,
+  hasExchangeRate,
   type ExchangeRates,
 } from '../services/exchangeRateService';
 import CurrencyLibraryModal from './CurrencyLibraryModal';
 import CurrencyFlag from './CurrencyFlag';
+import CurrencyDetectionBanner from './CurrencyDetectionBanner';
+import {
+  detectLocalCurrency,
+  isDetectedCurrencyAccepted,
+} from '../services/currencyDetectionService';
+import {
+  getCurrencyAutoDetectPref,
+  setCurrencyAutoDetectPref,
+} from '../services/currencyDetectionPreference';
+
+const expenseFormControlClass =
+  'h-12 rounded-xl border border-neutral-700 bg-neutral-800 text-neutral-100 text-base transition-all outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30';
+
+const AMOUNT_INPUT_MAX_LENGTH = 14;
+
+/** Horizontal padding (px-4 × 2) plus breathing room so digits never clip. */
+const AMOUNT_INPUT_WIDTH_EXTRA_PX = 56;
+const AMOUNT_INPUT_MIN_WIDTH_PX = 80;
+
+/** Width grows with digit count; `ch` matches tabular-nums on the input. */
+function getAmountInputWidth(amount: string): { width: string; minWidth: string; maxWidth: string } {
+  const charCount = amount.length > 0 ? amount.length : 1;
+  return {
+    width: `calc(${charCount}ch + ${AMOUNT_INPUT_WIDTH_EXTRA_PX}px)`,
+    minWidth: `${AMOUNT_INPUT_MIN_WIDTH_PX}px`,
+    maxWidth: '100%',
+  };
+}
 
 interface ExpenseAmountFieldProps {
   amount: string;
@@ -27,19 +58,25 @@ export default function ExpenseAmountField({
   onCurrencyChange,
   onRatesReadyChange,
 }: ExpenseAmountFieldProps) {
-  const { tr } = useLanguage();
+  const { tr, displayCurrency } = useLanguage();
   const pinnedCurrencies = usePinnedCurrencies();
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [isCurrencyMenuOpen, setIsCurrencyMenuOpen] = useState(false);
+  const [showDetectionPrompt, setShowDetectionPrompt] = useState(false);
+  const [detectedCurrency, setDetectedCurrency] = useState<CurrencyCode | null>(null);
   const currencyMenuRef = useRef<HTMLDivElement>(null);
+  const detectionRanRef = useRef(false);
 
-  const needsRates = currency !== 'ILS';
+  const needsRatesForStorage = currency !== 'ILS';
+  const needsRatesForFetch = needsRatesForStorage || displayCurrency !== currency;
   const initialCachedRates = getCachedExchangeRates();
 
   const [rates, setRates] = useState<ExchangeRates | null>(() =>
-    needsRates ? initialCachedRates : null,
+    needsRatesForFetch ? initialCachedRates : null,
   );
-  const [loading, setLoading] = useState(() => needsRates && !initialCachedRates);
+  const [loading, setLoading] = useState(
+    () => needsRatesForFetch && !initialCachedRates,
+  );
   const [error, setError] = useState(false);
 
   const selectedMeta = useMemo(() => getCurrencyMeta(currency), [currency]);
@@ -74,7 +111,7 @@ export default function ExpenseAmountField({
   useEffect(() => {
     if (!isCurrencyMenuOpen) return;
 
-    const handlePointerDown = (event: MouseEvent) => {
+    const handlePointerDownOutside = (event: PointerEvent) => {
       const target = event.target as Node;
       if (currencyMenuRef.current?.contains(target)) return;
       closeCurrencyMenu();
@@ -84,20 +121,24 @@ export default function ExpenseAmountField({
       if (event.key === 'Escape') closeCurrencyMenu();
     };
 
-    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('pointerdown', handlePointerDownOutside);
     document.addEventListener('keydown', handleEscape);
     return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('pointerdown', handlePointerDownOutside);
       document.removeEventListener('keydown', handleEscape);
     };
   }, [isCurrencyMenuOpen, closeCurrencyMenu]);
 
   useEffect(() => {
-    if (!needsRates) {
+    if (!needsRatesForFetch) {
       setLoading(false);
       setError(false);
       onRatesReadyChange?.(true);
       return;
+    }
+
+    if (!needsRatesForStorage) {
+      onRatesReadyChange?.(true);
     }
 
     const cached = getCachedExchangeRates();
@@ -105,14 +146,14 @@ export default function ExpenseAmountField({
       setRates(cached);
       setLoading(false);
       setError(false);
-      onRatesReadyChange?.(true);
+      if (needsRatesForStorage) onRatesReadyChange?.(true);
       return;
     }
 
     let cancelled = false;
     setLoading(true);
     setError(false);
-    onRatesReadyChange?.(false);
+    if (needsRatesForStorage) onRatesReadyChange?.(false);
 
     void fetchExchangeRates()
       .then((nextRates) => {
@@ -124,7 +165,7 @@ export default function ExpenseAmountField({
       .catch(() => {
         if (cancelled) return;
         setError(true);
-        onRatesReadyChange?.(false);
+        if (needsRatesForStorage) onRatesReadyChange?.(false);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -133,26 +174,66 @@ export default function ExpenseAmountField({
     return () => {
       cancelled = true;
     };
-  }, [needsRates, onRatesReadyChange]);
+  }, [needsRatesForFetch, needsRatesForStorage, onRatesReadyChange]);
 
   useEffect(() => {
-    if (currency === 'ILS') return;
+    if (!needsRatesForFetch) return;
     const cached = getCachedExchangeRates();
     if (cached) {
       setRates(cached);
       setLoading(false);
       setError(false);
-      onRatesReadyChange?.(true);
+      if (needsRatesForStorage) onRatesReadyChange?.(true);
     }
-  }, [currency, onRatesReadyChange]);
+  }, [currency, displayCurrency, needsRatesForFetch, needsRatesForStorage, onRatesReadyChange]);
 
   const parsedAmount = parseFloat(amount);
-  const convertedIls = useMemo(() => {
-    if (!needsRates || !rates || !(parsedAmount > 0)) return null;
-    return convertForeignToIls(parsedAmount, currency, rates);
-  }, [needsRates, rates, parsedAmount, currency]);
 
-  const showPreview = needsRates && parsedAmount > 0;
+  const isMaxLengthReached = amount.length >= AMOUNT_INPUT_MAX_LENGTH;
+
+  const handleAmountChange = useCallback(
+    (value: string) => {
+      if (value.length > AMOUNT_INPUT_MAX_LENGTH) return;
+      onAmountChange(value);
+    },
+    [onAmountChange],
+  );
+
+  const showDisplayPreview = useMemo(
+    () =>
+      !isMaxLengthReached &&
+      parsedAmount > 0 &&
+      currency !== displayCurrency,
+    [isMaxLengthReached, parsedAmount, currency, displayCurrency],
+  );
+
+  const convertedDisplayAmount = useMemo(() => {
+    if (!showDisplayPreview || !rates) return null;
+
+    if (
+      !hasExchangeRate(currency, rates) ||
+      !hasExchangeRate(displayCurrency, rates)
+    ) {
+      return null;
+    }
+
+    const converted = convertAmountViaIls(
+      parsedAmount,
+      currency,
+      displayCurrency,
+      rates,
+    );
+    if (converted == null) return null;
+
+    return Math.round(converted * 100) / 100;
+  }, [showDisplayPreview, rates, parsedAmount, currency, displayCurrency]);
+
+  const displayPreviewFormatted = useMemo(() => {
+    if (convertedDisplayAmount == null) return null;
+    return formatAmountWithSymbol(convertedDisplayAmount, displayCurrency);
+  }, [convertedDisplayAmount, displayCurrency]);
+
+  const amountInputSize = useMemo(() => getAmountInputWidth(amount), [amount]);
 
   const handleExpenseCurrencyFromLibrary = useCallback(
     (code: CurrencyCode) => {
@@ -161,41 +242,91 @@ export default function ExpenseAmountField({
     [onCurrencyChange],
   );
 
+  useEffect(() => {
+    if (detectionRanRef.current) return;
+    detectionRanRef.current = true;
+
+    const pref = getCurrencyAutoDetectPref();
+    if (pref === 'never') return;
+
+    let cancelled = false;
+
+    void detectLocalCurrency().then((detected) => {
+      if (
+        cancelled ||
+        !detected ||
+        !isDetectedCurrencyAccepted(detected) ||
+        detected === displayCurrency
+      ) {
+        return;
+      }
+
+      if (pref === 'always') {
+        onCurrencyChange(detected);
+        return;
+      }
+
+      setDetectedCurrency(detected);
+      setShowDetectionPrompt(true);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [displayCurrency, onCurrencyChange]);
+
+  const handleDetectionConfirm = useCallback(() => {
+    if (detectedCurrency) onCurrencyChange(detectedCurrency);
+    setShowDetectionPrompt(false);
+  }, [detectedCurrency, onCurrencyChange]);
+
+  const handleDetectionAlways = useCallback(() => {
+    setCurrencyAutoDetectPref('always');
+    if (detectedCurrency) onCurrencyChange(detectedCurrency);
+    setShowDetectionPrompt(false);
+  }, [detectedCurrency, onCurrencyChange]);
+
+  const handleDetectionNever = useCallback(() => {
+    setCurrencyAutoDetectPref('never');
+    setShowDetectionPrompt(false);
+  }, []);
+
   return (
-    <div className="min-w-0">
+    <div className="flex w-full shrink-0 flex-col sm:w-auto">
       <label className="block text-sm font-medium text-neutral-300 mb-2">{tr('amountLabel')}</label>
 
-      <div dir="ltr" className="flex gap-2 min-w-0">
-        <div ref={currencyMenuRef} className="relative shrink-0">
-          <button
-            type="button"
-            onClick={() => setIsCurrencyMenuOpen((prev) => !prev)}
-            aria-label={tr('currencyLabel')}
-            aria-haspopup="listbox"
-            aria-expanded={isCurrencyMenuOpen}
-            className={`flex items-center gap-2 px-3 py-3 rounded-xl border text-sm font-medium tabular-nums transition-all active:scale-[0.98] min-w-[6.5rem] ${
-              isTemporaryCurrency
-                ? 'bg-neutral-800 border-violet-500/50 text-violet-100 ring-1 ring-violet-500/25'
-                : 'bg-neutral-800 border-neutral-700 text-neutral-100 hover:border-neutral-600'
-            } ${isCurrencyMenuOpen ? 'border-emerald-500/60 ring-2 ring-emerald-500/25' : ''}`}
-          >
-            <CurrencyFlag countryCode={selectedMeta.countryCode} size="sm" alt={selectedMeta.name} />
-            <span className="font-semibold">{selectedMeta.symbol}</span>
-            <span className="text-neutral-300">{currency}</span>
-            <ChevronDown
-              className={`w-3.5 h-3.5 shrink-0 text-neutral-400 transition-transform duration-200 ${
-                isCurrencyMenuOpen ? 'rotate-180' : ''
-              }`}
-              aria-hidden
-            />
-          </button>
-
-          {isCurrencyMenuOpen && (
-            <div
-              role="listbox"
+      <div dir="ltr" className="relative z-10 w-full sm:w-auto">
+        <div className="relative z-10 flex w-full items-center gap-2 sm:w-auto">
+          <div ref={currencyMenuRef} className="relative z-20 shrink-0">
+            <button
+              type="button"
+              onClick={() => setIsCurrencyMenuOpen((prev) => !prev)}
               aria-label={tr('currencyLabel')}
-              className="absolute top-full start-0 z-50 mt-1.5 w-[min(100vw-2rem,15.5rem)] rounded-xl border border-neutral-700/90 bg-neutral-900 shadow-xl shadow-black/50 p-1.5"
+              aria-haspopup="listbox"
+              aria-expanded={isCurrencyMenuOpen}
+              className={`${expenseFormControlClass} flex shrink-0 items-center gap-1.5 px-2.5 sm:gap-2 sm:px-3 text-sm font-medium tabular-nums active:scale-[0.98] whitespace-nowrap ${
+                isTemporaryCurrency
+                  ? 'bg-neutral-800 border-violet-500/50 text-violet-100 ring-1 ring-violet-500/25'
+                  : 'bg-neutral-800 border-neutral-700 text-neutral-100 hover:border-neutral-600'
+              } ${isCurrencyMenuOpen ? 'border-emerald-500/60 ring-2 ring-emerald-500/25' : ''}`}
             >
+              <CurrencyFlag countryCode={selectedMeta.countryCode} size="sm" alt={selectedMeta.name} />
+              <span className="font-semibold">{selectedMeta.symbol}</span>
+              <span className="text-neutral-300">{currency}</span>
+              <ChevronDown
+                className={`w-3.5 h-3.5 shrink-0 text-neutral-400 transition-transform duration-200 ${
+                  isCurrencyMenuOpen ? 'rotate-180' : ''
+                }`}
+                aria-hidden
+              />
+            </button>
+
+            {isCurrencyMenuOpen && (
+              <div
+                role="listbox"
+                aria-label={tr('currencyLabel')}
+                className="absolute top-full start-0 z-30 mt-1.5 w-[min(100vw-2rem,15.5rem)] rounded-xl border border-neutral-700/90 bg-neutral-900 shadow-xl shadow-black/50 p-1.5"
+              >
               <div className="flex flex-wrap gap-1.5">
                 {selectableCurrencies.map((code) => {
                   const meta = getCurrencyMeta(code);
@@ -234,46 +365,86 @@ export default function ExpenseAmountField({
                   <span className="block text-[9px] font-medium opacity-80 mt-0.5">+</span>
                 </button>
               </div>
-            </div>
-          )}
+              </div>
+            )}
+          </div>
+
+          <input
+            type="number"
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => handleAmountChange(e.target.value)}
+            placeholder="0.00"
+            style={{
+              width: amountInputSize.width,
+              minWidth: amountInputSize.minWidth,
+              maxWidth: amountInputSize.maxWidth,
+            }}
+            className={`${expenseFormControlClass} box-border shrink-0 px-4 text-center tabular-nums placeholder-neutral-500 transition-[width] duration-150 ease-out ${
+              isMaxLengthReached ? 'border-red-500/70 focus:border-red-500 focus:ring-red-500/30' : ''
+            }`}
+            aria-invalid={isMaxLengthReached}
+            min="0"
+            step="0.01"
+            required
+          />
         </div>
 
-        <input
-          type="number"
-          inputMode="decimal"
-          value={amount}
-          onChange={(e) => onAmountChange(e.target.value)}
-          placeholder="0.00"
-          className="flex-1 min-w-0 px-4 py-3 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base tabular-nums"
-          min="0"
-          step="0.01"
-          required
-        />
+        <AnimatePresence mode="wait">
+          {isMaxLengthReached ? (
+            <motion.p
+              key="amount-max-length"
+              initial={{ opacity: 0, y: -2 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="absolute start-0 top-full z-20 mt-1 text-xs text-red-500 pointer-events-none whitespace-nowrap"
+              role="alert"
+            >
+              {tr('amountTooLarge')}
+            </motion.p>
+          ) : showDisplayPreview ? (
+            <motion.p
+              key={`${currency}-${displayCurrency}-${amount}`}
+              initial={{ opacity: 0, y: -2 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="absolute start-0 top-full z-10 mt-1 max-w-[min(100vw-2rem,20rem)] truncate text-sm leading-snug text-neutral-400 pointer-events-none"
+              aria-live="polite"
+            >
+              {loading ? (
+                <span className="inline-flex items-center gap-1.5 text-neutral-500">
+                  <Loader2 className="w-3 h-3 animate-spin shrink-0" aria-hidden />
+                  {tr('loadingExchangeRates')}
+                </span>
+              ) : error ? (
+                <span className="text-amber-400/80">{tr('exchangeRatesUnavailable')}</span>
+              ) : displayPreviewFormatted ? (
+                <span>
+                  {tr('approxIlsPrefix')}{' '}
+                  <LtrNumeric className="font-medium text-neutral-300/90 tabular-nums">
+                    {displayPreviewFormatted}
+                  </LtrNumeric>
+                </span>
+              ) : (
+                <span className="text-amber-400/80">{tr('exchangeRatesUnavailable')}</span>
+              )}
+            </motion.p>
+          ) : null}
+        </AnimatePresence>
       </div>
 
-      {showPreview && (
-        <p className="mt-1.5 min-h-[1.125rem] text-xs leading-snug">
-          {loading ? (
-            <span className="inline-flex items-center gap-1.5 text-neutral-500">
-              <Loader2 className="w-3 h-3 animate-spin shrink-0" aria-hidden />
-              {tr('loadingExchangeRates')}
-            </span>
-          ) : error ? (
-            <span className="text-amber-400/90">{tr('exchangeRatesUnavailable')}</span>
-          ) : convertedIls != null ? (
-            <span className="text-emerald-400/90">
-              {tr('approxIlsPrefix')}{' '}
-              <LtrNumeric className="font-medium text-emerald-300">
-                ₪
-                {convertedIls.toLocaleString(undefined, {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
-              </LtrNumeric>
-            </span>
-          ) : null}
-        </p>
-      )}
+      <AnimatePresence>
+        {showDetectionPrompt && detectedCurrency && (
+          <CurrencyDetectionBanner
+            detectedCurrency={detectedCurrency}
+            onConfirmSwitch={handleDetectionConfirm}
+            onAlwaysSwitch={handleDetectionAlways}
+            onNeverAsk={handleDetectionNever}
+          />
+        )}
+      </AnimatePresence>
 
       <CurrencyLibraryModal
         open={libraryOpen}

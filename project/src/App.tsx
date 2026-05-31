@@ -376,41 +376,40 @@ function CollapsibleNavMenu({
     return (
       <>
         {backdrop}
+        {/* FAB-only footprint when closed — avoids a full-width invisible hit layer over the form */}
         <div
-          className="md:hidden fixed inset-x-0 bottom-0 z-50 flex flex-col items-center pointer-events-none"
+          className="md:hidden fixed bottom-0 left-1/2 z-40 flex -translate-x-1/2 flex-col items-center"
           style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
         >
-          {/* Expanded tab stack (grows upward from FAB) */}
-          <div
-            className={`pointer-events-auto w-[min(100%,20rem)] px-4 mb-3 flex flex-col gap-2 transition-all duration-300 ease-in-out ${
-              open ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'
-            }`}
-            role="menu"
-            aria-hidden={!open}
-          >
-            {userEmail && (
-              <p
-                className="text-center text-xs text-slate-500 truncate px-2 py-1 border-b border-slate-800/80 mb-1"
-                title={userEmail}
-              >
-                {userEmail}
-              </p>
-            )}
-            {[...TABS].reverse().map((tab, i) => tabButton(tab, TABS.length - 1 - i))}
-            {onLogout && (
-              <button
-                type="button"
-                onClick={() => {
-                  onLogout();
-                  onOpenChange(false);
-                }}
-                className="w-full flex items-center gap-2.5 px-4 py-3.5 rounded-2xl border border-rose-500/30 bg-rose-500/10 text-rose-300 text-sm font-medium hover:bg-rose-500/20 transition-all active:scale-[0.98]"
-              >
-                <LogOut className="w-5 h-5 shrink-0" />
-                <span className={`flex-1 ${dir === 'rtl' ? 'text-right' : 'text-left'}`}>{tr('logout')}</span>
-              </button>
-            )}
-          </div>
+          {open && (
+            <div
+              className="mb-3 flex w-[min(100vw-2rem,20rem)] flex-col gap-2 px-4 transition-all duration-300 ease-in-out opacity-100 translate-y-0"
+              role="menu"
+            >
+              {userEmail && (
+                <p
+                  className="text-center text-xs text-slate-500 truncate px-2 py-1 border-b border-slate-800/80 mb-1"
+                  title={userEmail}
+                >
+                  {userEmail}
+                </p>
+              )}
+              {[...TABS].reverse().map((tab, i) => tabButton(tab, TABS.length - 1 - i))}
+              {onLogout && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onLogout();
+                    onOpenChange(false);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-4 py-3.5 rounded-2xl border border-rose-500/30 bg-rose-500/10 text-rose-300 text-sm font-medium hover:bg-rose-500/20 transition-all active:scale-[0.98]"
+                >
+                  <LogOut className="w-5 h-5 shrink-0" />
+                  <span className={`flex-1 ${dir === 'rtl' ? 'text-right' : 'text-left'}`}>{tr('logout')}</span>
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Collapsed / active FAB pill */}
           <button
@@ -418,7 +417,7 @@ function CollapsibleNavMenu({
             onClick={toggleOpen}
             aria-expanded={open}
             aria-haspopup="menu"
-            className={`pointer-events-auto flex items-center gap-2.5 px-5 py-3.5 rounded-full bg-slate-900 border shadow-2xl shadow-black/50 transition-all duration-300 ease-in-out active:scale-[0.98] outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 ${
+            className={`flex items-center gap-2.5 px-5 py-3.5 rounded-full bg-slate-900 border shadow-2xl shadow-black/50 transition-all duration-300 ease-in-out active:scale-[0.98] outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 ${
               open
                 ? 'border-emerald-500/50 shadow-emerald-500/20'
                 : 'border-slate-700 hover:border-slate-600'
@@ -918,6 +917,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
 
         <div dir="ltr" className="flex items-center gap-1 mt-4">
           <button
+            type="button"
             onClick={() => shift(-1)}
             className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl text-neutral-400 hover:bg-neutral-800 active:scale-95 transition-all"
             aria-label={tr('prev')}
@@ -932,6 +932,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                 return (
                   <button
                     key={chip.offset}
+                    type="button"
                     onClick={() => setAnchor(chip.date)}
                     className={`relative px-3 py-2 text-sm whitespace-nowrap transition-colors ${
                       active ? 'text-white font-semibold' : 'text-neutral-500 hover:text-neutral-300'
@@ -948,6 +949,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
           </div>
 
           <button
+            type="button"
             onClick={() => shift(1)}
             className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl text-neutral-400 hover:bg-neutral-800 active:scale-95 transition-all"
             aria-label={tr('next')}
@@ -2895,62 +2897,85 @@ function App() {
         </div>
 
         {/* Add Expense Form */}
-        <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 mb-6 sm:mb-8">
+        <div className="relative isolate z-10 bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 mb-6 sm:mb-8">
           <h2 className="text-base sm:text-lg font-semibold text-neutral-100 mb-4 sm:mb-6 flex items-center gap-2">
             <Plus className="w-5 h-5 text-emerald-400" />
             {tr('addExpenseTitle')}
           </h2>
 
-          <form onSubmit={handleAddExpense} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-neutral-300 mb-2">{tr('description')}</label>
-              <input
-                type="text"
-                value={newExpense.description}
-                onChange={(e) => setNewExpense({ ...newExpense, description: e.target.value })}
-                placeholder={tr('exampleExpensePlaceholder')}
-                className="w-full px-4 py-3 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base"
-                required
+          <form onSubmit={handleAddExpense} className="flex flex-col gap-4">
+            {/* Row 1: Description + Amount */}
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+              <div className="min-w-0 flex-1">
+                <label className="block text-sm font-medium text-neutral-300 mb-2">{tr('description')}</label>
+                <input
+                  type="text"
+                  value={newExpense.description}
+                  onChange={(e) => setNewExpense({ ...newExpense, description: e.target.value })}
+                  placeholder={tr('exampleExpensePlaceholder')}
+                  className="h-12 w-full min-w-0 px-4 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base"
+                  required
+                />
+              </div>
+
+              <ExpenseAmountField
+                amount={newExpense.amount}
+                currency={newExpense.currency}
+                onAmountChange={(amount) => setNewExpense({ ...newExpense, amount })}
+                onCurrencyChange={(currency) => setNewExpense({ ...newExpense, currency })}
+                onRatesReadyChange={setExpenseRatesReady}
               />
             </div>
 
-            <ExpenseAmountField
-              amount={newExpense.amount}
-              currency={newExpense.currency}
-              onAmountChange={(amount) => setNewExpense({ ...newExpense, amount })}
-              onCurrencyChange={(currency) => setNewExpense({ ...newExpense, currency })}
-              onRatesReadyChange={setExpenseRatesReady}
-            />
+            {/* Row 2: Category + Date + Submit */}
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+              <div className="min-w-0 flex-1">
+                <label className="block text-sm font-medium text-neutral-300 mb-2">{tr('category')}</label>
+                <select
+                  value={isAddingCategory ? ADD_CUSTOM_VALUE : newExpense.category}
+                  onChange={(e) => handleCategoryChange(e.target.value)}
+                  className="h-12 w-full min-w-0 px-4 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base"
+                >
+                  {allCategories.map((cat) => (
+                    <option key={cat.value} value={cat.value}>
+                      {cat.label}
+                    </option>
+                  ))}
+                  <option value={ADD_CUSTOM_VALUE}>{tr('addNewCategory')}</option>
+                </select>
+              </div>
 
-            <div>
-              <label className="block text-sm font-medium text-neutral-300 mb-2">{tr('date')}</label>
-              <input
-                type="date"
-                value={newExpense.date}
-                onChange={(e) => setNewExpense({ ...newExpense, date: e.target.value })}
-                className="w-full px-4 py-3 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base [color-scheme:dark]"
-                required
-              />
-            </div>
+              <div className="w-full shrink-0 sm:w-44">
+                <label className="block text-sm font-medium text-neutral-300 mb-2">{tr('date')}</label>
+                <input
+                  type="date"
+                  value={newExpense.date}
+                  onChange={(e) => setNewExpense({ ...newExpense, date: e.target.value })}
+                  className="h-12 w-full min-w-0 px-4 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base [color-scheme:dark]"
+                  required
+                />
+              </div>
 
-            <div className="min-w-0">
-              <label className="block text-sm font-medium text-neutral-300 mb-2">{tr('category')}</label>
-              <select
-                value={isAddingCategory ? ADD_CUSTOM_VALUE : newExpense.category}
-                onChange={(e) => handleCategoryChange(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base"
-              >
-                {allCategories.map((cat) => (
-                  <option key={cat.value} value={cat.value}>
-                    {cat.label}
-                  </option>
-                ))}
-                <option value={ADD_CUSTOM_VALUE}>{tr('addNewCategory')}</option>
-              </select>
+              <div className="shrink-0 w-full sm:w-auto">
+                <span
+                  className="mb-2 block text-sm font-medium text-transparent select-none pointer-events-none"
+                  aria-hidden="true"
+                >
+                  {tr('addExpense')}
+                </span>
+                <button
+                  type="submit"
+                  disabled={expenseSubmitBlocked}
+                  className="h-12 w-full min-w-[10.5rem] shrink-0 bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-6 rounded-xl font-medium hover:from-emerald-600 hover:to-teal-700 transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:from-emerald-500 disabled:hover:to-teal-600"
+                >
+                  <Plus className="w-5 h-5" />
+                  {tr('addExpense')}
+                </button>
+              </div>
             </div>
 
             {isAddingCategory && (
-              <div className="col-span-1 sm:col-span-2 lg:col-span-5 flex justify-start">
+              <div className="flex justify-start">
                 <CreateCategoryForm
                   name={newCategoryName}
                   onNameChange={(v) => {
@@ -2967,17 +2992,6 @@ function App() {
                 />
               </div>
             )}
-
-            <div className="flex items-end sm:col-span-2 lg:col-span-1">
-              <button
-                type="submit"
-                disabled={expenseSubmitBlocked}
-                className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-6 py-3 rounded-xl font-medium hover:from-emerald-600 hover:to-teal-700 transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:from-emerald-500 disabled:hover:to-teal-600"
-              >
-                <Plus className="w-5 h-5" />
-                {tr('addExpense')}
-              </button>
-            </div>
           </form>
         </div>
 

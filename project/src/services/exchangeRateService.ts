@@ -185,6 +185,36 @@ export function convertIlsToForeign(
   return ilsAmount * ilsToForeign;
 }
 
+/**
+ * Cross-convert any two currencies using ILS as the base (`ilsToForeign` rates).
+ * `baseAmount = amount / ilsToForeign[from]` then `converted = baseAmount * ilsToForeign[to]`.
+ */
+export function convertAmountViaIls(
+  amount: number,
+  fromCurrency: string,
+  toCurrency: string,
+  rates: ExchangeRates,
+): number | null {
+  if (!(amount > 0)) return null;
+  if (fromCurrency === toCurrency) return amount;
+
+  const fromIlsToForeign =
+    fromCurrency === 'ILS' ? 1 : rates.ilsToForeign[fromCurrency];
+  const toIlsToForeign = toCurrency === 'ILS' ? 1 : rates.ilsToForeign[toCurrency];
+
+  if (
+    typeof fromIlsToForeign !== 'number' ||
+    fromIlsToForeign <= 0 ||
+    typeof toIlsToForeign !== 'number' ||
+    toIlsToForeign <= 0
+  ) {
+    return null;
+  }
+
+  const baseAmount = amount / fromIlsToForeign;
+  return baseAmount * toIlsToForeign;
+}
+
 export function hasExchangeRate(currency: string, rates: ExchangeRates): boolean {
   if (currency === 'ILS') return true;
   const rate = rates.ilsToForeign[currency];

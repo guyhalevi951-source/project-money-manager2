@@ -149,7 +149,7 @@ export default function AdvancedColorPickerPopover({
           <div dir="ltr" className="space-y-3">
             <div
               ref={sbRef}
-              className="relative h-36 w-full rounded-xl overflow-hidden cursor-crosshair touch-none ring-1 ring-white/10"
+              className="relative h-36 w-full rounded-xl overflow-hidden cursor-crosshair ring-1 ring-white/10"
               style={{
                 background: `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, ${pureHueCss})`,
               }}
