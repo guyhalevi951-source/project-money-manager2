@@ -1,10 +1,14 @@
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
+import { getFirestore, type Firestore } from 'firebase/firestore';
 import {
   getAuth,
   GoogleAuthProvider,
+  FacebookAuthProvider,
+  TwitterAuthProvider,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signInWithPopup,
+  signInAnonymously,
   signOut,
   type Auth,
 } from 'firebase/auth';
@@ -27,8 +31,15 @@ const app = initFirebaseApp();
 
 export const auth: Auth = getAuth(app);
 
+export const db: Firestore = getFirestore(app);
+
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
+
+export const facebookProvider = new FacebookAuthProvider();
+facebookProvider.addScope('email');
+
+export const twitterProvider = new TwitterAuthProvider();
 
 export const signInWithEmail = (email: string, password: string) =>
   signInWithEmailAndPassword(auth, email.trim(), password);
@@ -37,6 +48,12 @@ export const signUpWithEmail = (email: string, password: string) =>
   createUserWithEmailAndPassword(auth, email.trim(), password);
 
 export const signInWithGoogle = () => signInWithPopup(auth, googleProvider);
+
+export const signInWithFacebook = () => signInWithPopup(auth, facebookProvider);
+
+export const signInWithTwitter = () => signInWithPopup(auth, twitterProvider);
+
+export const signInAsGuest = () => signInAnonymously(auth);
 
 export const signOutUser = () => signOut(auth);
 

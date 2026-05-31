@@ -1,15 +1,19 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Wallet, Mail, Lock, Loader2 } from 'lucide-react';
+import { Wallet, Mail, Lock, Loader2, UserRound } from 'lucide-react';
 import {
   isFirebaseConfigured,
   signInWithEmail,
   signInWithGoogle,
+  signInWithFacebook,
+  signInWithTwitter,
+  signInAsGuest,
   signUpWithEmail,
 } from '../firebase';
 import { mapAuthError, validateAuthForm } from '../authErrors';
 
 type AuthMode = 'login' | 'signup';
+type LoadingAction = 'email' | 'google' | 'facebook' | 'twitter' | 'guest' | null;
 
 function GoogleIcon({ className }: { className?: string }) {
   return (
@@ -30,6 +34,22 @@ function GoogleIcon({ className }: { className?: string }) {
         fill="#EA4335"
         d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
       />
+    </svg>
+  );
+}
+
+function FacebookIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+    </svg>
+  );
+}
+
+function XIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
     </svg>
   );
 }
@@ -78,18 +98,79 @@ function FloatingField({
   );
 }
 
+interface SocialButtonProps {
+  onClick: () => void;
+  disabled: boolean;
+  loading: boolean;
+  icon: React.ReactNode;
+  label?: string;
+  className: string;
+  signInWithIcon?: boolean;
+  ariaLabel?: string;
+}
+
+function SocialButton({
+  onClick,
+  disabled,
+  loading,
+  icon,
+  label,
+  className,
+  signInWithIcon = false,
+  ariaLabel,
+}: SocialButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      dir={signInWithIcon ? 'ltr' : undefined}
+      className={`w-full py-3.5 rounded-xl font-medium transition-all active:scale-[0.98] disabled:opacity-60 flex items-center justify-center gap-3 ${className}`}
+    >
+      {signInWithIcon ? (
+        <>
+          Sign in with {loading ? <Loader2 className="w-5 h-5 animate-spin shrink-0" /> : icon}
+        </>
+      ) : (
+        <>
+          {loading ? <Loader2 className="w-5 h-5 animate-spin shrink-0" /> : icon}
+          {label}
+        </>
+      )}
+    </button>
+  );
+}
+
 export default function AuthPage() {
   const [mode, setMode] = useState<AuthMode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loadingAction, setLoadingAction] = useState<LoadingAction>(null);
 
   const firebaseReady = isFirebaseConfigured();
+  const loading = loadingAction !== null;
 
   const switchMode = (next: AuthMode) => {
     setMode(next);
     setError('');
+  };
+
+  const runAuth = async (action: LoadingAction, fn: () => Promise<unknown>) => {
+    setError('');
+    if (!firebaseReady) {
+      setError('Firebase לא מוגדר. הוסף את משתני הסביבה בקובץ .env');
+      return;
+    }
+    setLoadingAction(action);
+    try {
+      await fn();
+    } catch (err) {
+      setError(mapAuthError(err));
+    } finally {
+      setLoadingAction(null);
+    }
   };
 
   const handleEmailSubmit = async (e: React.FormEvent) => {
@@ -102,39 +183,13 @@ export default function AuthPage() {
       return;
     }
 
-    if (!firebaseReady) {
-      setError('Firebase לא מוגדר. הוסף את משתני הסביבה בקובץ .env');
-      return;
-    }
-
-    setLoading(true);
-    try {
+    await runAuth('email', async () => {
       if (mode === 'login') {
         await signInWithEmail(email, password);
       } else {
         await signUpWithEmail(email, password);
       }
-    } catch (err) {
-      setError(mapAuthError(err));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleGoogle = async () => {
-    setError('');
-    if (!firebaseReady) {
-      setError('Firebase לא מוגדר. הוסף את משתני הסביבה בקובץ .env');
-      return;
-    }
-    setLoading(true);
-    try {
-      await signInWithGoogle();
-    } catch (err) {
-      setError(mapAuthError(err));
-    } finally {
-      setLoading(false);
-    }
+    });
   };
 
   return (
@@ -221,18 +276,12 @@ export default function AuthPage() {
                 <p className="text-xs text-slate-500 -mt-1">הסיסמה חייבת להכיל לפחות 6 תווים</p>
               )}
 
-              {error && (
-                <p className="text-sm text-rose-400 bg-rose-500/10 border border-rose-500/30 rounded-xl px-3 py-2.5">
-                  {error}
-                </p>
-              )}
-
               <button
                 type="submit"
                 disabled={loading}
                 className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold shadow-lg shadow-emerald-500/25 hover:from-emerald-600 hover:to-teal-700 transition-all active:scale-[0.98] disabled:opacity-60 flex items-center justify-center gap-2"
               >
-                {loading ? (
+                {loadingAction === 'email' ? (
                   <>
                     <Loader2 className="w-5 h-5 animate-spin" />
                     ממתין...
@@ -246,21 +295,58 @@ export default function AuthPage() {
             </motion.form>
           </AnimatePresence>
 
+          {error && (
+            <p className="mt-4 text-sm text-rose-400 bg-rose-500/10 border border-rose-500/30 rounded-xl px-3 py-2.5">
+              {error}
+            </p>
+          )}
+
           <div className="flex items-center gap-3 my-6">
             <div className="flex-1 h-px bg-slate-800" />
             <span className="text-xs text-slate-500 shrink-0">או</span>
             <div className="flex-1 h-px bg-slate-800" />
           </div>
 
-          <button
-            type="button"
-            onClick={handleGoogle}
-            disabled={loading}
-            className="w-full py-3.5 rounded-xl bg-slate-950 border border-slate-700 text-slate-100 font-medium hover:bg-slate-900 hover:border-slate-600 transition-all active:scale-[0.98] disabled:opacity-60 flex items-center justify-center gap-3"
-          >
-            <GoogleIcon className="w-5 h-5 shrink-0" />
-            המשך עם Google
-          </button>
+          <div className="space-y-3">
+            <SocialButton
+              onClick={() => runAuth('google', signInWithGoogle)}
+              disabled={loading}
+              loading={loadingAction === 'google'}
+              icon={<GoogleIcon className="w-5 h-5 shrink-0" />}
+              signInWithIcon
+              ariaLabel="Sign in with Google"
+              className="bg-slate-950 border border-slate-700 text-slate-100 hover:bg-slate-900 hover:border-slate-600"
+            />
+
+            <SocialButton
+              onClick={() => runAuth('facebook', signInWithFacebook)}
+              disabled={loading}
+              loading={loadingAction === 'facebook'}
+              icon={<FacebookIcon className="w-5 h-5 shrink-0 text-white" />}
+              signInWithIcon
+              ariaLabel="Sign in with Facebook"
+              className="bg-[#1877F2] border border-[#1877F2] text-white hover:bg-[#166FE5] hover:border-[#166FE5] shadow-md shadow-[#1877F2]/20"
+            />
+
+            <SocialButton
+              onClick={() => runAuth('twitter', signInWithTwitter)}
+              disabled={loading}
+              loading={loadingAction === 'twitter'}
+              icon={<XIcon className="w-5 h-5 shrink-0 text-white" />}
+              signInWithIcon
+              ariaLabel="Sign in with X"
+              className="bg-black border border-neutral-800 text-white hover:bg-neutral-900 hover:border-neutral-700 shadow-md shadow-black/30"
+            />
+
+            <SocialButton
+              onClick={() => runAuth('guest', signInAsGuest)}
+              disabled={loading}
+              loading={loadingAction === 'guest'}
+              icon={<UserRound className="w-5 h-5 shrink-0 text-slate-400" />}
+              label="המשך כאורח"
+              className="border border-slate-700/80 bg-slate-900/30 text-slate-300 hover:bg-slate-900/60 hover:border-emerald-500/40 hover:text-slate-100"
+            />
+          </div>
 
           {!firebaseReady && (
             <p className="mt-4 text-xs text-amber-400/90 text-center leading-relaxed">

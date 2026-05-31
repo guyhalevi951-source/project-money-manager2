@@ -27,13 +27,19 @@ export function mapAuthError(error: unknown): string {
     case 'auth/too-many-requests':
       return 'יותר מדי ניסיונות. נסה שוב מאוחר יותר';
     case 'auth/popup-closed-by-user':
-      return 'חלון Google נסגר לפני השלמת ההתחברות';
+      return 'חלון ההתחברות נסגר לפני השלמת התהליך';
     case 'auth/popup-blocked':
       return 'חלון הקופץ נחסם. אפשר קופצים בדפדפן ונסה שוב';
+    case 'auth/cancelled-popup-request':
+      return 'בקשת ההתחברות בוטלה. נסה שוב';
+    case 'auth/account-exists-with-different-credential':
+      return 'כבר קיים חשבון עם אימייל זה בשיטת התחברות אחרת';
     case 'auth/network-request-failed':
       return 'בעיית רשת. בדוק את החיבור לאינטרנט';
     case 'auth/operation-not-allowed':
       return 'שיטת ההתחברות אינה מופעלת בפרויקט Firebase';
+    case 'auth/admin-restricted-operation':
+      return 'כניסה כאורח אינה מופעלת. הפעל Anonymous Auth ב-Firebase Console';
     default:
       return 'אירעה שגיאה. נסה שוב';
   }

@@ -35,6 +35,13 @@ import { onAuthStateChanged, type User } from 'firebase/auth';
 import { auth, signOutUser } from './firebase';
 import AuthPage from './components/AuthPage';
 import {
+  EMPTY_USER_APP_DATA,
+  loadFromFirestore,
+  loadFromLocalStorage,
+  saveToFirestore,
+  saveToLocalStorage,
+} from './userDataStorage';
+import {
   PieChart,
   Pie,
   Cell,
@@ -1880,6 +1887,7 @@ function BudgetChangeModal({
 function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [dataReady, setDataReady] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
@@ -1997,54 +2005,94 @@ function App() {
     }
   }, [selectedMonthKey, budgetsByMonth, subBudgetsByMonth]);
 
-  // Load data from localStorage on mount
+  const applyAppData = (data: typeof EMPTY_USER_APP_DATA) => {
+    setExpenses(data.expenses.map((e) => ({ ...e, date: normalizeDate(e.date) })));
+    setCustomCategories(data.customCategories);
+    setBudgetsByMonth(data.budgetsByMonth);
+    setSubBudgetsByMonth(data.subBudgetsByMonth);
+  };
+
+  const resetAppData = () => {
+    setExpenses([]);
+    setCustomCategories([]);
+    setBudgetsByMonth({});
+    setSubBudgetsByMonth({});
+    setBudgetInput('');
+    setSearch('');
+    setNewExpense({
+      description: '',
+      amount: '',
+      category: 'אוכל',
+      date: toISODate(new Date()),
+    });
+  };
+
+  // Load persisted data when auth state changes (Firestore for signed-in users, localStorage for guests).
   useEffect(() => {
-    const savedExpenses = localStorage.getItem('expenses');
-    const savedCategories = localStorage.getItem('customCategories');
-    const thisMonth = monthKeyOfDate(new Date());
+    if (!authReady) return;
 
-    if (savedExpenses) {
-      const parsed: Expense[] = JSON.parse(savedExpenses);
-      // Migrate any legacy (he-IL) dates to the canonical ISO format.
-      setExpenses(parsed.map((e) => ({ ...e, date: normalizeDate(e.date) })));
-    }
-    if (savedCategories) {
-      setCustomCategories(JSON.parse(savedCategories));
-    }
+    let cancelled = false;
 
-    // Per-month budget (migrate legacy single global budget into this month).
-    const savedBudgets = localStorage.getItem('budgetsByMonth');
-    const legacyBudget = localStorage.getItem('monthlyBudget');
-    if (savedBudgets) {
-      setBudgetsByMonth(JSON.parse(savedBudgets));
-    } else if (legacyBudget) {
-      setBudgetsByMonth({ [thisMonth]: parseFloat(legacyBudget) });
-    }
+    const loadUserData = async () => {
+      setDataReady(false);
 
-    // Per-month sub-budgets (migrate legacy flat map into this month).
-    const savedSubByMonth = localStorage.getItem('subBudgetsByMonth');
-    const legacySub = localStorage.getItem('subBudgets');
-    if (savedSubByMonth) {
-      setSubBudgetsByMonth(JSON.parse(savedSubByMonth));
-    } else if (legacySub) {
-      setSubBudgetsByMonth({ [thisMonth]: JSON.parse(legacySub) });
-    }
-  }, []);
+      if (!user) {
+        resetAppData();
+        if (!cancelled) setDataReady(true);
+        return;
+      }
 
-  // Save custom categories to localStorage
+      if (user.isAnonymous) {
+        if (!cancelled) applyAppData(loadFromLocalStorage());
+        if (!cancelled) setDataReady(true);
+        return;
+      }
+
+      try {
+        const remoteData = await loadFromFirestore(user.uid);
+        if (cancelled) return;
+        applyAppData(remoteData ?? EMPTY_USER_APP_DATA);
+      } catch {
+        if (!cancelled) applyAppData(EMPTY_USER_APP_DATA);
+      }
+
+      if (!cancelled) setDataReady(true);
+    };
+
+    void loadUserData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, authReady]);
+
+  // Persist changes: Firestore for authenticated users, localStorage for guests.
   useEffect(() => {
-    localStorage.setItem('customCategories', JSON.stringify(customCategories));
-  }, [customCategories]);
+    if (!dataReady || !user) return;
 
-  // Save per-month sub-budgets to localStorage
-  useEffect(() => {
-    localStorage.setItem('subBudgetsByMonth', JSON.stringify(subBudgetsByMonth));
-  }, [subBudgetsByMonth]);
+    const payload = {
+      expenses,
+      customCategories,
+      budgetsByMonth,
+      subBudgetsByMonth,
+    };
 
-  // Save per-month budgets to localStorage
-  useEffect(() => {
-    localStorage.setItem('budgetsByMonth', JSON.stringify(budgetsByMonth));
-  }, [budgetsByMonth]);
+    if (user.isAnonymous) {
+      saveToLocalStorage(payload);
+      return;
+    }
+
+    const uid = user.uid;
+    const timer = window.setTimeout(() => {
+      const currentUser = auth.currentUser;
+      if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) return;
+      void saveToFirestore(uid, payload).catch(() => {
+        // Sync failures are non-blocking; data remains in local state until the next save.
+      });
+    }, 400);
+
+    return () => window.clearTimeout(timer);
+  }, [expenses, customCategories, budgetsByMonth, subBudgetsByMonth, dataReady, user]);
 
   // Budget update entry point. If the active month already has sub-budget
   // allocations, we ask how to reconcile them via the confirmation modal;
@@ -2084,11 +2132,6 @@ function App() {
     setShowBudgetModal(false);
     setPendingBudget(null);
   };
-
-  // Save expenses to localStorage
-  useEffect(() => {
-    localStorage.setItem('expenses', JSON.stringify(expenses));
-  }, [expenses]);
 
   // Add new expense
   const handleAddExpense = (e: React.FormEvent) => {
@@ -2302,7 +2345,7 @@ function App() {
     </div>
   );
 
-  if (!authReady) {
+  if (!authReady || (user && !dataReady)) {
     return (
       <div
         dir="rtl"
@@ -2316,6 +2359,8 @@ function App() {
   if (!user) {
     return <AuthPage />;
   }
+
+  const userDisplayLabel = user.isAnonymous ? 'אורח' : (user.email ?? '');
 
   return (
     <motion.div
@@ -2346,9 +2391,9 @@ function App() {
               <div className="hidden sm:flex items-center gap-2 max-w-[200px]">
                 <span
                   className="text-xs text-slate-400 truncate"
-                  title={user.email ?? undefined}
+                  title={userDisplayLabel || undefined}
                 >
-                  {user.email}
+                  {userDisplayLabel}
                 </span>
                 <button
                   type="button"
@@ -2365,7 +2410,7 @@ function App() {
                 open={navOpen}
                 onOpenChange={setNavOpen}
                 onTabSelect={handleTabSelect}
-                userEmail={user.email}
+                userEmail={userDisplayLabel}
                 onLogout={handleLogout}
               />
             </div>
@@ -2853,7 +2898,7 @@ function App() {
         open={navOpen}
         onOpenChange={setNavOpen}
         onTabSelect={handleTabSelect}
-        userEmail={user.email}
+        userEmail={userDisplayLabel}
         onLogout={handleLogout}
       />
 
