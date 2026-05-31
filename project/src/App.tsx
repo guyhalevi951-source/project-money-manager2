@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, type MutableRefObject } from 'react';
 import { AnimatePresence, motion, type PanInfo } from 'framer-motion';
 import {
   Wallet,
@@ -34,6 +34,7 @@ import {
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { auth, signOutUser } from './firebase';
 import AuthPage from './components/AuthPage';
+import UserProfileMenu from './components/UserProfileMenu';
 import {
   EMPTY_USER_APP_DATA,
   loadFromFirestore,
@@ -172,6 +173,13 @@ const formatDisplayDate = (iso: string): string => {
   const [y, m, d] = iso.split('-').map((n) => parseInt(n, 10));
   if (!y || !m || !d) return iso;
   return new Date(y, m - 1, d).toLocaleDateString('he-IL');
+};
+
+// DD/MM/YYYY subtitle for the dashboard category donut.
+const formatChartDateLabel = (iso: string): string => {
+  const [y, m, d] = iso.split('-').map((n) => parseInt(n, 10));
+  if (!y || !m || !d) return iso;
+  return `${pad2(d)}/${pad2(m)}/${y}`;
 };
 
 // Parse an ISO 'YYYY-MM-DD' into a local Date (midnight).
@@ -1288,19 +1296,19 @@ interface Envelope {
 }
 
 interface SpendingDonutProps {
-  monthExpenses: Expense[];
+  dayExpenses: Expense[];
   categories: Category[];
-  monthLabel: string;
+  dateLabel: string;
 }
 
-// Compact donut of how much was spent per category in the selected month.
-function SpendingDonut({ monthExpenses, categories, monthLabel }: SpendingDonutProps) {
-  const total = monthExpenses.reduce((s, e) => s + e.amount, 0);
+// Compact donut of how much was spent per category on the selected day.
+function SpendingDonut({ dayExpenses, categories, dateLabel }: SpendingDonutProps) {
+  const total = dayExpenses.reduce((s, e) => s + e.amount, 0);
   const getCat = (value: string) =>
     categories.find((c) => c.value === value) || categories[categories.length - 1];
 
   const breakdown = Object.values(
-    monthExpenses.reduce<Record<string, { value: string; amount: number }>>((acc, e) => {
+    dayExpenses.reduce<Record<string, { value: string; amount: number }>>((acc, e) => {
       acc[e.category] = acc[e.category] || { value: e.category, amount: 0 };
       acc[e.category].amount += e.amount;
       return acc;
@@ -1329,14 +1337,14 @@ function SpendingDonut({ monthExpenses, categories, monthLabel }: SpendingDonutP
         <PieChartIcon className="w-5 h-5 text-emerald-400" />
         הוצאות לפי קטגוריה
       </h2>
-      <p className="text-sm text-neutral-500 mb-4">{monthLabel}</p>
+      <p className="text-sm text-neutral-500 mb-4">{dateLabel}</p>
 
       {breakdown.length === 0 ? (
         <div className="text-center py-8">
           <div className="bg-neutral-800 w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3">
             <TrendingDown className="w-7 h-7 text-neutral-500" />
           </div>
-          <p className="text-neutral-400">אין הוצאות החודש</p>
+          <p className="text-neutral-400">אין הוצאות בתאריך זה</p>
           <p className="text-neutral-500 text-sm mt-1">הוסף הוצאה כדי לראות את הפילוח</p>
         </div>
       ) : (
@@ -1386,6 +1394,37 @@ function SpendingDonut({ monthExpenses, categories, monthLabel }: SpendingDonutP
         </div>
       )}
     </div>
+  );
+}
+
+interface DashboardCategoryChartProps {
+  expenses: Expense[];
+  categories: Category[];
+  chartDateSetterRef: MutableRefObject<((iso: string) => void) | null>;
+}
+
+// Mounts only on the Home tab; unmounting resets selectedChartDate to today.
+function DashboardCategoryChart({ expenses, categories, chartDateSetterRef }: DashboardCategoryChartProps) {
+  const [selectedChartDate, setSelectedChartDate] = useState(() => toISODate(new Date()));
+
+  useEffect(() => {
+    chartDateSetterRef.current = setSelectedChartDate;
+    return () => {
+      chartDateSetterRef.current = null;
+    };
+  }, [chartDateSetterRef]);
+
+  const dayExpenses = useMemo(
+    () => expenses.filter((e) => normalizeDate(e.date) === selectedChartDate),
+    [expenses, selectedChartDate]
+  );
+
+  return (
+    <SpendingDonut
+      dayExpenses={dayExpenses}
+      categories={categories}
+      dateLabel={formatChartDateLabel(selectedChartDate)}
+    />
   );
 }
 
@@ -1917,6 +1956,7 @@ function App() {
   // Active top-level navigation tab.
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [navOpen, setNavOpen] = useState(false);
+  const chartDateSetterRef = useRef<((iso: string) => void) | null>(null);
 
   const handleTabSelect = (id: TabId) => {
     setActiveTab(id);
@@ -2151,6 +2191,8 @@ function App() {
       setExpenses([expense, ...expenses]);
       setNewExpense({ description: '', amount: '', category: 'אוכל', date: toISODate(new Date()) });
 
+      chartDateSetterRef.current?.(isoDate);
+
       // Jump the view to the month of the new expense so it's immediately visible.
       const [y, m] = isoDate.split('-').map((n) => parseInt(n, 10));
       setSelectedDate(new Date(y, m - 1, 1));
@@ -2361,6 +2403,9 @@ function App() {
   }
 
   const userDisplayLabel = user.isAnonymous ? 'אורח' : (user.email ?? '');
+  const userName = user.isAnonymous
+    ? 'אורח'
+    : (user.displayName || user.email?.split('@')[0] || 'משתמש');
 
   return (
     <motion.div
@@ -2388,30 +2433,13 @@ function App() {
             </div>
 
             <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-              <div className="hidden sm:flex items-center gap-2 max-w-[200px]">
-                <span
-                  className="text-xs text-slate-400 truncate"
-                  title={userDisplayLabel || undefined}
-                >
-                  {userDisplayLabel}
-                </span>
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-rose-300 border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 transition-colors"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  התנתק
-                </button>
-              </div>
+              <UserProfileMenu user={user} userName={userName} onLogout={handleLogout} />
               <CollapsibleNavMenu
                 variant="desktop"
                 activeTab={activeTab}
                 open={navOpen}
                 onOpenChange={setNavOpen}
                 onTabSelect={handleTabSelect}
-                userEmail={userDisplayLabel}
-                onLogout={handleLogout}
               />
             </div>
           </div>
@@ -2677,11 +2705,11 @@ function App() {
           </form>
         </div>
 
-            {/* Spending by category */}
-            <SpendingDonut
-              monthExpenses={monthExpenses}
+            {/* Spending by category (daily) */}
+            <DashboardCategoryChart
+              expenses={expenses}
               categories={allCategories}
-              monthLabel={monthLabel}
+              chartDateSetterRef={chartDateSetterRef}
             />
           </>
         )}
