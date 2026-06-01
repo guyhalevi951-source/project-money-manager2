@@ -13,10 +13,10 @@ import CurrencyFlag from './CurrencyFlag';
 import CurrencyLibraryModal from './CurrencyLibraryModal';
 import {
   fetchExchangeRates,
-  fetchHistoricalDirectRate,
+  fetchHistoricalDirectRateSnapshot,
   getLocalTodayIso,
   needsNetworkHistoricalFetch,
-  peekHistoricalDirectRate,
+  peekHistoricalDirectRateSnapshot,
 } from '../services/exchangeRateService';
 import {
   listActiveManualExchangeOverrides,
@@ -98,7 +98,7 @@ type ManagementEntry =
 export default function ExchangeRateSimulator({
   recentExpenseCurrencies,
 }: ExchangeRateSimulatorProps) {
-  const { tr, dir, displayCurrency, customCurrencies, replaceCustomCurrencies } = useLanguage();
+  const { tr, dir, lang, displayCurrency, customCurrencies, replaceCustomCurrencies } = useLanguage();
   const pinnedCurrencies = usePinnedCurrencies();
 
   const [mainCurrency, setMainCurrency] = useState<CurrencyCode>(displayCurrency);
@@ -119,6 +119,7 @@ export default function ExchangeRateSimulator({
   const [cloudError, setCloudError] = useState<string | null>(null);
 
   const [resolvedRate, setResolvedRate] = useState<number | null>(null);
+  const [historicalRateUpdatedAt, setHistoricalRateUpdatedAt] = useState<number | null>(null);
   const [todayMarketRate, setTodayMarketRate] = useState<number | null>(null);
   const [loadingRate, setLoadingRate] = useState(false);
   const [storedOverrides, setStoredOverrides] = useState<ManualExchangeOverrideEntry[]>(() =>
@@ -153,10 +154,23 @@ export default function ExchangeRateSimulator({
         updatedAt: Date.now(),
       });
       setResolvedRate(unitRate);
+      setHistoricalRateUpdatedAt(Date.now());
       setSavePrompt('shown');
       setCloudError(null);
     },
     [dateIso, mainCurrency, secondaryCurrency],
+  );
+
+  const formatHistoricalRateUpdatedLabel = useCallback(
+    (timestamp: number): string => {
+      const time = new Date(timestamp).toLocaleTimeString(lang === 'he' ? 'he-IL' : 'en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      });
+      return replaceTokens(tr('exchangeRateLastUpdated'), { time });
+    },
+    [lang, tr],
   );
 
   const clearManualOverrideState = useCallback(() => {
@@ -247,31 +261,35 @@ export default function ExchangeRateSimulator({
     const fetchId = ++historicalFetchIdRef.current;
     let cancelled = false;
 
-    const applyResolvedRate = (rate: number | null) => {
+    const applyResolvedRate = (rate: number | null, fetchedAt: number | null) => {
       if (cancelled || fetchId !== historicalFetchIdRef.current) return;
       setResolvedRate(rate);
+      if (fetchedAt != null) {
+        setHistoricalRateUpdatedAt(fetchedAt);
+      }
       setLoadingRate(false);
       shouldSeedSecondaryRef.current = true;
     };
 
     if (mainCurrency === secondaryCurrency) {
-      applyResolvedRate(1);
+      applyResolvedRate(1, Date.now());
       return () => {
         cancelled = true;
       };
     }
 
     if (activeSessionRate != null) {
-      applyResolvedRate(activeSessionRate);
+      applyResolvedRate(activeSessionRate, sessionOverride?.updatedAt ?? Date.now());
       return () => {
         cancelled = true;
       };
     }
 
-    const cachedRate = peekHistoricalDirectRate(dateIso, mainCurrency, secondaryCurrency);
-    if (cachedRate != null) {
-      applyResolvedRate(cachedRate);
+    const cachedSnapshot = peekHistoricalDirectRateSnapshot(dateIso, mainCurrency, secondaryCurrency);
+    if (cachedSnapshot.rate != null) {
+      applyResolvedRate(cachedSnapshot.rate, cachedSnapshot.fetchedAt);
     } else {
+      setHistoricalRateUpdatedAt(null);
       setLoadingRate(true);
     }
 
@@ -284,17 +302,21 @@ export default function ExchangeRateSimulator({
 
     void (async () => {
       try {
-        const rate = await fetchHistoricalDirectRate(dateIso, mainCurrency, secondaryCurrency);
-        applyResolvedRate(rate);
+        const snapshot = await fetchHistoricalDirectRateSnapshot(
+          dateIso,
+          mainCurrency,
+          secondaryCurrency,
+        );
+        applyResolvedRate(snapshot.rate, snapshot.fetchedAt);
       } catch {
-        applyResolvedRate(null);
+        applyResolvedRate(null, null);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [dateIso, mainCurrency, secondaryCurrency, activeSessionRate]);
+  }, [dateIso, mainCurrency, secondaryCurrency, activeSessionRate, sessionOverride?.updatedAt]);
 
   useEffect(() => {
     const fetchTodayMarketRate = async () => {
@@ -594,6 +616,8 @@ export default function ExchangeRateSimulator({
   }, [mainCurrency, pinnedCurrencies, secondaryCurrency]);
 
   const summaryMainAmount = parsePositiveAmount(mainAmountInput) ?? 1;
+  const showUnitRateLine =
+    Math.abs(summaryMainAmount - 1) > 1e-9 && effectiveUnitRate != null && effectiveUnitRate > 0;
   const summarySecondaryAmount = useMemo(() => {
     const typedSecondary = parsePositiveAmount(secondaryAmountInput);
     if (effectiveUnitRate != null && effectiveUnitRate > 0) {
@@ -761,7 +785,7 @@ export default function ExchangeRateSimulator({
               <span className="text-blue-200/80">{tr('exchangeRateLoadingHistorical')}</span>
             ) : (
               <div className="flex min-h-[6rem] items-center justify-between gap-4">
-                <div className="min-w-0 space-y-2">
+                <div className="min-w-0 space-y-0.5">
                   <div className="flex min-w-0 items-center gap-2">
                     <input
                       type="number"
@@ -788,8 +812,13 @@ export default function ExchangeRateSimulator({
                       </span>
                     </div>
                   </div>
-                  {effectiveUnitRate != null && (
+                  {historicalRateUpdatedAt != null && (
                     <p className="text-xs text-blue-200/75">
+                      {formatHistoricalRateUpdatedLabel(historicalRateUpdatedAt)}
+                    </p>
+                  )}
+                  {showUnitRateLine && (
+                    <p className="mt-1 text-xs text-blue-200/75">
                       <LtrNumeric>
                         {replaceTokens(tr('exchangeRateUnitRateLine'), {
                           mainCurrency,

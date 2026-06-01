@@ -427,6 +427,11 @@ function setCachedCurrencyRate(
   writeCurrencyCache(cache);
 }
 
+export interface HistoricalRateSnapshot {
+  rate: number | null;
+  fetchedAt: number | null;
+}
+
 /** Synchronous cache read for instant UI updates (no network). */
 export function peekHistoricalDirectRate(
   dateIso: string,
@@ -441,6 +446,29 @@ export function peekHistoricalDirectRate(
   if (!cached) return null;
 
   return sanitizeDirectUnitRate(fromCurrency, toCurrency, cached.rate, liveRates);
+}
+
+/** Synchronous cache read including the stored fetch timestamp. */
+export function peekHistoricalDirectRateSnapshot(
+  dateIso: string,
+  fromCurrency: string,
+  toCurrency: string,
+  liveRates: ExchangeRates | null = getCachedExchangeRates(),
+): HistoricalRateSnapshot {
+  if (fromCurrency === toCurrency) {
+    return { rate: 1, fetchedAt: Date.now() };
+  }
+
+  const safeDate = normalizeHistoricalDateIso(dateIso);
+  const cached = getCachedCurrencyRate(safeDate, fromCurrency, toCurrency);
+  if (!cached) {
+    return { rate: null, fetchedAt: null };
+  }
+
+  return {
+    rate: sanitizeDirectUnitRate(fromCurrency, toCurrency, cached.rate, liveRates),
+    fetchedAt: cached.timestamp,
+  };
 }
 
 /** Whether a network fetch is required for this date/currency pair. */
@@ -549,7 +577,19 @@ export async function fetchHistoricalDirectRate(
   fromCurrency: string,
   toCurrency: string,
 ): Promise<number | null> {
-  if (fromCurrency === toCurrency) return 1;
+  const snapshot = await fetchHistoricalDirectRateSnapshot(dateIso, fromCurrency, toCurrency);
+  return snapshot.rate;
+}
+
+export async function fetchHistoricalDirectRateSnapshot(
+  dateIso: string,
+  fromCurrency: string,
+  toCurrency: string,
+): Promise<HistoricalRateSnapshot> {
+  if (fromCurrency === toCurrency) {
+    const fetchedAt = Date.now();
+    return { rate: 1, fetchedAt };
+  }
 
   const safeDate = normalizeHistoricalDateIso(dateIso);
   const liveRates = getCachedExchangeRates() ?? (await fetchExchangeRates().catch(() => null));
@@ -566,36 +606,41 @@ export async function fetchHistoricalDirectRate(
         cached.source ?? 'historical_api',
       );
     }
-    return sanitized;
+    const refreshed = getCachedCurrencyRate(safeDate, fromCurrency, toCurrency);
+    return {
+      rate: sanitized,
+      fetchedAt: refreshed?.timestamp ?? cached.timestamp,
+    };
   }
 
   const frankfurterRate = await fetchRateFromFrankfurter(safeDate, fromCurrency, toCurrency);
   if (frankfurterRate != null) {
     const sanitized = sanitizeDirectUnitRate(fromCurrency, toCurrency, frankfurterRate, liveRates);
     setCachedCurrencyRate(safeDate, fromCurrency, toCurrency, sanitized, 'historical_api');
-    return sanitized;
+    const stored = getCachedCurrencyRate(safeDate, fromCurrency, toCurrency);
+    return { rate: sanitized, fetchedAt: stored?.timestamp ?? Date.now() };
   }
 
   const currencyApiRate = await fetchRateFromCurrencyApi(safeDate, fromCurrency, toCurrency);
   if (currencyApiRate != null) {
     const sanitized = sanitizeDirectUnitRate(fromCurrency, toCurrency, currencyApiRate, liveRates);
     setCachedCurrencyRate(safeDate, fromCurrency, toCurrency, sanitized, 'historical_api');
-    return sanitized;
+    const stored = getCachedCurrencyRate(safeDate, fromCurrency, toCurrency);
+    return { rate: sanitized, fetchedAt: stored?.timestamp ?? Date.now() };
   }
 
-  if (!liveRates) return null;
+  if (!liveRates) return { rate: null, fetchedAt: null };
 
   const fallbackRate = convertAmountViaIls(1, fromCurrency, toCurrency, liveRates);
   if (fallbackRate != null && fallbackRate > 0) {
     const sanitized = sanitizeDirectUnitRate(fromCurrency, toCurrency, fallbackRate, liveRates);
     const todayIso = getLocalTodayIso();
     if (safeDate === todayIso) {
-      // Today's fallback can be cached with TTL.
       setCachedCurrencyRate(safeDate, fromCurrency, toCurrency, sanitized, 'today_live_fallback');
-      return sanitized;
+      const stored = getCachedCurrencyRate(safeDate, fromCurrency, toCurrency);
+      return { rate: sanitized, fetchedAt: stored?.timestamp ?? Date.now() };
     }
   }
 
-  // For historical dates, avoid returning today's fallback data (causes "frozen" date changes).
-  return safeDate === getLocalTodayIso() ? convertAmountViaIls(1, fromCurrency, toCurrency, liveRates) : null;
+  return { rate: null, fetchedAt: null };
 }
