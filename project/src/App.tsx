@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, type MutableRefObject } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, type MutableRefObject } from 'react';
 import { AnimatePresence, motion, type PanInfo } from 'framer-motion';
 import {
   Wallet,
@@ -2101,6 +2101,19 @@ function App() {
   const settingsReturnTabRef = useRef<TabId>('dashboard');
   const [navOpen, setNavOpen] = useState(false);
   const chartDateSetterRef = useRef<((iso: string) => void) | null>(null);
+  const isHomeView = activeTab === 'dashboard' && !settingsOpen;
+  const wasHomeViewRef = useRef(isHomeView);
+
+  useEffect(() => {
+    const wasHome = wasHomeViewRef.current;
+    if (!wasHome && isHomeView) {
+      setNewExpense((prev) => ({
+        ...prev,
+        currency: displayCurrency as ExpenseCurrency,
+      }));
+    }
+    wasHomeViewRef.current = isHomeView;
+  }, [isHomeView, displayCurrency]);
 
   const handleTabSelect = (id: TabId) => {
     setActiveTab(id);
@@ -2235,12 +2248,20 @@ function App() {
     setNewExpense({
       description: '',
       amount: '',
-      currency: 'ILS',
+      currency: displayCurrency as ExpenseCurrency,
       category: CATEGORIES[0]?.value ?? '',
       date: toISODate(new Date()),
     });
     setExpenseRatesReady(true);
   };
+
+  const expenseDescriptionLabel = useCallback(
+    (description: string) => {
+      const trimmed = description.trim();
+      return trimmed.length > 0 ? trimmed : tr('expenseNoDescription');
+    },
+    [tr],
+  );
 
   // Real-time sync: Firestore for signed-in users, localStorage for guests.
   useEffect(() => {
@@ -2529,7 +2550,7 @@ function App() {
     e.preventDefault();
     const foreignAmount = parseFloat(newExpense.amount);
 
-    if (!newExpense.description.trim() || isNaN(foreignAmount) || !(foreignAmount > 0)) return;
+    if (isNaN(foreignAmount) || !(foreignAmount > 0)) return;
 
     const resolveIlsAmount = async (): Promise<number | null> => {
       if (newExpense.currency === 'ILS') return foreignAmount;
@@ -2560,13 +2581,13 @@ function App() {
       };
 
       setExpenses([expense, ...expenses]);
-      setNewExpense({
+      setNewExpense((prev) => ({
         description: '',
         amount: '',
-        currency: 'ILS',
-        category: CATEGORIES[0]?.value ?? '',
+        currency: prev.currency,
+        category: prev.category,
         date: toISODate(new Date()),
-      });
+      }));
       setExpenseRatesReady(true);
 
       chartDateSetterRef.current?.(isoDate);
@@ -2955,14 +2976,15 @@ function App() {
             {/* Row 1: Description + Amount */}
             <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
               <div className="min-w-0 flex-1">
-                <label className="block text-sm font-medium text-neutral-300 mb-2">{tr('description')}</label>
+                <label className="block text-sm font-medium text-neutral-300 mb-2">
+                  {tr('descriptionOptional')}
+                </label>
                 <input
                   type="text"
                   value={newExpense.description}
                   onChange={(e) => setNewExpense({ ...newExpense, description: e.target.value })}
                   placeholder={tr('exampleExpensePlaceholder')}
                   className="h-12 w-full min-w-0 px-4 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base"
-                  required
                 />
               </div>
 
@@ -3213,8 +3235,10 @@ function App() {
                         />
                         <div className="min-w-0 flex-1">
                           <LocalizedUserText
-                            text={expense.description}
-                            className="font-medium text-neutral-100 truncate block"
+                            text={expenseDescriptionLabel(expense.description)}
+                            className={`font-medium truncate block ${
+                              expense.description.trim() ? 'text-neutral-100' : 'text-neutral-500 italic'
+                            }`}
                           />
                           <div className="flex items-center gap-2 mt-0.5 text-xs text-neutral-500">
                             <span className="truncate">
@@ -3268,7 +3292,12 @@ function App() {
                       return (
                         <tr key={expense.id} className="hover:bg-neutral-800/40 transition-colors">
                           <td className="px-6 py-4">
-                            <LocalizedUserText text={expense.description} className="font-medium text-neutral-100" />
+                            <LocalizedUserText
+                              text={expenseDescriptionLabel(expense.description)}
+                              className={`font-medium ${
+                                expense.description.trim() ? 'text-neutral-100' : 'text-neutral-500 italic'
+                              }`}
+                            />
                           </td>
                           <td className="px-6 py-4">
                             <ExpenseAmountDisplay

@@ -6,8 +6,10 @@ export { CORE_DISPLAY_CURRENCIES as EXPENSE_CURRENCIES, currencySymbol } from '.
 
 const ER_API_URL = 'https://open.er-api.com/v6/latest/ILS';
 const STORAGE_KEY = 'budget_exchange_rates';
-const HISTORICAL_RATE_STORAGE_KEY = 'budget_exchange_historical_rates_v1';
+const LEGACY_HISTORICAL_RATE_STORAGE_KEY = 'budget_exchange_historical_rates_v1';
+const APP_CURRENCY_CACHE_KEY = 'app_currency_cache';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const TODAY_HISTORICAL_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Exchange rates from open.er-api.com with base ILS.
@@ -29,12 +31,23 @@ interface StoredExchangeRatesPayload {
 let memoryCache: ExchangeRates | null = null;
 let fetchPromise: Promise<ExchangeRates> | null = null;
 
-interface HistoricalRateCache {
+interface CurrencyCacheEntry {
+  rate: number;
+  timestamp: number;
+  source?: CurrencyCacheSource;
+}
+
+type CurrencyCacheStore = Record<string, CurrencyCacheEntry>;
+type CurrencyCacheSource = 'historical_api' | 'today_live_fallback' | 'legacy';
+
+interface LegacyHistoricalRateCache {
   [key: string]: {
     rate: number;
     fetchedAt: number;
   };
 }
+
+let currencyCacheHydrated = false;
 
 function isCacheFresh(fetchedAt: number): boolean {
   return Date.now() - fetchedAt < CACHE_TTL_MS;
@@ -250,24 +263,281 @@ export function formatForeignAmount(amount: number, currency: ExpenseCurrency): 
   return `${currencySymbol(currency)}${formatted}`;
 }
 
-function buildHistoricalRateKey(dateIso: string, fromCurrency: string, toCurrency: string): string {
-  return `${dateIso}|${fromCurrency}|${toCurrency}`;
+/** Local calendar date (`YYYY-MM-DD`) for cache expiry rules. */
+export function getLocalTodayIso(): string {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
-function readHistoricalRateCache(): HistoricalRateCache {
+function normalizeHistoricalDateIso(dateIso: string): string {
+  const todayIso = getLocalTodayIso();
+  return dateIso > todayIso ? todayIso : dateIso;
+}
+
+function buildCurrencyCacheKey(dateIso: string, fromCurrency: string, toCurrency: string): string {
+  return `${dateIso}_${fromCurrency}_${toCurrency}`;
+}
+
+function isCacheEntryValid(dateIso: string, entry: CurrencyCacheEntry): boolean {
+  if (!(Number.isFinite(entry.rate) && entry.rate > 0)) return false;
+  if (!(Number.isFinite(entry.timestamp) && entry.timestamp > 0)) return false;
+
+  const todayIso = getLocalTodayIso();
+  if (dateIso < todayIso) {
+    // Historical dates are immutable, so only trust rates fetched from historical API.
+    return entry.source === 'historical_api';
+  }
+  if (dateIso > todayIso) return false;
+
+  return Date.now() - entry.timestamp < TODAY_HISTORICAL_CACHE_TTL_MS;
+}
+
+function migrateLegacyHistoricalCache(store: CurrencyCacheStore): CurrencyCacheStore {
   try {
-    const raw = window.localStorage.getItem(HISTORICAL_RATE_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as HistoricalRateCache;
-    if (!parsed || typeof parsed !== 'object') return {};
-    return parsed;
+    const legacyRaw = window.localStorage.getItem(LEGACY_HISTORICAL_RATE_STORAGE_KEY);
+    if (!legacyRaw) return store;
+
+    const legacy = JSON.parse(legacyRaw) as LegacyHistoricalRateCache;
+    if (!legacy || typeof legacy !== 'object') return store;
+
+    const next = { ...store };
+    for (const [legacyKey, legacyEntry] of Object.entries(legacy)) {
+      const [datePart, fromCurrency, toCurrency] = legacyKey.split('|');
+      if (
+        !datePart ||
+        !fromCurrency ||
+        !toCurrency ||
+        typeof legacyEntry?.rate !== 'number' ||
+        !(legacyEntry.rate > 0)
+      ) {
+        continue;
+      }
+
+      const cacheKey = buildCurrencyCacheKey(datePart, fromCurrency, toCurrency);
+      if (next[cacheKey]) continue;
+
+      next[cacheKey] = {
+        rate: legacyEntry.rate,
+        timestamp: legacyEntry.fetchedAt ?? Date.now(),
+        source: 'legacy',
+      };
+    }
+
+    window.localStorage.removeItem(LEGACY_HISTORICAL_RATE_STORAGE_KEY);
+    return next;
+  } catch {
+    return store;
+  }
+}
+
+function readCurrencyCache(): CurrencyCacheStore {
+  try {
+    const raw = window.localStorage.getItem(APP_CURRENCY_CACHE_KEY);
+    let store: CurrencyCacheStore = {};
+
+    if (raw) {
+      const parsed = JSON.parse(raw) as CurrencyCacheStore;
+      if (parsed && typeof parsed === 'object') {
+        store = parsed;
+      }
+    }
+
+    if (!currencyCacheHydrated) {
+      currencyCacheHydrated = true;
+      store = migrateLegacyHistoricalCache(store);
+      if (Object.keys(store).length > 0) {
+        writeCurrencyCache(store);
+      }
+    }
+
+    return store;
   } catch {
     return {};
   }
 }
 
-function writeHistoricalRateCache(cache: HistoricalRateCache): void {
-  window.localStorage.setItem(HISTORICAL_RATE_STORAGE_KEY, JSON.stringify(cache));
+function pruneCurrencyCacheForQuota(cache: CurrencyCacheStore): CurrencyCacheStore {
+  const todayIso = getLocalTodayIso();
+  const next: CurrencyCacheStore = { ...cache };
+
+  for (const [key, entry] of Object.entries(next)) {
+    const dateIso = key.slice(0, 10);
+    if (dateIso === todayIso && !isCacheEntryValid(dateIso, entry)) {
+      delete next[key];
+    }
+  }
+
+  const todayKeys = Object.keys(next).filter((key) => key.startsWith(`${todayIso}_`));
+  todayKeys.sort((a, b) => next[a].timestamp - next[b].timestamp);
+
+  while (todayKeys.length > 120) {
+    const oldestKey = todayKeys.shift();
+    if (!oldestKey) break;
+    delete next[oldestKey];
+  }
+
+  return next;
+}
+
+function writeCurrencyCache(cache: CurrencyCacheStore): void {
+  try {
+    window.localStorage.setItem(APP_CURRENCY_CACHE_KEY, JSON.stringify(cache));
+  } catch (error) {
+    const isQuotaError =
+      error instanceof DOMException &&
+      (error.name === 'QuotaExceededError' || error.code === 22 || error.code === 1014);
+
+    if (!isQuotaError) return;
+
+    const pruned = pruneCurrencyCacheForQuota(cache);
+    try {
+      window.localStorage.setItem(APP_CURRENCY_CACHE_KEY, JSON.stringify(pruned));
+    } catch {
+      // Ignore secondary quota failures; network path remains available.
+    }
+  }
+}
+
+function getCachedCurrencyRate(
+  dateIso: string,
+  fromCurrency: string,
+  toCurrency: string,
+): CurrencyCacheEntry | null {
+  const cache = readCurrencyCache();
+  const entry = cache[buildCurrencyCacheKey(dateIso, fromCurrency, toCurrency)];
+  if (!entry || !isCacheEntryValid(dateIso, entry)) return null;
+  return entry;
+}
+
+function setCachedCurrencyRate(
+  dateIso: string,
+  fromCurrency: string,
+  toCurrency: string,
+  rate: number,
+  source: CurrencyCacheSource,
+): void {
+  if (!(rate > 0)) return;
+
+  const cache = readCurrencyCache();
+  cache[buildCurrencyCacheKey(dateIso, fromCurrency, toCurrency)] = {
+    rate,
+    timestamp: Date.now(),
+    source,
+  };
+  writeCurrencyCache(cache);
+}
+
+/** Synchronous cache read for instant UI updates (no network). */
+export function peekHistoricalDirectRate(
+  dateIso: string,
+  fromCurrency: string,
+  toCurrency: string,
+  liveRates: ExchangeRates | null = getCachedExchangeRates(),
+): number | null {
+  if (fromCurrency === toCurrency) return 1;
+
+  const safeDate = normalizeHistoricalDateIso(dateIso);
+  const cached = getCachedCurrencyRate(safeDate, fromCurrency, toCurrency);
+  if (!cached) return null;
+
+  return sanitizeDirectUnitRate(fromCurrency, toCurrency, cached.rate, liveRates);
+}
+
+/** Whether a network fetch is required for this date/currency pair. */
+export function needsNetworkHistoricalFetch(
+  dateIso: string,
+  fromCurrency: string,
+  toCurrency: string,
+): boolean {
+  if (fromCurrency === toCurrency) return false;
+  const safeDate = normalizeHistoricalDateIso(dateIso);
+  return getCachedCurrencyRate(safeDate, fromCurrency, toCurrency) == null;
+}
+
+/**
+ * Ensures `rate` means: 1 `fromCurrency` = `rate` units of `toCurrency`.
+ * Repairs inverted historical/cache values when they are closer to 1/rate than rate.
+ */
+function sanitizeDirectUnitRate(
+  fromCurrency: string,
+  toCurrency: string,
+  rate: number,
+  liveRates: ExchangeRates | null,
+): number {
+  if (!(rate > 0)) return rate;
+
+  if (liveRates) {
+    const expected = convertAmountViaIls(1, fromCurrency, toCurrency, liveRates);
+    if (expected != null && expected > 0) {
+      const directError = Math.abs(rate - expected) / expected;
+      const inverted = 1 / rate;
+      const inverseError = Math.abs(inverted - expected) / expected;
+      if (inverseError + 1e-9 < directError) {
+        return inverted;
+      }
+    }
+  }
+
+  if (toCurrency === 'ILS' && fromCurrency !== 'ILS' && rate < 1) {
+    const inverted = 1 / rate;
+    if (inverted > 1) return inverted;
+  }
+  if (fromCurrency === 'ILS' && toCurrency !== 'ILS' && rate > 1) {
+    const inverted = 1 / rate;
+    if (inverted > 0 && inverted < 1) return inverted;
+  }
+
+  return rate;
+}
+
+async function fetchRateFromFrankfurter(
+  dateIso: string,
+  fromCurrency: string,
+  toCurrency: string,
+): Promise<number | null> {
+  try {
+    const response = await fetch(
+      `https://api.frankfurter.app/${dateIso}?from=${fromCurrency}&to=${toCurrency}`,
+    );
+    if (!response.ok) return null;
+
+    const payload = (await response.json()) as { rates?: Record<string, number> };
+    const rate = payload?.rates?.[toCurrency];
+    return typeof rate === 'number' && rate > 0 ? rate : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchRateFromCurrencyApi(
+  dateIso: string,
+  fromCurrency: string,
+  toCurrency: string,
+): Promise<number | null> {
+  const base = fromCurrency.toLowerCase();
+  const quote = toCurrency.toLowerCase();
+  const endpoints = [
+    `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${dateIso}/v1/currencies/${base}.min.json`,
+    `https://${dateIso}.currency-api.pages.dev/v1/currencies/${base}.min.json`,
+    `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${dateIso}/v1/currencies/${base}.json`,
+    `https://${dateIso}.currency-api.pages.dev/v1/currencies/${base}.json`,
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) continue;
+
+      const payload = (await response.json()) as Record<string, unknown>;
+      const basePayload = payload[base] as Record<string, unknown> | undefined;
+      const quoteRate = basePayload?.[quote];
+      if (typeof quoteRate === 'number' && quoteRate > 0) return quoteRate;
+    } catch {
+      // Try next endpoint.
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -281,37 +551,51 @@ export async function fetchHistoricalDirectRate(
 ): Promise<number | null> {
   if (fromCurrency === toCurrency) return 1;
 
-  const manualRate = getManualExchangeOverride(fromCurrency, toCurrency);
-  if (manualRate != null) return manualRate;
-
-  const todayIso = new Date().toISOString().slice(0, 10);
-  const safeDate = dateIso > todayIso ? todayIso : dateIso;
-  const key = buildHistoricalRateKey(safeDate, fromCurrency, toCurrency);
-
-  const cache = readHistoricalRateCache();
-  const cached = cache[key];
-  if (cached && typeof cached.rate === 'number' && cached.rate > 0) {
-    return cached.rate;
-  }
-
-  try {
-    const response = await fetch(
-      `https://api.frankfurter.app/${safeDate}?from=${fromCurrency}&to=${toCurrency}`,
-    );
-    if (response.ok) {
-      const payload = (await response.json()) as { rates?: Record<string, number> };
-      const rate = payload?.rates?.[toCurrency];
-      if (typeof rate === 'number' && rate > 0) {
-        cache[key] = { rate, fetchedAt: Date.now() };
-        writeHistoricalRateCache(cache);
-        return rate;
-      }
-    }
-  } catch {
-    // Fallback below.
-  }
-
+  const safeDate = normalizeHistoricalDateIso(dateIso);
   const liveRates = getCachedExchangeRates() ?? (await fetchExchangeRates().catch(() => null));
+
+  const cached = getCachedCurrencyRate(safeDate, fromCurrency, toCurrency);
+  if (cached) {
+    const sanitized = sanitizeDirectUnitRate(fromCurrency, toCurrency, cached.rate, liveRates);
+    if (sanitized !== cached.rate) {
+      setCachedCurrencyRate(
+        safeDate,
+        fromCurrency,
+        toCurrency,
+        sanitized,
+        cached.source ?? 'historical_api',
+      );
+    }
+    return sanitized;
+  }
+
+  const frankfurterRate = await fetchRateFromFrankfurter(safeDate, fromCurrency, toCurrency);
+  if (frankfurterRate != null) {
+    const sanitized = sanitizeDirectUnitRate(fromCurrency, toCurrency, frankfurterRate, liveRates);
+    setCachedCurrencyRate(safeDate, fromCurrency, toCurrency, sanitized, 'historical_api');
+    return sanitized;
+  }
+
+  const currencyApiRate = await fetchRateFromCurrencyApi(safeDate, fromCurrency, toCurrency);
+  if (currencyApiRate != null) {
+    const sanitized = sanitizeDirectUnitRate(fromCurrency, toCurrency, currencyApiRate, liveRates);
+    setCachedCurrencyRate(safeDate, fromCurrency, toCurrency, sanitized, 'historical_api');
+    return sanitized;
+  }
+
   if (!liveRates) return null;
-  return convertAmountViaIls(1, fromCurrency, toCurrency, liveRates);
+
+  const fallbackRate = convertAmountViaIls(1, fromCurrency, toCurrency, liveRates);
+  if (fallbackRate != null && fallbackRate > 0) {
+    const sanitized = sanitizeDirectUnitRate(fromCurrency, toCurrency, fallbackRate, liveRates);
+    const todayIso = getLocalTodayIso();
+    if (safeDate === todayIso) {
+      // Today's fallback can be cached with TTL.
+      setCachedCurrencyRate(safeDate, fromCurrency, toCurrency, sanitized, 'today_live_fallback');
+      return sanitized;
+    }
+  }
+
+  // For historical dates, avoid returning today's fallback data (causes "frozen" date changes).
+  return safeDate === getLocalTodayIso() ? convertAmountViaIls(1, fromCurrency, toCurrency, liveRates) : null;
 }

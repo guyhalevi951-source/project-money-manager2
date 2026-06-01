@@ -236,13 +236,12 @@ export function replaceCloudManualExchangeOverrides(
   const localOnly = readActiveEntries().filter((entry) => entry.source !== 'cloud');
   const normalizedCloud: ManualExchangeOverrideEntry[] = [];
   cloudOverrides.forEach((entry) => {
-      const normalized = normalizePair(entry.baseCurrency, entry.quoteCurrency, entry.rate);
-      if (!normalized) return;
+      if (!isFinitePositive(entry.rate) || entry.baseCurrency === entry.quoteCurrency) return;
       normalizedCloud.push({
-        baseCurrency: normalized.baseCurrency,
-        quoteCurrency: normalized.quoteCurrency,
+        baseCurrency: entry.baseCurrency,
+        quoteCurrency: entry.quoteCurrency,
         source: 'cloud' as const,
-        rate: normalized.normalizedRate,
+        rate: entry.rate,
         expiresAt: null,
         updatedAt: entry.updatedAt ?? Date.now(),
       });

@@ -11,7 +11,13 @@ import {
 } from '../constants/currencies';
 import CurrencyFlag from './CurrencyFlag';
 import CurrencyLibraryModal from './CurrencyLibraryModal';
-import { fetchHistoricalDirectRate } from '../services/exchangeRateService';
+import {
+  fetchExchangeRates,
+  fetchHistoricalDirectRate,
+  getLocalTodayIso,
+  needsNetworkHistoricalFetch,
+  peekHistoricalDirectRate,
+} from '../services/exchangeRateService';
 import {
   listActiveManualExchangeOverrides,
   removeCloudManualExchangeOverride,
@@ -81,6 +87,7 @@ interface SessionOverride {
   baseCurrency: ExpenseCurrency;
   quoteCurrency: ExpenseCurrency;
   rate: number;
+  dateIso: string;
   updatedAt: number;
 }
 
@@ -112,6 +119,7 @@ export default function ExchangeRateSimulator({
   const [cloudError, setCloudError] = useState<string | null>(null);
 
   const [resolvedRate, setResolvedRate] = useState<number | null>(null);
+  const [todayMarketRate, setTodayMarketRate] = useState<number | null>(null);
   const [loadingRate, setLoadingRate] = useState(false);
   const [storedOverrides, setStoredOverrides] = useState<ManualExchangeOverrideEntry[]>(() =>
     listActiveManualExchangeOverrides(),
@@ -120,6 +128,8 @@ export default function ExchangeRateSimulator({
 
   const selectorContainerRef = useRef<HTMLDivElement>(null);
   const shouldSeedSecondaryRef = useRef(true);
+  const rateContextKeyRef = useRef('');
+  const historicalFetchIdRef = useRef(0);
 
   const formatRemainingTime = useCallback(
     (expiresAt: number): string => {
@@ -139,13 +149,14 @@ export default function ExchangeRateSimulator({
         baseCurrency: mainCurrency,
         quoteCurrency: secondaryCurrency,
         rate: unitRate,
+        dateIso,
         updatedAt: Date.now(),
       });
       setResolvedRate(unitRate);
       setSavePrompt('shown');
       setCloudError(null);
     },
-    [mainCurrency, secondaryCurrency],
+    [dateIso, mainCurrency, secondaryCurrency],
   );
 
   const clearManualOverrideState = useCallback(() => {
@@ -179,40 +190,143 @@ export default function ExchangeRateSimulator({
   }, [mainCurrency, secondaryCurrency]);
 
   useEffect(() => {
-    if (sessionOverride) return;
+    setSessionOverride(null);
+    setSavePrompt('hidden');
+    setCloudError(null);
+    shouldSeedSecondaryRef.current = true;
+  }, [dateIso]);
+
+  const activeSessionRate = useMemo(() => {
+    if (
+      sessionOverride &&
+      sessionOverride.baseCurrency === mainCurrency &&
+      sessionOverride.quoteCurrency === secondaryCurrency &&
+      sessionOverride.dateIso === dateIso &&
+      sessionOverride.rate > 0
+    ) {
+      return sessionOverride.rate;
+    }
+    return null;
+  }, [dateIso, mainCurrency, secondaryCurrency, sessionOverride]);
+
+  useEffect(() => {
+    const rateContextKey = `${dateIso}|${mainCurrency}|${secondaryCurrency}|${sessionOverride?.rate ?? resolvedRate ?? ''}`;
+    if (rateContextKeyRef.current !== rateContextKey) {
+      rateContextKeyRef.current = rateContextKey;
+      shouldSeedSecondaryRef.current = true;
+    }
+  }, [dateIso, mainCurrency, secondaryCurrency, resolvedRate, sessionOverride?.rate]);
+
+  useEffect(() => {
     if (mainCurrency === secondaryCurrency) return;
-    if (resolvedRate == null) return;
+
+    const unitRate =
+      sessionOverride &&
+      sessionOverride.baseCurrency === mainCurrency &&
+      sessionOverride.quoteCurrency === secondaryCurrency &&
+      sessionOverride.dateIso === dateIso
+        ? sessionOverride.rate
+        : resolvedRate;
+
+    if (unitRate == null || !(unitRate > 0)) return;
     if (!shouldSeedSecondaryRef.current) return;
 
     const mainAmount = parsePositiveAmount(mainAmountInput) ?? 1;
-    setSecondaryAmountInput(formatAmountForInput(mainAmount * resolvedRate));
+    setSecondaryAmountInput(formatAmountForInput(mainAmount * unitRate));
     shouldSeedSecondaryRef.current = false;
-  }, [resolvedRate, mainCurrency, secondaryCurrency, sessionOverride, mainAmountInput]);
+  }, [
+    resolvedRate,
+    mainCurrency,
+    secondaryCurrency,
+    sessionOverride,
+    mainAmountInput,
+    dateIso,
+  ]);
 
   useEffect(() => {
-    const fetchRate = async () => {
-      if (mainCurrency === secondaryCurrency) {
-        setResolvedRate(1);
-        return;
-      }
+    const fetchId = ++historicalFetchIdRef.current;
+    let cancelled = false;
 
-      if (
-        sessionOverride &&
-        sessionOverride.baseCurrency === mainCurrency &&
-        sessionOverride.quoteCurrency === secondaryCurrency
-      ) {
-        setResolvedRate(sessionOverride.rate);
-        return;
-      }
-
-      setLoadingRate(true);
-      const rate = await fetchHistoricalDirectRate(dateIso, mainCurrency, secondaryCurrency);
+    const applyResolvedRate = (rate: number | null) => {
+      if (cancelled || fetchId !== historicalFetchIdRef.current) return;
       setResolvedRate(rate);
       setLoadingRate(false);
+      shouldSeedSecondaryRef.current = true;
     };
 
-    void fetchRate();
-  }, [dateIso, mainCurrency, secondaryCurrency, sessionOverride]);
+    if (mainCurrency === secondaryCurrency) {
+      applyResolvedRate(1);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (activeSessionRate != null) {
+      applyResolvedRate(activeSessionRate);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const cachedRate = peekHistoricalDirectRate(dateIso, mainCurrency, secondaryCurrency);
+    if (cachedRate != null) {
+      applyResolvedRate(cachedRate);
+    } else {
+      setLoadingRate(true);
+    }
+
+    const shouldFetchFromNetwork = needsNetworkHistoricalFetch(dateIso, mainCurrency, secondaryCurrency);
+    if (!shouldFetchFromNetwork) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void (async () => {
+      try {
+        const rate = await fetchHistoricalDirectRate(dateIso, mainCurrency, secondaryCurrency);
+        applyResolvedRate(rate);
+      } catch {
+        applyResolvedRate(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dateIso, mainCurrency, secondaryCurrency, activeSessionRate]);
+
+  useEffect(() => {
+    const fetchTodayMarketRate = async () => {
+      if (mainCurrency === secondaryCurrency) {
+        setTodayMarketRate(1);
+        return;
+      }
+
+      const liveRates = await fetchExchangeRates().catch(() => null);
+      if (!liveRates) {
+        setTodayMarketRate(null);
+        return;
+      }
+
+      const fromIlsToForeign = mainCurrency === 'ILS' ? 1 : liveRates.ilsToForeign[mainCurrency];
+      const toIlsToForeign = secondaryCurrency === 'ILS' ? 1 : liveRates.ilsToForeign[secondaryCurrency];
+      if (
+        typeof fromIlsToForeign !== 'number' ||
+        fromIlsToForeign <= 0 ||
+        typeof toIlsToForeign !== 'number' ||
+        toIlsToForeign <= 0
+      ) {
+        setTodayMarketRate(null);
+        return;
+      }
+
+      const marketRate = toIlsToForeign / fromIlsToForeign;
+      setTodayMarketRate(Number.isFinite(marketRate) && marketRate > 0 ? marketRate : null);
+    };
+
+    void fetchTodayMarketRate();
+  }, [mainCurrency, secondaryCurrency]);
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
@@ -291,10 +405,11 @@ export default function ExchangeRateSimulator({
         baseCurrency: prevSecondary,
         quoteCurrency: prevMain,
         rate: 1 / prev.rate,
+        dateIso,
         updatedAt: Date.now(),
       };
     });
-  }, [mainCurrency, secondaryCurrency, mainAmountInput, secondaryAmountInput]);
+  }, [mainCurrency, secondaryCurrency, mainAmountInput, secondaryAmountInput, dateIso]);
 
   const applySelectorValue = useCallback((target: SelectorTarget, code: CurrencyCode) => {
     if (target === 'main') {
@@ -327,7 +442,8 @@ export default function ExchangeRateSimulator({
 
       const hasActiveSession =
         sessionOverride?.baseCurrency === mainCurrency &&
-        sessionOverride?.quoteCurrency === secondaryCurrency;
+        sessionOverride?.quoteCurrency === secondaryCurrency &&
+        sessionOverride?.dateIso === dateIso;
 
       const unitRate = hasActiveSession ? sessionOverride.rate : resolvedRate;
 
@@ -349,6 +465,7 @@ export default function ExchangeRateSimulator({
       secondaryAmountInput,
       sessionOverride,
       resolvedRate,
+      dateIso,
     ],
   );
 
@@ -456,15 +573,59 @@ export default function ExchangeRateSimulator({
     [refreshStoredOverrides, tr],
   );
 
+  const effectiveUnitRate = useMemo(() => {
+    if (
+      sessionOverride &&
+      sessionOverride.baseCurrency === mainCurrency &&
+      sessionOverride.quoteCurrency === secondaryCurrency &&
+      sessionOverride.dateIso === dateIso &&
+      sessionOverride.rate > 0
+    ) {
+      return sessionOverride.rate;
+    }
+    return resolvedRate;
+  }, [dateIso, mainCurrency, secondaryCurrency, sessionOverride, resolvedRate]);
+
+  const currenciesToPin = useMemo(() => {
+    const codes = new Set<CurrencyCode>();
+    if (!pinnedCurrencies.includes(mainCurrency)) codes.add(mainCurrency);
+    if (!pinnedCurrencies.includes(secondaryCurrency)) codes.add(secondaryCurrency);
+    return Array.from(codes);
+  }, [mainCurrency, pinnedCurrencies, secondaryCurrency]);
+
   const summaryMainAmount = parsePositiveAmount(mainAmountInput) ?? 1;
-  const summarySecondaryAmount =
-    parsePositiveAmount(secondaryAmountInput) ??
-    (resolvedRate != null ? summaryMainAmount * resolvedRate : null);
+  const summarySecondaryAmount = useMemo(() => {
+    const typedSecondary = parsePositiveAmount(secondaryAmountInput);
+    if (effectiveUnitRate != null && effectiveUnitRate > 0) {
+      return summaryMainAmount * effectiveUnitRate;
+    }
+    return typedSecondary;
+  }, [secondaryAmountInput, effectiveUnitRate, summaryMainAmount]);
+
+  const rateComparison = useMemo(() => {
+    const todayIso = getLocalTodayIso();
+    if (dateIso === todayIso) return null;
+    if (!(effectiveUnitRate != null && effectiveUnitRate > 0)) return null;
+    if (!(todayMarketRate != null && todayMarketRate > 0)) return null;
+
+    const rawDeltaPercent = ((todayMarketRate - effectiveUnitRate) / effectiveUnitRate) * 100;
+    if (!Number.isFinite(rawDeltaPercent)) return null;
+
+    const roundedDelta = Number(rawDeltaPercent.toFixed(2));
+    if (roundedDelta === 0) return null;
+
+    const trend: 'up' | 'down' = roundedDelta > 0 ? 'up' : 'down';
+    const sign = roundedDelta > 0 ? '+' : '';
+    return {
+      trend,
+      percentText: `${sign}${roundedDelta.toFixed(2)}%`,
+      contextText: tr('exchangeRateVsToday'),
+    };
+  }, [dateIso, effectiveUnitRate, todayMarketRate, tr]);
 
   const renderSelector = (target: SelectorTarget, code: CurrencyCode, label: string) => {
     const meta = getCurrencyMeta(code);
     const isOpen = openSelector === target;
-    const isTemporary = !pinnedCurrencies.includes(code);
 
     return (
       <div className="relative min-w-0 flex-1">
@@ -531,16 +692,6 @@ export default function ExchangeRateSimulator({
             </button>
           </div>
         )}
-
-        {isTemporary && (
-          <button
-            type="button"
-            onClick={() => pinTemporaryCurrency(code)}
-            className="mt-2 rounded-lg border border-violet-500/45 bg-violet-500/10 px-2.5 py-1.5 text-xs font-medium text-violet-200 transition-all hover:bg-violet-500/20"
-          >
-            {replaceTokens(tr('exchangeRatePinCurrency'), { code })}
-          </button>
-        )}
       </div>
     );
   };
@@ -556,7 +707,13 @@ export default function ExchangeRateSimulator({
         <div className="flex flex-col items-stretch gap-2.5 sm:flex-row sm:items-end">
           {renderSelector('main', mainCurrency, tr('exchangeRateMainCurrency'))}
 
-          <div className="flex items-end justify-center pb-0.5">
+          <div className="flex shrink-0 flex-col justify-end">
+            <span
+              className="mb-1.5 block text-xs font-medium text-transparent select-none"
+              aria-hidden="true"
+            >
+              &nbsp;
+            </span>
             <button
               type="button"
               onClick={handleSwap}
@@ -564,46 +721,112 @@ export default function ExchangeRateSimulator({
               aria-label={tr('exchangeRateSwapCurrencies')}
               title={tr('exchangeRateSwapCurrencies')}
             >
-              <ArrowUpDown className="mx-auto h-4 w-4" />
+              <ArrowUpDown className="mx-auto h-4 w-4 rotate-90" />
             </button>
           </div>
 
           {renderSelector('secondary', secondaryCurrency, tr('exchangeRateSecondaryCurrency'))}
         </div>
 
-        <div className="flex flex-col gap-2.5 sm:flex-row sm:items-end">
-          <div className="w-full sm:w-52">
+        <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start">
+          <div className="flex w-full shrink-0 flex-col sm:w-52">
             <label className="mb-1.5 block text-xs font-medium text-neutral-400">{tr('date')}</label>
             <input
               type="date"
               value={dateIso}
               onChange={(event) => setDateIso(event.target.value)}
               max={toIsoDateLocal(new Date())}
-              className={`${controlBaseClass} w-full [color-scheme:dark]`}
+              className={`${controlBaseClass} w-full shrink-0 [color-scheme:dark]`}
             />
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {currenciesToPin.map((code) => (
+                <button
+                  key={`pin-${code}`}
+                  type="button"
+                  onClick={() => pinTemporaryCurrency(code)}
+                  className="rounded-lg border border-violet-500/45 bg-violet-500/10 px-2.5 py-1.5 text-xs font-medium text-violet-200 transition-all hover:bg-violet-500/20 active:scale-[0.98]"
+                >
+                  {replaceTokens(tr('exchangeRatePinCurrency'), { code })}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="min-h-12 flex-1 rounded-xl border border-blue-900/40 bg-blue-950/25 px-3.5 py-3 text-sm text-blue-100">
+          <div className="flex min-w-0 flex-1 flex-col">
+            <label className="mb-1.5 block text-xs font-medium text-neutral-400">
+              {tr('exchangeRateConversionCalculation')}
+            </label>
+            <div className="min-h-12 flex-1 rounded-xl border border-blue-900/40 bg-blue-950/25 px-3.5 py-3 text-sm text-blue-100">
             {loadingRate ? (
               <span className="text-blue-200/80">{tr('exchangeRateLoadingHistorical')}</span>
-            ) : summarySecondaryAmount != null ? (
-              <LtrNumeric className="font-semibold">
-                {replaceTokens(tr('exchangeRateSummary'), {
-                  mainAmount: formatRate(summaryMainAmount),
-                  mainCurrency,
-                  secondaryAmount: formatRate(summarySecondaryAmount),
-                  secondaryCurrency,
-                })}
-              </LtrNumeric>
             ) : (
-              <LtrNumeric className="font-semibold">
-                {replaceTokens(tr('exchangeRateUnitRateLine'), {
-                  mainCurrency,
-                  secondaryCurrency,
-                  rate: resolvedRate != null ? formatRate(resolvedRate) : '-',
-                })}
-              </LtrNumeric>
+              <div className="flex min-h-[6rem] items-center justify-between gap-4">
+                <div className="min-w-0 space-y-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      step="any"
+                      value={mainAmountInput}
+                      onChange={(event) => handleMainAmountChange(event.target.value)}
+                      className="h-10 w-24 min-w-[4.5rem] rounded-lg border border-blue-800/60 bg-blue-950/50 px-2.5 text-sm font-semibold text-blue-50 outline-none transition-all focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 [color-scheme:dark]"
+                      aria-label={tr('exchangeRateMainAmountLabel')}
+                    />
+                    <span dir="ltr" className="shrink-0 font-semibold text-blue-100">
+                      {mainCurrency}
+                    </span>
+                    <span className="shrink-0 text-blue-300/80" aria-hidden>
+                      =
+                    </span>
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <LtrNumeric className="text-base font-semibold text-blue-50">
+                        {summarySecondaryAmount != null ? formatRate(summarySecondaryAmount) : '-'}
+                      </LtrNumeric>
+                      <span dir="ltr" className="shrink-0 font-semibold text-blue-100">
+                        {secondaryCurrency}
+                      </span>
+                    </div>
+                  </div>
+                  {effectiveUnitRate != null && (
+                    <p className="text-xs text-blue-200/75">
+                      <LtrNumeric>
+                        {replaceTokens(tr('exchangeRateUnitRateLine'), {
+                          mainCurrency,
+                          secondaryCurrency,
+                          rate: formatRate(effectiveUnitRate),
+                        })}
+                      </LtrNumeric>
+                    </p>
+                  )}
+                </div>
+                {rateComparison && (
+                  <div className="my-auto flex shrink-0 items-center gap-3 py-2">
+                    <div className="flex min-h-[4.5rem] flex-col justify-center">
+                      <LtrNumeric
+                        className={`whitespace-nowrap text-4xl font-black leading-none ${
+                          rateComparison.trend === 'up' ? 'text-emerald-400' : 'text-rose-500'
+                        }`}
+                      >
+                        {rateComparison.percentText}
+                      </LtrNumeric>
+                      <span className="mt-1 text-xl font-semibold leading-tight text-neutral-100">
+                        {rateComparison.contextText}
+                      </span>
+                    </div>
+                    <span
+                      aria-hidden
+                      className={`text-[4rem] leading-none ${
+                        rateComparison.trend === 'up' ? 'text-emerald-500' : 'text-rose-600'
+                      }`}
+                    >
+                      {rateComparison.trend === 'up' ? '⬆' : '⬇'}
+                    </span>
+                  </div>
+                )}
+              </div>
             )}
+            </div>
           </div>
         </div>
 
