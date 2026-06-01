@@ -2,6 +2,7 @@ import { ArrowLeft, ArrowRight, Coins, Languages } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useEffect } from 'react';
 import { useLanguage } from '../LanguageContext';
+import { writePreferredLanguage } from '../services/authLanguagePreference';
 import DisplayCurrencySelector from './DisplayCurrencySelector';
 import type { ExpenseCurrency } from '../services/exchangeRateService';
 
@@ -21,6 +22,11 @@ export default function SettingsPage({ onBack, recentExpenseCurrencies }: Settin
   } = useLanguage();
 
   const BackIcon = dir === 'rtl' ? ArrowRight : ArrowLeft;
+
+  const selectLanguage = (next: 'he' | 'en') => {
+    writePreferredLanguage(next);
+    setLang(next);
+  };
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -74,7 +80,7 @@ export default function SettingsPage({ onBack, recentExpenseCurrencies }: Settin
         <div className="inline-flex w-full rounded-2xl bg-gray-950/80 border border-gray-700 p-1">
           <button
             type="button"
-            onClick={() => setLang('he')}
+            onClick={() => selectLanguage('he')}
             className={`flex-1 py-2.5 sm:py-3 rounded-xl text-sm font-semibold transition-all ${
               lang === 'he'
                 ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/30'
@@ -85,7 +91,7 @@ export default function SettingsPage({ onBack, recentExpenseCurrencies }: Settin
           </button>
           <button
             type="button"
-            onClick={() => setLang('en')}
+            onClick={() => selectLanguage('en')}
             className={`flex-1 py-2.5 sm:py-3 rounded-xl text-sm font-semibold transition-all ${
               lang === 'en'
                 ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/30'

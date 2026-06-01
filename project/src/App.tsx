@@ -72,6 +72,11 @@ import {
   saveToLocalStorage,
 } from './userDataStorage';
 import {
+  consumePendingAuthLang,
+  readGuestLang,
+  setGuestLangActive,
+} from './services/authLanguagePreference';
+import {
   ensureCloudDataMigrated,
   saveCategoriesToCloud,
   saveExpensesToCloud,
@@ -2056,6 +2061,7 @@ function App() {
     tr,
     dir,
     lang,
+    setLang,
     getUserContent,
     ensureUserContents,
     keepOriginalValues,
@@ -2072,6 +2078,21 @@ function App() {
   const [settingsCloudReady, setSettingsCloudReady] = useState(false);
   const suppressCloudSaveRef = useRef(true);
   const skipNextSettingsSaveRef = useRef(false);
+  const pendingAuthLangRef = useRef<'he' | 'en' | null>(null);
+  const hadAuthenticatedUserRef = useRef(false);
+  const settingsMergeRef = useRef({
+    keepOriginalValues,
+    displayCurrency,
+    savedColors,
+    customCurrencies,
+  });
+
+  settingsMergeRef.current = {
+    keepOriginalValues,
+    displayCurrency,
+    savedColors,
+    customCurrencies,
+  };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
@@ -2291,28 +2312,43 @@ function App() {
     };
 
     const initUserData = async () => {
-      setDataReady(false);
-      setSettingsCloudReady(false);
       suppressCloudSaveRef.current = true;
 
       if (!user) {
+        if (hadAuthenticatedUserRef.current) {
+          resetAppData();
+        }
+        hadAuthenticatedUserRef.current = false;
+
+        setGuestLangActive(false);
+        pendingAuthLangRef.current = null;
         setSettingsPersistence('local');
         clearCloudManualExchangeOverrides();
         clearCloudCurrencyCommissions();
-        resetAppData();
         setDataReady(true);
         return;
       }
 
+      hadAuthenticatedUserRef.current = !user.isAnonymous;
+      setDataReady(false);
+      setSettingsCloudReady(false);
+
       if (user.isAnonymous) {
+        setGuestLangActive(true);
         setSettingsPersistence('local');
         clearCloudManualExchangeOverrides();
         clearCloudCurrencyCommissions();
+        const guestLang = readGuestLang();
+        if (guestLang) {
+          setLang(guestLang, { persist: false });
+        }
         applyAppData(loadFromLocalStorage());
         setDataReady(true);
         return;
       }
 
+      setGuestLangActive(false);
+      pendingAuthLangRef.current = consumePendingAuthLang();
       setSettingsPersistence('cloud');
       const uid = user.uid;
 
@@ -2386,7 +2422,22 @@ function App() {
           uid,
           (settings, meta) => {
             if (cancelled || meta.hasPendingWrites) return;
-            if (meta.exists) {
+            const pendingLang = pendingAuthLangRef.current;
+            if (pendingLang) {
+              pendingAuthLangRef.current = null;
+              skipNextSettingsSaveRef.current = true;
+              const mergeBase = settingsMergeRef.current;
+              const merged = meta.exists
+                ? { ...settings, lang: pendingLang }
+                : {
+                    lang: pendingLang,
+                    keepOriginalValues: mergeBase.keepOriginalValues,
+                    displayCurrency: mergeBase.displayCurrency,
+                    saved_colors: mergeBase.savedColors,
+                    custom_currencies: mergeBase.customCurrencies,
+                  };
+              applySettingsFromCloud(merged);
+            } else if (meta.exists) {
               skipNextSettingsSaveRef.current = true;
               applySettingsFromCloud(settings);
             }
@@ -2450,7 +2501,7 @@ function App() {
       unsubManualOverrides?.();
       unsubCurrencyCommissions?.();
     };
-  }, [user, authReady, applySettingsFromCloud, setSettingsPersistence]);
+  }, [user, authReady, applySettingsFromCloud, setSettingsPersistence, setLang]);
 
   // Persist financial changes: localStorage for guests, debounced Firestore for accounts.
   useEffect(() => {

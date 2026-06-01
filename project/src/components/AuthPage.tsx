@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Wallet, Mail, Lock, Loader2, UserRound } from 'lucide-react';
+import { Wallet, Mail, Lock, Loader2, UserRound, Globe } from 'lucide-react';
 import {
   isFirebaseConfigured,
   signInWithEmail,
@@ -12,6 +12,15 @@ import {
 } from '../firebase';
 import { mapAuthError, validateAuthForm } from '../authErrors';
 import { useLanguage } from '../LanguageContext';
+import type { Lang } from '../translations';
+import {
+  clearAuthPageLang,
+  resolveAuthPageInitialLang,
+  writeAuthPageLang,
+  writeGuestLang,
+  writePendingAuthLang,
+  writePreferredLanguage,
+} from '../services/authLanguagePreference';
 
 type AuthMode = 'login' | 'signup';
 type LoadingAction = 'email' | 'google' | 'facebook' | 'twitter' | 'guest' | null;
@@ -106,7 +115,6 @@ interface SocialButtonProps {
   icon: React.ReactNode;
   label?: string;
   className: string;
-  signInWithIcon?: boolean;
   ariaLabel?: string;
   signInWithText?: string;
 }
@@ -118,35 +126,29 @@ function SocialButton({
   icon,
   label,
   className,
-  signInWithIcon = false,
   ariaLabel,
   signInWithText,
 }: SocialButtonProps) {
+  const text = signInWithText ?? label;
+
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
       aria-label={ariaLabel}
-      dir={signInWithIcon ? 'ltr' : undefined}
-      className={`w-full py-3.5 rounded-xl font-medium transition-all active:scale-[0.98] disabled:opacity-60 flex items-center justify-center gap-3 ${className}`}
+      className={`w-full py-3.5 rounded-xl font-medium transition-all active:scale-[0.98] disabled:opacity-60 flex flex-row items-center justify-center gap-3 ${className}`}
     >
-      {signInWithIcon ? (
-        <>
-          {signInWithText} {loading ? <Loader2 className="w-5 h-5 animate-spin shrink-0" /> : icon}
-        </>
-      ) : (
-        <>
-          {loading ? <Loader2 className="w-5 h-5 animate-spin shrink-0" /> : icon}
-          {label}
-        </>
-      )}
+      {text != null && <span>{text}</span>}
+      {loading ? <Loader2 className="w-5 h-5 animate-spin shrink-0" /> : icon}
     </button>
   );
 }
 
+const SOCIAL_AUTH_ACTIONS = new Set<LoadingAction>(['google', 'facebook', 'twitter']);
+
 export default function AuthPage() {
-  const { dir, tr, lang } = useLanguage();
+  const { dir, tr, lang, setLang } = useLanguage();
   const [mode, setMode] = useState<AuthMode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -155,6 +157,24 @@ export default function AuthPage() {
 
   const firebaseReady = isFirebaseConfigured();
   const loading = loadingAction !== null;
+  const authLangHydratedRef = useRef(false);
+
+  useEffect(() => {
+    if (authLangHydratedRef.current) return;
+    authLangHydratedRef.current = true;
+
+    const initial = resolveAuthPageInitialLang();
+    if (!initial) return;
+
+    setLang(initial, { persist: false });
+  }, [setLang]);
+
+  const toggleAuthLanguage = () => {
+    const next: Lang = lang === 'he' ? 'en' : 'he';
+    writePreferredLanguage(next);
+    writeAuthPageLang(next);
+    setLang(next, { persist: false });
+  };
 
   const switchMode = (next: AuthMode) => {
     setMode(next);
@@ -167,6 +187,14 @@ export default function AuthPage() {
       setError(tr('authFirebaseMissing'));
       return;
     }
+
+    if (action === 'guest') {
+      writeGuestLang(lang);
+      clearAuthPageLang();
+    } else if (action != null && SOCIAL_AUTH_ACTIONS.has(action)) {
+      writePendingAuthLang(lang);
+    }
+
     setLoadingAction(action);
     try {
       await fn();
@@ -199,7 +227,7 @@ export default function AuthPage() {
   return (
     <div
       dir={dir}
-      className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-4 py-10"
+      className="relative min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-4 py-10"
       style={{ paddingTop: 'max(2.5rem, env(safe-area-inset-top))', paddingBottom: 'max(2.5rem, env(safe-area-inset-bottom))' }}
     >
       {/* Ambient glow */}
@@ -215,7 +243,19 @@ export default function AuthPage() {
         className="relative w-full max-w-md"
       >
         {/* Glass card */}
-        <div className="rounded-3xl border border-slate-800/80 bg-slate-900/40 backdrop-blur-xl shadow-2xl shadow-black/50 p-6 sm:p-8">
+        <div className="relative rounded-3xl border border-slate-800/80 bg-slate-900/40 backdrop-blur-xl shadow-2xl shadow-black/50 p-6 sm:p-8">
+          <button
+            type="button"
+            onClick={toggleAuthLanguage}
+            disabled={loading}
+            className="absolute z-10 top-4 end-4 flex flex-row items-center gap-1.5 rounded-full border border-white/10 bg-white/10 p-2 px-3 text-xs font-semibold uppercase tracking-wide text-slate-100 shadow-lg shadow-black/20 backdrop-blur-sm transition-colors hover:border-white/20 hover:bg-white/15 disabled:opacity-50 md:fixed md:z-20 md:top-[max(1.5rem,env(safe-area-inset-top))] md:end-[max(1.5rem,env(safe-area-inset-inline-end,0px))]"
+            aria-label={tr('authSwitchLanguage')}
+            title={tr('authSwitchLanguage')}
+          >
+            <Globe className="h-4 w-4 shrink-0 text-emerald-300/90" aria-hidden />
+            <span>{lang === 'he' ? 'HE' : 'EN'}</span>
+          </button>
+
           <div className="flex flex-col items-center text-center mb-8">
             <div className="bg-gradient-to-br from-emerald-500 to-teal-600 p-3 rounded-2xl shadow-lg shadow-emerald-500/25 mb-4">
               <Wallet className="w-8 h-8 text-white" />
@@ -317,7 +357,6 @@ export default function AuthPage() {
               disabled={loading}
               loading={loadingAction === 'google'}
               icon={<GoogleIcon className="w-5 h-5 shrink-0" />}
-              signInWithIcon
               ariaLabel={`${tr('signInWith')} Google`}
               signInWithText={tr('signInWith')}
               className="bg-slate-950 border border-slate-700 text-slate-100 hover:bg-slate-900 hover:border-slate-600"
@@ -328,7 +367,6 @@ export default function AuthPage() {
               disabled={loading}
               loading={loadingAction === 'facebook'}
               icon={<FacebookIcon className="w-5 h-5 shrink-0 text-white" />}
-              signInWithIcon
               ariaLabel={`${tr('signInWith')} Facebook`}
               signInWithText={tr('signInWith')}
               className="bg-[#1877F2] border border-[#1877F2] text-white hover:bg-[#166FE5] hover:border-[#166FE5] shadow-md shadow-[#1877F2]/20"
@@ -339,7 +377,6 @@ export default function AuthPage() {
               disabled={loading}
               loading={loadingAction === 'twitter'}
               icon={<XIcon className="w-5 h-5 shrink-0 text-white" />}
-              signInWithIcon
               ariaLabel={`${tr('signInWith')} X`}
               signInWithText={tr('signInWith')}
               className="bg-black border border-neutral-800 text-white hover:bg-neutral-900 hover:border-neutral-700 shadow-md shadow-black/30"

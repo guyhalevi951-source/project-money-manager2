@@ -225,6 +225,7 @@ export function loadLegacySettingsFromLocalStorage(): UserSettings {
 }
 
 export function clearLegacyLocalStorage(): void {
+  // Intentionally preserves `preferred_language` for login-screen language sync after logout.
   window.localStorage.removeItem('expenses');
   window.localStorage.removeItem('customCategories');
   window.localStorage.removeItem('budgetsByMonth');

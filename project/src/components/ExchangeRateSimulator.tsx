@@ -27,11 +27,11 @@ import {
   type CurrencyCommissionEntry,
 } from '../services/currencyCommissionService';
 import {
+  clearHistoricalDirectRateCache,
   computeDirectUnitRateFromIlsPivot,
   fetchExchangeRates,
   fetchHistoricalDirectRateSnapshot,
   getLocalTodayIso,
-  needsNetworkHistoricalFetch,
   peekHistoricalDirectRateSnapshot,
 } from '../services/exchangeRateService';
 import {
@@ -159,6 +159,8 @@ export default function ExchangeRateSimulator({
   const shouldSeedSecondaryRef = useRef(true);
   const rateContextKeyRef = useRef('');
   const historicalFetchIdRef = useRef(0);
+  const todayMarketFetchIdRef = useRef(0);
+  const historicalContextKeyRef = useRef<string | null>(null);
 
   const formatRemainingTime = useCallback(
     (expiresAt: number): string => {
@@ -307,6 +309,7 @@ export default function ExchangeRateSimulator({
   useEffect(() => {
     const fetchId = ++historicalFetchIdRef.current;
     let cancelled = false;
+    const historicalContextKey = `${dateIso}|${mainCurrency}|${secondaryCurrency}`;
 
     const applyResolvedRate = (rate: number | null, fetchedAt: number | null) => {
       if (cancelled || fetchId !== historicalFetchIdRef.current) return;
@@ -332,6 +335,12 @@ export default function ExchangeRateSimulator({
       };
     }
 
+    const prevContextKey = historicalContextKeyRef.current;
+    if (prevContextKey != null && prevContextKey !== historicalContextKey) {
+      clearHistoricalDirectRateCache(dateIso, mainCurrency, secondaryCurrency);
+    }
+    historicalContextKeyRef.current = historicalContextKey;
+
     const cachedSnapshot = peekHistoricalDirectRateSnapshot(dateIso, mainCurrency, secondaryCurrency);
     if (cachedSnapshot.rate != null) {
       applyResolvedRate(cachedSnapshot.rate, cachedSnapshot.fetchedAt);
@@ -340,23 +349,21 @@ export default function ExchangeRateSimulator({
       setLoadingRate(true);
     }
 
-    const shouldFetchFromNetwork = needsNetworkHistoricalFetch(dateIso, mainCurrency, secondaryCurrency);
-    if (!shouldFetchFromNetwork) {
-      return () => {
-        cancelled = true;
-      };
-    }
-
     void (async () => {
       try {
         const snapshot = await fetchHistoricalDirectRateSnapshot(
           dateIso,
           mainCurrency,
           secondaryCurrency,
+          { bypassCache: true },
         );
         applyResolvedRate(snapshot.rate, snapshot.fetchedAt);
-      } catch {
-        applyResolvedRate(null, null);
+      } catch (error) {
+        console.error('Trend fetch error (historical snapshot):', error, {
+          pair: `${mainCurrency}/${secondaryCurrency}`,
+          dateIso,
+        });
+        applyResolvedRate(cachedSnapshot.rate, cachedSnapshot.fetchedAt);
       }
     })();
 
@@ -366,27 +373,42 @@ export default function ExchangeRateSimulator({
   }, [dateIso, mainCurrency, secondaryCurrency, activeSessionRate, sessionOverride?.updatedAt]);
 
   useEffect(() => {
-    const fetchTodayMarketRate = async () => {
-      if (mainCurrency === secondaryCurrency) {
-        setTodayMarketRate(1);
-        return;
-      }
+    const fetchId = ++todayMarketFetchIdRef.current;
+    let cancelled = false;
 
-      const liveRates = await fetchExchangeRates().catch(() => null);
-      if (!liveRates) {
-        setTodayMarketRate(null);
-        return;
-      }
+    if (mainCurrency === secondaryCurrency) {
+      setTodayMarketRate(1);
+      return () => {
+        cancelled = true;
+      };
+    }
 
-      const marketRate = computeDirectUnitRateFromIlsPivot(
-        mainCurrency,
-        secondaryCurrency,
-        liveRates.ilsToForeign,
-      );
-      setTodayMarketRate(marketRate != null && marketRate > 0 ? marketRate : null);
+    setTodayMarketRate(null);
+
+    void (async () => {
+      try {
+        const liveRates = await fetchExchangeRates();
+        if (cancelled || fetchId !== todayMarketFetchIdRef.current) return;
+
+        const marketRate = computeDirectUnitRateFromIlsPivot(
+          mainCurrency,
+          secondaryCurrency,
+          liveRates.ilsToForeign,
+        );
+        setTodayMarketRate(marketRate != null && marketRate > 0 ? marketRate : null);
+      } catch (error) {
+        console.error('Trend fetch error (today market rate):', error, {
+          pair: `${mainCurrency}/${secondaryCurrency}`,
+        });
+        if (!cancelled && fetchId === todayMarketFetchIdRef.current) {
+          setTodayMarketRate(null);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
     };
-
-    void fetchTodayMarketRate();
   }, [mainCurrency, secondaryCurrency]);
 
   useEffect(() => {
@@ -806,6 +828,7 @@ export default function ExchangeRateSimulator({
   const rateComparison = useMemo(() => {
     const todayIso = getLocalTodayIso();
     if (dateIso === todayIso) return null;
+    if (loadingRate) return null;
     if (!(effectiveUnitRate != null && effectiveUnitRate > 0)) return null;
     if (!(todayMarketRate != null && todayMarketRate > 0)) return null;
 
@@ -814,6 +837,7 @@ export default function ExchangeRateSimulator({
 
     const roundedDelta = Number(rawDeltaPercent.toFixed(2));
     if (roundedDelta === 0) return null;
+    if (Math.abs(roundedDelta) > 500) return null;
 
     const trend: 'up' | 'down' = roundedDelta > 0 ? 'up' : 'down';
     const sign = roundedDelta > 0 ? '+' : '';
@@ -822,7 +846,24 @@ export default function ExchangeRateSimulator({
       percentText: `${sign}${roundedDelta.toFixed(2)}%`,
       contextText: tr('exchangeRateVsToday'),
     };
-  }, [dateIso, effectiveUnitRate, todayMarketRate, tr]);
+  }, [dateIso, effectiveUnitRate, loadingRate, todayMarketRate, tr]);
+
+  const showNoTrendData = useMemo(() => {
+    const todayIso = getLocalTodayIso();
+    if (dateIso === todayIso) return false;
+    if (loadingRate) return false;
+    if (rateComparison) return false;
+    if (mainCurrency === secondaryCurrency) return false;
+    if (!(effectiveUnitRate != null && effectiveUnitRate > 0)) return false;
+    return true;
+  }, [
+    dateIso,
+    effectiveUnitRate,
+    loadingRate,
+    mainCurrency,
+    rateComparison,
+    secondaryCurrency,
+  ]);
 
   const renderSelector = (target: SelectorTarget, code: CurrencyCode, label: string) => {
     const meta = getCurrencyMeta(code);
@@ -1098,6 +1139,11 @@ export default function ExchangeRateSimulator({
                       {rateComparison.trend === 'up' ? '⬆' : '⬇'}
                     </span>
                   </div>
+                )}
+                {showNoTrendData && (
+                  <p className="ms-auto max-w-[9rem] shrink-0 self-center py-2 text-end text-xs leading-snug text-blue-200/60">
+                    {tr('exchangeRateNoTrendData')}
+                  </p>
                 )}
               </div>
             )}

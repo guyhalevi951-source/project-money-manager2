@@ -76,6 +76,7 @@ const he: TranslationDict = {
   exchangeRateSummary: '{mainAmount} {mainCurrency} = {secondaryAmount} {secondaryCurrency}',
   exchangeRateUnitRateLine: '1 {mainCurrency} = {rate} {secondaryCurrency}',
   exchangeRateVsToday: 'לעומת היום',
+  exchangeRateNoTrendData: 'אין נתוני מגמה לתאריך זה',
   exchangeRateLastUpdated: 'שער החליפין עודכן לאחרונה ב-{time}',
   exchangeRateCopyAmount: 'העתק סכום מומר',
   exchangeRateCopied: 'הועתק ללוח',
@@ -111,6 +112,7 @@ const he: TranslationDict = {
   authGuest: 'המשך כאורח',
   authFirebaseHint: 'הגדר את משתני VITE_FIREBASE_* בקובץ .env (ראה .env.example)',
   signInWith: 'התחבר עם',
+  authSwitchLanguage: 'החלף שפת ממשק',
 
   // Nav / tabs
   tabDashboard: 'בית',
@@ -326,6 +328,7 @@ const en: TranslationDict = {
   exchangeRateSummary: '{mainAmount} {mainCurrency} = {secondaryAmount} {secondaryCurrency}',
   exchangeRateUnitRateLine: '1 {mainCurrency} = {rate} {secondaryCurrency}',
   exchangeRateVsToday: 'vs Today',
+  exchangeRateNoTrendData: 'No trend data for this date',
   exchangeRateLastUpdated: 'Rate last updated at {time}',
   exchangeRateCopyAmount: 'Copy converted amount',
   exchangeRateCopied: 'Copied to clipboard',
@@ -358,6 +361,7 @@ const en: TranslationDict = {
   authGuest: 'Continue as guest',
   authFirebaseHint: 'Set VITE_FIREBASE_* variables in .env (see .env.example)',
   signInWith: 'Sign in with',
+  authSwitchLanguage: 'Switch interface language',
   tabDashboard: 'Home',
   tabAnalytics: 'Insights',
   tabSubbudgets: 'Budgets',

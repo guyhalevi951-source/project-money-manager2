@@ -22,6 +22,12 @@ import {
   type ExpenseCurrency,
 } from './services/currencyRegistry';
 import {
+  GUEST_LANG_STORAGE_KEY,
+  isGuestLangActive,
+  readPreferredLanguage,
+  writePreferredLanguage,
+} from './services/authLanguagePreference';
+import {
   appendSavedColor,
 } from './services/userFirebaseSync';
 import { getSavedColors as getLocalSavedColors } from './services/savedColorsService';
@@ -34,7 +40,7 @@ import {
 interface LanguageContextValue {
   lang: Lang;
   dir: Dir;
-  setLang: (next: Lang) => void;
+  setLang: (next: Lang, options?: { persist?: boolean }) => void;
   keepOriginalValues: boolean;
   setKeepOriginalValues: (next: boolean) => void;
   displayCurrency: CurrencyCode;
@@ -95,8 +101,15 @@ const translationKey = (text: string, fromLang: Lang, toLang: Lang) =>
   `${fromLang}|${toLang}|${text}`;
 
 function getInitialLang(): Lang {
+  const preferred = readPreferredLanguage();
+  if (preferred) return preferred;
+
   const fromStorage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
-  if (fromStorage === 'he' || fromStorage === 'en') return fromStorage;
+  if (fromStorage === 'he' || fromStorage === 'en') {
+    writePreferredLanguage(fromStorage);
+    return fromStorage;
+  }
+
   const browserLang = navigator.language.toLowerCase();
   return browserLang.startsWith('he') ? 'he' : 'en';
 }
@@ -124,7 +137,8 @@ function resolveUserContent(
 }
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [lang, setLang] = useState<Lang>(() => getInitialLang());
+  const [lang, setLangState] = useState<Lang>(() => getInitialLang());
+  const skipLangLocalPersistRef = useRef(false);
   const [keepOriginalValues, setKeepOriginalValues] = useState<boolean>(() => {
     const fromStorage = window.localStorage.getItem(KEEP_ORIGINAL_VALUES_STORAGE_KEY);
     return fromStorage === 'true';
@@ -146,6 +160,17 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const loadingMapRef = useRef(loadingMap);
   const dir = dirByLang[lang];
 
+  const setLang = useCallback((next: Lang, options?: { persist?: boolean }) => {
+    setLangState((prev) => {
+      if (prev === next) return prev;
+      if (options?.persist === false) {
+        skipLangLocalPersistRef.current = true;
+      }
+      writePreferredLanguage(next);
+      return next;
+    });
+  }, []);
+
   const applySettingsFromCloud = useCallback(
     (settings: {
       lang: Lang;
@@ -160,7 +185,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       setSavedColors(settings.saved_colors);
       setCustomCurrencies(settings.custom_currencies);
     },
-    [],
+    [setLang],
   );
 
   const setDisplayCurrency = useCallback((next: CurrencyCode) => {
@@ -203,6 +228,18 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (settingsPersistence !== 'local') return;
+    if (skipLangLocalPersistRef.current) {
+      skipLangLocalPersistRef.current = false;
+      return;
+    }
+    if (isGuestLangActive()) {
+      try {
+        window.sessionStorage.setItem(GUEST_LANG_STORAGE_KEY, lang);
+      } catch {
+        // Ignore.
+      }
+      return;
+    }
     window.localStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
   }, [lang, settingsPersistence]);
 
