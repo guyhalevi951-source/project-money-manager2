@@ -50,6 +50,11 @@ import DisplayMoney from './components/DisplayMoney';
 import CategoryColorChip from './components/CategoryColorChip';
 import { LocalizedUserText, LtrNumeric, useLanguage } from './LanguageContext';
 import { localizeCategoryLabel } from './translations';
+import { symbolToCurrency } from './services/displayCurrencyUtils';
+import {
+  clearCloudManualExchangeOverrides,
+  replaceCloudManualExchangeOverrides,
+} from './services/manualExchangeOverrideService';
 import {
   convertForeignToIls,
   currencySymbol,
@@ -67,6 +72,7 @@ import {
   saveCategoriesToCloud,
   saveExpensesToCloud,
   saveSettingsToCloud,
+  subscribeManualExchangeOverrides,
   subscribeCategories,
   subscribeExpenses,
   subscribeSettings,
@@ -2244,6 +2250,7 @@ function App() {
     let unsubExpenses: (() => void) | undefined;
     let unsubCategories: (() => void) | undefined;
     let unsubSettings: (() => void) | undefined;
+    let unsubManualOverrides: (() => void) | undefined;
     let initialExpenses = false;
     let initialCategories = false;
     let initialSettings = false;
@@ -2263,6 +2270,7 @@ function App() {
 
       if (!user) {
         setSettingsPersistence('local');
+        clearCloudManualExchangeOverrides();
         resetAppData();
         setDataReady(true);
         return;
@@ -2270,6 +2278,7 @@ function App() {
 
       if (user.isAnonymous) {
         setSettingsPersistence('local');
+        clearCloudManualExchangeOverrides();
         applyAppData(loadFromLocalStorage());
         setDataReady(true);
         return;
@@ -2368,6 +2377,19 @@ function App() {
             }
           },
         );
+
+        unsubManualOverrides = subscribeManualExchangeOverrides(
+          uid,
+          (entries, meta) => {
+            if (cancelled || meta.hasPendingWrites) return;
+            replaceCloudManualExchangeOverrides(entries);
+          },
+          () => {
+            if (!cancelled) {
+              clearCloudManualExchangeOverrides();
+            }
+          },
+        );
       } catch {
         if (!cancelled) {
           resetAppData();
@@ -2383,6 +2405,7 @@ function App() {
       unsubExpenses?.();
       unsubCategories?.();
       unsubSettings?.();
+      unsubManualOverrides?.();
     };
   }, [user, authReady, applySettingsFromCloud, setSettingsPersistence]);
 
@@ -2702,6 +2725,21 @@ function App() {
   }, [expenses, search, timeFilter]);
 
   const historyTotal = historyExpenses.reduce((s, e) => s + e.amount, 0);
+  const recentExpenseCurrencies = useMemo<ExpenseCurrency[]>(() => {
+    return [...expenses]
+      .sort((a, b) => {
+        if (a.date === b.date) {
+          const idA = Number.parseInt(a.id, 10);
+          const idB = Number.parseInt(b.id, 10);
+          return (Number.isFinite(idB) ? idB : 0) - (Number.isFinite(idA) ? idA : 0);
+        }
+        return a.date < b.date ? 1 : -1;
+      })
+      .map((expense) => {
+        if (!expense.originalCurrency) return 'ILS';
+        return symbolToCurrency(expense.originalCurrency) ?? 'ILS';
+      });
+  }, [expenses]);
 
   // Reusable month selector (used on Dashboard & Sub-Budgets pages).
   const monthSelector = (
@@ -2811,7 +2849,10 @@ function App() {
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 pb-24 md:pb-10">
         {settingsOpen ? (
-          <SettingsPage onBack={closeSettings} />
+          <SettingsPage
+            onBack={closeSettings}
+            recentExpenseCurrencies={recentExpenseCurrencies}
+          />
         ) : (
           <>
         {/* ============================ DASHBOARD ============================ */}

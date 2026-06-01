@@ -1,10 +1,12 @@
 import { currencySymbol, type ExpenseCurrency } from '../constants/currencies';
+import { getManualExchangeOverride } from './manualExchangeOverrideService';
 
 export type { ExpenseCurrency, CurrencyCode } from '../constants/currencies';
 export { CORE_DISPLAY_CURRENCIES as EXPENSE_CURRENCIES, currencySymbol } from '../constants/currencies';
 
 const ER_API_URL = 'https://open.er-api.com/v6/latest/ILS';
 const STORAGE_KEY = 'budget_exchange_rates';
+const HISTORICAL_RATE_STORAGE_KEY = 'budget_exchange_historical_rates_v1';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
@@ -26,6 +28,13 @@ interface StoredExchangeRatesPayload {
 
 let memoryCache: ExchangeRates | null = null;
 let fetchPromise: Promise<ExchangeRates> | null = null;
+
+interface HistoricalRateCache {
+  [key: string]: {
+    rate: number;
+    fetchedAt: number;
+  };
+}
 
 function isCacheFresh(fetchedAt: number): boolean {
   return Date.now() - fetchedAt < CACHE_TTL_MS;
@@ -166,6 +175,11 @@ export function convertForeignToIls(
   if (currency === 'ILS') return amount;
   if (!(amount > 0)) return 0;
 
+  const manualRate = getManualExchangeOverride(currency, 'ILS');
+  if (manualRate != null) {
+    return amount * manualRate;
+  }
+
   const foreignToIls = getForeignToIls(currency, rates);
   if (foreignToIls == null) return null;
 
@@ -178,6 +192,11 @@ export function convertIlsToForeign(
   rates: ExchangeRates,
 ): number | null {
   if (currency === 'ILS') return ilsAmount;
+
+  const manualRate = getManualExchangeOverride('ILS', currency);
+  if (manualRate != null) {
+    return ilsAmount * manualRate;
+  }
 
   const ilsToForeign = rates.ilsToForeign[currency];
   if (!ilsToForeign || ilsToForeign <= 0) return null;
@@ -197,6 +216,11 @@ export function convertAmountViaIls(
 ): number | null {
   if (!(amount > 0)) return null;
   if (fromCurrency === toCurrency) return amount;
+
+  const manualRate = getManualExchangeOverride(fromCurrency, toCurrency);
+  if (manualRate != null) {
+    return amount * manualRate;
+  }
 
   const fromIlsToForeign =
     fromCurrency === 'ILS' ? 1 : rates.ilsToForeign[fromCurrency];
@@ -224,4 +248,70 @@ export function hasExchangeRate(currency: string, rates: ExchangeRates): boolean
 export function formatForeignAmount(amount: number, currency: ExpenseCurrency): string {
   const formatted = Number.isInteger(amount) ? String(amount) : amount.toFixed(2);
   return `${currencySymbol(currency)}${formatted}`;
+}
+
+function buildHistoricalRateKey(dateIso: string, fromCurrency: string, toCurrency: string): string {
+  return `${dateIso}|${fromCurrency}|${toCurrency}`;
+}
+
+function readHistoricalRateCache(): HistoricalRateCache {
+  try {
+    const raw = window.localStorage.getItem(HISTORICAL_RATE_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as HistoricalRateCache;
+    if (!parsed || typeof parsed !== 'object') return {};
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
+function writeHistoricalRateCache(cache: HistoricalRateCache): void {
+  window.localStorage.setItem(HISTORICAL_RATE_STORAGE_KEY, JSON.stringify(cache));
+}
+
+/**
+ * Fetches a historical direct conversion rate (`fromCurrency` -> `toCurrency`) for a specific date.
+ * Falls back to current cached rates if the historical provider is unavailable.
+ */
+export async function fetchHistoricalDirectRate(
+  dateIso: string,
+  fromCurrency: string,
+  toCurrency: string,
+): Promise<number | null> {
+  if (fromCurrency === toCurrency) return 1;
+
+  const manualRate = getManualExchangeOverride(fromCurrency, toCurrency);
+  if (manualRate != null) return manualRate;
+
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const safeDate = dateIso > todayIso ? todayIso : dateIso;
+  const key = buildHistoricalRateKey(safeDate, fromCurrency, toCurrency);
+
+  const cache = readHistoricalRateCache();
+  const cached = cache[key];
+  if (cached && typeof cached.rate === 'number' && cached.rate > 0) {
+    return cached.rate;
+  }
+
+  try {
+    const response = await fetch(
+      `https://api.frankfurter.app/${safeDate}?from=${fromCurrency}&to=${toCurrency}`,
+    );
+    if (response.ok) {
+      const payload = (await response.json()) as { rates?: Record<string, number> };
+      const rate = payload?.rates?.[toCurrency];
+      if (typeof rate === 'number' && rate > 0) {
+        cache[key] = { rate, fetchedAt: Date.now() };
+        writeHistoricalRateCache(cache);
+        return rate;
+      }
+    }
+  } catch {
+    // Fallback below.
+  }
+
+  const liveRates = getCachedExchangeRates() ?? (await fetchExchangeRates().catch(() => null));
+  if (!liveRates) return null;
+  return convertAmountViaIls(1, fromCurrency, toCurrency, liveRates);
 }

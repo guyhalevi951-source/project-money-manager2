@@ -9,9 +9,11 @@ import {
   isCoreCurrency,
   type CoreCurrencyCode,
   type CurrencyCode,
+  type ExpenseCurrency,
 } from '../constants/currencies';
 import CurrencyLibraryModal from './CurrencyLibraryModal';
 import CurrencyFlag from './CurrencyFlag';
+import ExchangeRateSimulator from './ExchangeRateSimulator';
 
 const DEFAULT_DISPLAY_CURRENCY: CoreCurrencyCode = 'ILS';
 
@@ -84,7 +86,11 @@ function CurrencyPinSaveConfirmModal({
 const currencyCellClass =
   'absolute inset-0 flex flex-col items-center justify-center rounded-xl text-sm sm:text-base font-semibold tabular-nums transition-all min-h-0';
 
-function DisplayCurrencySelector() {
+interface DisplayCurrencySelectorProps {
+  recentExpenseCurrencies: ExpenseCurrency[];
+}
+
+function DisplayCurrencySelector({ recentExpenseCurrencies }: DisplayCurrencySelectorProps) {
   const {
     tr,
     displayCurrency,
@@ -283,6 +289,8 @@ function DisplayCurrencySelector() {
         onConfirm={handleConfirmSave}
         onDiscard={handleDiscardChanges}
       />
+
+      <ExchangeRateSimulator recentExpenseCurrencies={recentExpenseCurrencies} />
     </>
   );
 }

@@ -64,6 +64,11 @@ service cloud.firestore {
         && request.resource.data.subBudgetsByMonth is map;
     }
 
+    function isValidManualOverridesDoc() {
+      return request.resource.data.keys().hasAll(['overrides'])
+        && request.resource.data.overrides is map;
+    }
+
     match /users/{userId} {
       allow read, write: if false;
 
@@ -91,6 +96,15 @@ service cloud.firestore {
           && isPersistedAccount()
           && docId == 'data'
           && isValidSettingsDoc();
+        allow delete: if isOwner(userId) && isPersistedAccount() && docId == 'data';
+      }
+
+      match /manual_exchange_overrides/{docId} {
+        allow read: if isOwner(userId) && isPersistedAccount();
+        allow create, update: if isOwner(userId)
+          && isPersistedAccount()
+          && docId == 'data'
+          && isValidManualOverridesDoc();
         allow delete: if isOwner(userId) && isPersistedAccount() && docId == 'data';
       }
 

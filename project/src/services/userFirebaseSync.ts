@@ -1,4 +1,5 @@
 import {
+  deleteField,
   doc,
   getDoc,
   onSnapshot,
@@ -39,6 +40,13 @@ export interface UserCategoriesData {
   subBudgetsByMonth: Record<string, Record<string, number>>;
 }
 
+export interface CloudManualExchangeOverride {
+  baseCurrency: ExpenseCurrency;
+  quoteCurrency: ExpenseCurrency;
+  rate: number;
+  updatedAt: number;
+}
+
 export const EMPTY_USER_SETTINGS: UserSettings = {
   lang: 'he',
   keepOriginalValues: false,
@@ -67,6 +75,7 @@ export const shouldSyncToFirestore = (user: User | null): user is User =>
 const expensesRef = (uid: string) => doc(db, 'users', uid, 'expenses', DOC_ID);
 const categoriesRef = (uid: string) => doc(db, 'users', uid, 'categories', DOC_ID);
 const settingsRef = (uid: string) => doc(db, 'users', uid, 'settings', DOC_ID);
+const manualOverridesRef = (uid: string) => doc(db, 'users', uid, 'manual_exchange_overrides', DOC_ID);
 const legacyAppRef = (uid: string) => doc(db, 'users', uid, 'data', 'app');
 
 export type SnapshotMeta = { hasPendingWrites: boolean; exists: boolean };
@@ -109,6 +118,30 @@ function parseCategories(raw: Record<string, unknown> | undefined): UserCategori
 
 function parseExpenses(raw: Record<string, unknown> | undefined): StoredExpense[] {
   return (raw?.expenses as StoredExpense[] | undefined) ?? [];
+}
+
+function parseCloudManualOverrides(
+  raw: Record<string, unknown> | undefined,
+): CloudManualExchangeOverride[] {
+  if (!raw) return [];
+  const overridesRaw = (raw.overrides ?? {}) as Record<string, unknown>;
+  if (!overridesRaw || typeof overridesRaw !== 'object') return [];
+
+  return Object.values(overridesRaw)
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+    .map((item) => {
+      const baseCurrency = normalizeDisplayCurrency(item.baseCurrency);
+      const quoteCurrency = normalizeDisplayCurrency(item.quoteCurrency);
+      const rate = typeof item.rate === 'number' ? item.rate : 0;
+      const updatedAt = typeof item.updatedAt === 'number' ? item.updatedAt : Date.now();
+      return { baseCurrency, quoteCurrency, rate, updatedAt };
+    })
+    .filter(
+      (item) =>
+        item.baseCurrency !== item.quoteCurrency &&
+        Number.isFinite(item.rate) &&
+        item.rate > 0,
+    );
 }
 
 function hasFinancialLocalData(data: UserAppData): boolean {
@@ -340,6 +373,19 @@ export function subscribeSettings(
   return subscribeDoc(settingsRef(uid), parseSettings, onData, onError);
 }
 
+export function subscribeManualExchangeOverrides(
+  uid: string,
+  onData: (entries: CloudManualExchangeOverride[], meta: SnapshotMeta) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  return subscribeDoc(
+    manualOverridesRef(uid),
+    (raw) => parseCloudManualOverrides(raw),
+    onData,
+    onError,
+  );
+}
+
 export async function saveExpensesToCloud(uid: string, expenses: StoredExpense[]): Promise<void> {
   await setDoc(expensesRef(uid), { expenses, updatedAt: serverTimestamp() }, { merge: true });
 }
@@ -369,6 +415,75 @@ export async function saveSettingsToCloud(uid: string, settings: UserSettings): 
       displayCurrency: settings.displayCurrency,
       saved_colors: settings.saved_colors,
       custom_currencies: settings.custom_currencies,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+function normalizeOverridePair(
+  fromCurrency: ExpenseCurrency,
+  toCurrency: ExpenseCurrency,
+  rate: number,
+) {
+  if (!(Number.isFinite(rate) && rate > 0) || fromCurrency === toCurrency) return null;
+  if (fromCurrency < toCurrency) {
+    return { baseCurrency: fromCurrency, quoteCurrency: toCurrency, normalizedRate: rate };
+  }
+  return {
+    baseCurrency: toCurrency,
+    quoteCurrency: fromCurrency,
+    normalizedRate: 1 / rate,
+  };
+}
+
+function manualPairKey(baseCurrency: ExpenseCurrency, quoteCurrency: ExpenseCurrency): string {
+  return `${baseCurrency}__${quoteCurrency}`;
+}
+
+export async function saveManualExchangeOverrideToCloud(
+  uid: string,
+  fromCurrency: ExpenseCurrency,
+  toCurrency: ExpenseCurrency,
+  rate: number,
+): Promise<void> {
+  const normalized = normalizeOverridePair(fromCurrency, toCurrency, rate);
+  if (!normalized) return;
+  const pairKey = manualPairKey(normalized.baseCurrency, normalized.quoteCurrency);
+
+  await setDoc(
+    manualOverridesRef(uid),
+    {
+      overrides: {
+        [pairKey]: {
+          baseCurrency: normalized.baseCurrency,
+          quoteCurrency: normalized.quoteCurrency,
+          rate: normalized.normalizedRate,
+          updatedAt: Date.now(),
+        },
+      },
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+export async function deleteManualExchangeOverrideFromCloud(
+  uid: string,
+  fromCurrency: ExpenseCurrency,
+  toCurrency: ExpenseCurrency,
+): Promise<void> {
+  if (fromCurrency === toCurrency) return;
+  const baseCurrency = fromCurrency < toCurrency ? fromCurrency : toCurrency;
+  const quoteCurrency = fromCurrency < toCurrency ? toCurrency : fromCurrency;
+  const pairKey = manualPairKey(baseCurrency, quoteCurrency);
+
+  await setDoc(
+    manualOverridesRef(uid),
+    {
+      overrides: {
+        [pairKey]: deleteField(),
+      },
       updatedAt: serverTimestamp(),
     },
     { merge: true },

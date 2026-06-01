@@ -3,12 +3,14 @@ import { motion } from 'framer-motion';
 import { useEffect } from 'react';
 import { useLanguage } from '../LanguageContext';
 import DisplayCurrencySelector from './DisplayCurrencySelector';
+import type { ExpenseCurrency } from '../services/exchangeRateService';
 
 interface SettingsPageProps {
   onBack: () => void;
+  recentExpenseCurrencies: ExpenseCurrency[];
 }
 
-export default function SettingsPage({ onBack }: SettingsPageProps) {
+export default function SettingsPage({ onBack, recentExpenseCurrencies }: SettingsPageProps) {
   const {
     dir,
     lang,
@@ -149,7 +151,7 @@ export default function SettingsPage({ onBack }: SettingsPageProps) {
           </div>
         </div>
 
-        <DisplayCurrencySelector />
+        <DisplayCurrencySelector recentExpenseCurrencies={recentExpenseCurrencies} />
       </section>
     </motion.div>
   );
