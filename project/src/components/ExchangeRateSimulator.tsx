@@ -75,6 +75,26 @@ function formatRate(rate: number): string {
   return rate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 });
 }
 
+/** Shrinks conversion summary text on narrow screens when the full line gets long. */
+function getConversionRowFontSizePx(displayCharacterCount: number): number {
+  return Math.round(Math.max(11, Math.min(16, 18 - Math.max(0, displayCharacterCount - 10) * 0.5)));
+}
+
+function buildConversionSummaryLine(
+  amountInput: string,
+  mainCurrency: string,
+  secondaryAmount: number | null | undefined,
+  secondaryCurrency: string,
+): { displayText: string; characterCount: number } {
+  const amountStr = amountInput.trim() || '1';
+  const resultText =
+    secondaryAmount != null && Number.isFinite(secondaryAmount) && secondaryAmount > 0
+      ? formatRate(secondaryAmount)
+      : '-';
+  const displayText = `${amountStr} ${mainCurrency} = ${resultText} ${secondaryCurrency}`;
+  return { displayText, characterCount: displayText.length };
+}
+
 function getDefaultSecondaryCurrency(
   mainCurrency: CurrencyCode,
   recentExpenseCurrencies: ExpenseCurrency[],
@@ -736,6 +756,22 @@ export default function ExchangeRateSimulator({
     return typedSecondary;
   }, [secondaryAmountInput, displayUnitRate, summaryMainAmount]);
 
+  const conversionSummaryLayout = useMemo(() => {
+    const { characterCount } = buildConversionSummaryLine(
+      mainAmountInput,
+      mainCurrency,
+      summarySecondaryAmount,
+      secondaryCurrency,
+    );
+    const fontSizePx = getConversionRowFontSizePx(characterCount);
+    const amountStr = mainAmountInput.trim() || '1';
+    return {
+      fontSizePx,
+      inputFontSizePx: Math.max(12, fontSizePx),
+      inputWidthCh: Math.min(11, Math.max(4, amountStr.length + 1)),
+    };
+  }, [mainAmountInput, mainCurrency, summarySecondaryAmount, secondaryCurrency]);
+
   const copyConvertedAmount = useCallback(async () => {
     if (summarySecondaryAmount == null || !(summarySecondaryAmount > 0)) return;
     const text = formatRate(summarySecondaryAmount);
@@ -941,7 +977,7 @@ export default function ExchangeRateSimulator({
   return (
     <div
       dir={dir}
-      className="mt-5 rounded-2xl border border-blue-900/35 bg-gradient-to-b from-slate-950/80 to-slate-900/70 p-4 sm:p-5"
+      className="mt-5 max-w-full overflow-hidden rounded-2xl border border-blue-900/35 bg-gradient-to-b from-slate-950/80 to-slate-900/70 p-4 sm:p-5"
     >
       <h4 className="text-sm font-semibold text-blue-200">{tr('exchangeRateTitle')}</h4>
 
@@ -970,7 +1006,7 @@ export default function ExchangeRateSimulator({
           {renderSelector('secondary', secondaryCurrency, tr('exchangeRateSecondaryCurrency'))}
         </div>
 
-        <div className="grid grid-cols-1 gap-2 transition-all duration-300 ease-in-out sm:grid-cols-[minmax(0,auto)_minmax(0,1fr)] sm:items-start sm:gap-1.5">
+        <div className="grid min-w-0 max-w-full grid-cols-1 gap-2 transition-all duration-300 ease-in-out sm:grid-cols-[minmax(0,auto)_minmax(0,1fr)] sm:items-start sm:gap-1.5">
           <div className="flex w-full flex-col sm:w-max">
             <label className="mb-1.5 block w-full text-start text-xs font-medium text-neutral-400">
               {tr('date')}
@@ -985,7 +1021,7 @@ export default function ExchangeRateSimulator({
               />
             </div>
             <div className="mt-2 space-y-1.5">
-              <div className="flex w-max flex-row items-center gap-2">
+              <div className="flex w-full flex-col flex-wrap items-stretch gap-2 md:flex-row md:items-center">
                 {currenciesToPin.map((code) => (
                   <button
                     key={`pin-${code}`}
@@ -996,26 +1032,37 @@ export default function ExchangeRateSimulator({
                     {replaceTokens(tr('exchangeRatePinCurrency'), { code })}
                   </button>
                 ))}
-                <button
-                  type="button"
-                  onClick={toggleCommissionPanel}
-                  aria-expanded={commissionExpanded}
-                  className="shrink-0 whitespace-nowrap rounded-lg border border-violet-500/45 bg-violet-500/10 px-2.5 py-1.5 text-xs font-medium text-violet-200 transition-all hover:bg-violet-500/20 active:scale-[0.98]"
-                >
-                  {tr('exchangeRateAddCommission')}
-                </button>
-                {commissionExpanded && (
+                <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center">
                   <button
                     type="button"
-                    onClick={() => {
-                      setCommissionSaveError(null);
-                      setCommissionSaveModalOpen(true);
-                    }}
-                    className="shrink-0 whitespace-nowrap rounded-lg border border-violet-500/45 bg-violet-500/10 px-2.5 py-1.5 text-xs font-medium text-violet-200 transition-all hover:bg-violet-500/20 active:scale-[0.98]"
+                    onClick={() => setCommissionManagementExpanded((prev) => !prev)}
+                    aria-expanded={commissionManagementExpanded}
+                    className="order-first inline-flex min-h-[2.75rem] w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-violet-500/35 bg-violet-500/10 px-2.5 py-1.5 text-xs font-medium text-violet-100 transition-all hover:bg-violet-500/20 active:scale-[0.98] md:order-none md:w-auto"
                   >
-                    {tr('exchangeRateSaveCommission')}
+                    <Settings2 className="h-4 w-4 shrink-0" />
+                    {tr('exchangeRateManageCommissions')}
                   </button>
-                )}
+                  <button
+                    type="button"
+                    onClick={toggleCommissionPanel}
+                    aria-expanded={commissionExpanded}
+                    className="shrink-0 whitespace-nowrap rounded-lg border border-violet-500/45 bg-violet-500/10 px-2.5 py-1.5 text-xs font-medium text-violet-200 transition-all hover:bg-violet-500/20 active:scale-[0.98] md:w-auto"
+                  >
+                    {tr('exchangeRateAddCommission')}
+                  </button>
+                  {commissionExpanded && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCommissionSaveError(null);
+                        setCommissionSaveModalOpen(true);
+                      }}
+                      className="shrink-0 whitespace-nowrap rounded-lg border border-violet-500/45 bg-violet-500/10 px-2.5 py-1.5 text-xs font-medium text-violet-200 transition-all hover:bg-violet-500/20 active:scale-[0.98] md:w-auto"
+                    >
+                      {tr('exchangeRateSaveCommission')}
+                    </button>
+                  )}
+                </div>
               </div>
               {commissionExpanded && (
                 <div className="mt-1 w-full">
@@ -1051,15 +1098,16 @@ export default function ExchangeRateSimulator({
             <label className="mb-1.5 block w-full text-start text-xs font-medium text-neutral-400">
               {tr('exchangeRateConversionCalculation')}
             </label>
-            <div className="min-h-12 w-full flex-1 rounded-xl border border-blue-900/40 bg-blue-950/25 px-3 py-2.5 text-sm text-blue-100 transition-all duration-300 ease-in-out">
+            <div className="min-h-12 w-full max-w-full flex-1 overflow-hidden rounded-xl border border-blue-900/40 bg-blue-950/25 px-3 py-2.5 text-sm text-blue-100 transition-all duration-300 ease-in-out">
             {loadingRate ? (
               <span className="text-blue-200/80">{tr('exchangeRateLoadingHistorical')}</span>
             ) : (
-              <div className="flex min-h-[5.5rem] items-stretch gap-1 sm:gap-2">
+              <div className="flex min-h-[5.5rem] w-full flex-col flex-wrap items-start gap-2 md:flex-row md:items-center">
                 <div className="flex min-w-0 w-full flex-1 flex-col items-start justify-center gap-0.5">
                   <div
                     dir="ltr"
-                    className="inline-flex max-w-full flex-row flex-nowrap items-center gap-x-2 self-start"
+                    className="flex w-full min-w-0 flex-row items-center justify-center gap-1 overflow-hidden whitespace-nowrap md:gap-2 md:text-base"
+                    style={{ fontSize: `${conversionSummaryLayout.fontSizePx}px` }}
                   >
                     <input
                       type="number"
@@ -1068,30 +1116,34 @@ export default function ExchangeRateSimulator({
                       step="any"
                       value={mainAmountInput}
                       onChange={(event) => handleMainAmountChange(event.target.value)}
-                      className="h-10 w-24 min-w-[4.5rem] shrink-0 rounded-lg border border-blue-800/60 bg-blue-950/50 px-2.5 text-sm font-semibold text-blue-50 outline-none transition-all focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 [color-scheme:dark]"
+                      style={{
+                        fontSize: `${conversionSummaryLayout.inputFontSizePx}px`,
+                        width: `${conversionSummaryLayout.inputWidthCh}ch`,
+                      }}
+                      className="h-[2em] min-w-[3rem] max-w-[7rem] shrink-0 rounded-lg border border-blue-800/60 bg-blue-950/50 px-1.5 font-semibold leading-none text-blue-50 outline-none transition-all focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 [color-scheme:dark]"
                       aria-label={tr('exchangeRateMainAmountLabel')}
                     />
-                    <span dir="ltr" className="shrink-0 font-semibold text-blue-100">
+                    <span dir="ltr" className="shrink-0 font-semibold leading-none text-blue-100">
                       {mainCurrency}
                     </span>
-                    <span className="shrink-0 text-blue-300/80" aria-hidden>
+                    <span className="shrink-0 leading-none text-blue-300/80" aria-hidden>
                       =
                     </span>
-                    <LtrNumeric className="shrink-0 text-base font-semibold leading-none text-blue-50">
+                    <LtrNumeric className="min-w-0 shrink font-semibold leading-none text-blue-50">
                       {summarySecondaryAmount != null ? formatRate(summarySecondaryAmount) : '-'}
                     </LtrNumeric>
-                    <span dir="ltr" className="shrink-0 text-base font-semibold leading-none text-blue-100">
+                    <span dir="ltr" className="shrink-0 font-semibold leading-none text-blue-100">
                       {secondaryCurrency}
                     </span>
                     <button
                       type="button"
                       onClick={() => void copyConvertedAmount()}
                       disabled={summarySecondaryAmount == null || !(summarySecondaryAmount > 0)}
-                      className="inline-flex size-[1em] shrink-0 items-center justify-center rounded border border-blue-800/60 bg-blue-950/50 text-blue-200 transition-all hover:border-blue-700/80 hover:bg-blue-900/50 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
+                      className="inline-flex h-[1.35em] w-[1.35em] shrink-0 items-center justify-center rounded border border-blue-800/60 bg-blue-950/50 text-blue-200 transition-all hover:border-blue-700/80 hover:bg-blue-900/50 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
                       aria-label={tr('exchangeRateCopyAmount')}
                       title={copyFeedback ? tr('exchangeRateCopied') : tr('exchangeRateCopyAmount')}
                     >
-                      <Copy className="size-[0.65em]" strokeWidth={2.25} aria-hidden />
+                      <Copy className="h-[0.7em] w-[0.7em]" strokeWidth={2.25} aria-hidden />
                     </button>
                   </div>
                   {historicalRateUpdatedAt != null && (
@@ -1100,8 +1152,8 @@ export default function ExchangeRateSimulator({
                     </p>
                   )}
                   {showUnitRateLine && displayUnitRate != null && (
-                    <p className="mt-0.5 w-full self-start text-start text-xs text-blue-200/75">
-                      <LtrNumeric>
+                    <p className="mt-0.5 w-full max-w-full self-start break-words text-start text-xs text-blue-200/75">
+                      <LtrNumeric className="break-words">
                         {replaceTokens(
                           commissionActive
                             ? tr('exchangeRateUnitRateLineInclFee')
@@ -1117,31 +1169,29 @@ export default function ExchangeRateSimulator({
                   )}
                 </div>
                 {rateComparison && (
-                  <div className="ms-auto flex shrink-0 items-center gap-2 self-center py-2 sm:gap-2.5">
-                    <div className="flex min-h-[4.5rem] flex-col justify-center">
-                      <LtrNumeric
-                        className={`whitespace-nowrap text-4xl font-black leading-none ${
-                          rateComparison.trend === 'up' ? 'text-emerald-400' : 'text-rose-500'
-                        }`}
-                      >
-                        {rateComparison.percentText}
-                      </LtrNumeric>
-                      <span className="mt-1 text-xl font-semibold leading-tight text-neutral-100">
-                        {rateComparison.contextText}
-                      </span>
-                    </div>
+                  <div className="flex w-full shrink-0 flex-row items-center justify-center gap-2 self-stretch whitespace-nowrap py-2 md:ms-auto md:w-auto md:justify-end md:gap-2.5">
+                    <span className="text-sm font-semibold leading-tight text-neutral-100 md:text-xl">
+                      {rateComparison.contextText}
+                    </span>
                     <span
                       aria-hidden
-                      className={`text-[4rem] leading-none ${
+                      className={`text-3xl leading-none md:text-[4rem] ${
                         rateComparison.trend === 'up' ? 'text-emerald-500' : 'text-rose-600'
                       }`}
                     >
                       {rateComparison.trend === 'up' ? '⬆' : '⬇'}
                     </span>
+                    <LtrNumeric
+                      className={`text-2xl font-black leading-none md:text-4xl ${
+                        rateComparison.trend === 'up' ? 'text-emerald-400' : 'text-rose-500'
+                      }`}
+                    >
+                      {rateComparison.percentText}
+                    </LtrNumeric>
                   </div>
                 )}
                 {showNoTrendData && (
-                  <p className="ms-auto max-w-[9rem] shrink-0 self-center py-2 text-end text-xs leading-snug text-blue-200/60">
+                  <p className="w-full max-w-full shrink-0 self-stretch py-2 text-end text-xs leading-snug text-blue-200/60 md:ms-auto md:max-w-[9rem] md:self-center">
                     {tr('exchangeRateNoTrendData')}
                   </p>
                 )}
@@ -1177,15 +1227,6 @@ export default function ExchangeRateSimulator({
               {tr('exchangeRateManageManual')}
             </button>
 
-            <button
-              type="button"
-              onClick={() => setCommissionManagementExpanded((prev) => !prev)}
-              aria-expanded={commissionManagementExpanded}
-              className="inline-flex min-h-[2.75rem] items-center gap-1.5 rounded-xl border border-violet-500/35 bg-violet-500/10 px-3.5 text-sm font-medium text-violet-100 transition-colors hover:bg-violet-500/20"
-            >
-              <Settings2 className="h-4 w-4" />
-              {tr('exchangeRateManageCommissions')}
-            </button>
           </div>
 
           {manualExpanded && (
