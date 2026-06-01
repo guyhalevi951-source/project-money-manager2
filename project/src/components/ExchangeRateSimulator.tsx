@@ -931,14 +931,18 @@ export default function ExchangeRateSimulator({
 
         <div className="grid grid-cols-1 gap-2 transition-all duration-300 ease-in-out sm:grid-cols-[minmax(0,auto)_minmax(0,1fr)] sm:items-start sm:gap-1.5">
           <div className="flex w-full flex-col sm:w-max">
-            <label className="mb-1.5 block text-xs font-medium text-neutral-400">{tr('date')}</label>
-            <input
-              type="date"
-              value={dateIso}
-              onChange={(event) => setDateIso(event.target.value)}
-              max={toIsoDateLocal(new Date())}
-              className={`${controlBaseClass} w-full shrink-0 [color-scheme:dark]`}
-            />
+            <label className="mb-1.5 block w-full text-start text-xs font-medium text-neutral-400">
+              {tr('date')}
+            </label>
+            <div className="w-full">
+              <input
+                type="date"
+                value={dateIso}
+                onChange={(event) => setDateIso(event.target.value)}
+                max={toIsoDateLocal(new Date())}
+                className={`${controlBaseClass} w-full text-center [color-scheme:dark]`}
+              />
+            </div>
             <div className="mt-2 space-y-1.5">
               <div className="flex w-max flex-row items-center gap-2">
                 {currenciesToPin.map((code) => (
@@ -1002,19 +1006,19 @@ export default function ExchangeRateSimulator({
             </div>
           </div>
 
-          <div className="flex min-w-0 flex-1 flex-col transition-all duration-300 ease-in-out">
-            <label className="mb-1.5 block text-xs font-medium text-neutral-400">
+          <div className="flex min-w-0 flex-1 flex-col items-start transition-all duration-300 ease-in-out">
+            <label className="mb-1.5 block w-full text-start text-xs font-medium text-neutral-400">
               {tr('exchangeRateConversionCalculation')}
             </label>
-            <div className="min-h-12 flex-1 rounded-xl border border-blue-900/40 bg-blue-950/25 px-3 py-2.5 text-sm text-blue-100 transition-all duration-300 ease-in-out">
+            <div className="min-h-12 w-full flex-1 rounded-xl border border-blue-900/40 bg-blue-950/25 px-3 py-2.5 text-sm text-blue-100 transition-all duration-300 ease-in-out">
             {loadingRate ? (
               <span className="text-blue-200/80">{tr('exchangeRateLoadingHistorical')}</span>
             ) : (
-              <div className="flex min-h-[5.5rem] items-center gap-1 sm:gap-2">
-                <div className="min-w-0 flex-1 space-y-0.5">
+              <div className="flex min-h-[5.5rem] items-stretch gap-1 sm:gap-2">
+                <div className="flex min-w-0 w-full flex-1 flex-col items-start justify-center gap-0.5">
                   <div
                     dir="ltr"
-                    className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1"
+                    className="inline-flex max-w-full flex-row flex-nowrap items-center gap-x-2 self-start"
                   >
                     <input
                       type="number"
@@ -1023,45 +1027,39 @@ export default function ExchangeRateSimulator({
                       step="any"
                       value={mainAmountInput}
                       onChange={(event) => handleMainAmountChange(event.target.value)}
-                      className="h-10 w-24 min-w-[4.5rem] rounded-lg border border-blue-800/60 bg-blue-950/50 px-2.5 text-sm font-semibold text-blue-50 outline-none transition-all focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 [color-scheme:dark]"
+                      className="h-10 w-24 min-w-[4.5rem] shrink-0 rounded-lg border border-blue-800/60 bg-blue-950/50 px-2.5 text-sm font-semibold text-blue-50 outline-none transition-all focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 [color-scheme:dark]"
                       aria-label={tr('exchangeRateMainAmountLabel')}
                     />
-                    <span className="shrink-0 font-semibold text-blue-100">{mainCurrency}</span>
+                    <span dir="ltr" className="shrink-0 font-semibold text-blue-100">
+                      {mainCurrency}
+                    </span>
                     <span className="shrink-0 text-blue-300/80" aria-hidden>
                       =
                     </span>
-                    <div
-                      className="inline-flex min-w-0 shrink-0 items-center gap-2"
-                      dir={dir}
+                    <LtrNumeric className="shrink-0 text-base font-semibold leading-none text-blue-50">
+                      {summarySecondaryAmount != null ? formatRate(summarySecondaryAmount) : '-'}
+                    </LtrNumeric>
+                    <span dir="ltr" className="shrink-0 text-base font-semibold leading-none text-blue-100">
+                      {secondaryCurrency}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void copyConvertedAmount()}
+                      disabled={summarySecondaryAmount == null || !(summarySecondaryAmount > 0)}
+                      className="inline-flex size-[1em] shrink-0 items-center justify-center rounded border border-blue-800/60 bg-blue-950/50 text-blue-200 transition-all hover:border-blue-700/80 hover:bg-blue-900/50 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
+                      aria-label={tr('exchangeRateCopyAmount')}
+                      title={copyFeedback ? tr('exchangeRateCopied') : tr('exchangeRateCopyAmount')}
                     >
-                      <div
-                        dir="ltr"
-                        className="inline-flex min-w-0 items-center gap-x-1.5 text-base font-semibold leading-none"
-                      >
-                        <LtrNumeric className="text-blue-50">
-                          {summarySecondaryAmount != null ? formatRate(summarySecondaryAmount) : '-'}
-                        </LtrNumeric>
-                        <span className="shrink-0 text-blue-100">{secondaryCurrency}</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => void copyConvertedAmount()}
-                        disabled={summarySecondaryAmount == null || !(summarySecondaryAmount > 0)}
-                        className="inline-flex size-[1em] shrink-0 items-center justify-center rounded border border-blue-800/60 bg-blue-950/50 text-blue-200 transition-all hover:border-blue-700/80 hover:bg-blue-900/50 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
-                        aria-label={tr('exchangeRateCopyAmount')}
-                        title={copyFeedback ? tr('exchangeRateCopied') : tr('exchangeRateCopyAmount')}
-                      >
-                        <Copy className="size-[0.65em]" strokeWidth={2.25} aria-hidden />
-                      </button>
-                    </div>
+                      <Copy className="size-[0.65em]" strokeWidth={2.25} aria-hidden />
+                    </button>
                   </div>
                   {historicalRateUpdatedAt != null && (
-                    <p className="text-xs text-blue-200/75">
+                    <p className="w-full self-start text-start text-xs leading-snug text-blue-200/75">
                       {formatHistoricalRateUpdatedLabel(historicalRateUpdatedAt)}
                     </p>
                   )}
                   {showUnitRateLine && displayUnitRate != null && (
-                    <p className="mt-1 text-xs text-blue-200/75">
+                    <p className="mt-0.5 w-full self-start text-start text-xs text-blue-200/75">
                       <LtrNumeric>
                         {replaceTokens(
                           commissionActive
@@ -1078,7 +1076,7 @@ export default function ExchangeRateSimulator({
                   )}
                 </div>
                 {rateComparison && (
-                  <div className="my-auto ms-auto flex shrink-0 items-center gap-2 py-2 sm:gap-2.5">
+                  <div className="ms-auto flex shrink-0 items-center gap-2 self-center py-2 sm:gap-2.5">
                     <div className="flex min-h-[4.5rem] flex-col justify-center">
                       <LtrNumeric
                         className={`whitespace-nowrap text-4xl font-black leading-none ${
