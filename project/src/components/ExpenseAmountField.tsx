@@ -5,6 +5,11 @@ import { LtrNumeric, useLanguage } from '../LanguageContext';
 import { getCurrencyMeta, type CurrencyCode } from '../constants/currencies';
 import { usePinnedCurrencies } from '../hooks/usePinnedCurrencies';
 import { formatAmountWithSymbol } from '../services/displayCurrencyUtils';
+import { applyCommissionToAmount } from '../services/commissionMath';
+import {
+  getActiveCurrencyCommissionPercent,
+  subscribeCurrencyCommissionsUpdated,
+} from '../services/currencyCommissionService';
 import {
   convertAmountViaIls,
   fetchExchangeRates,
@@ -78,6 +83,7 @@ export default function ExpenseAmountField({
     () => needsRatesForFetch && !initialCachedRates,
   );
   const [error, setError] = useState(false);
+  const [commissionVersion, setCommissionVersion] = useState(0);
 
   const selectedMeta = useMemo(() => getCurrencyMeta(currency), [currency]);
 
@@ -187,6 +193,14 @@ export default function ExpenseAmountField({
     }
   }, [currency, displayCurrency, needsRatesForFetch, needsRatesForStorage, onRatesReadyChange]);
 
+  useEffect(
+    () =>
+      subscribeCurrencyCommissionsUpdated(() => {
+        setCommissionVersion((version) => version + 1);
+      }),
+    [],
+  );
+
   const parsedAmount = parseFloat(amount);
 
   const isMaxLengthReached = amount.length >= AMOUNT_INPUT_MAX_LENGTH;
@@ -207,6 +221,11 @@ export default function ExpenseAmountField({
     [isMaxLengthReached, parsedAmount, currency, displayCurrency],
   );
 
+  const activeCommissionPercent = useMemo(
+    () => getActiveCurrencyCommissionPercent(currency) ?? 0,
+    [currency, commissionVersion],
+  );
+
   const convertedDisplayAmount = useMemo(() => {
     if (!showDisplayPreview || !rates) return null;
 
@@ -225,13 +244,18 @@ export default function ExpenseAmountField({
     );
     if (converted == null) return null;
 
-    return Math.round(converted * 100) / 100;
-  }, [showDisplayPreview, rates, parsedAmount, currency, displayCurrency]);
+    const withCommission = applyCommissionToAmount(converted, activeCommissionPercent);
+    return Math.round(withCommission * 100) / 100;
+  }, [showDisplayPreview, rates, parsedAmount, currency, displayCurrency, activeCommissionPercent]);
 
   const displayPreviewFormatted = useMemo(() => {
     if (convertedDisplayAmount == null) return null;
-    return formatAmountWithSymbol(convertedDisplayAmount, displayCurrency);
-  }, [convertedDisplayAmount, displayCurrency]);
+    const base = formatAmountWithSymbol(convertedDisplayAmount, displayCurrency);
+    if (activeCommissionPercent > 0) {
+      return `${base} ${tr('inclFeeShort')}`;
+    }
+    return base;
+  }, [convertedDisplayAmount, displayCurrency, activeCommissionPercent, tr]);
 
   const amountInputSize = useMemo(() => getAmountInputWidth(amount), [amount]);
 

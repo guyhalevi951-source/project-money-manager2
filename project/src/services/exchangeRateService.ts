@@ -252,6 +252,32 @@ export function convertAmountViaIls(
   return baseAmount * toIlsToForeign;
 }
 
+/**
+ * Direct unit rate: 1 `fromCurrency` = result units of `toCurrency`.
+ * Uses the same ILS pivot as live rates: `ilsToForeign[to] / ilsToForeign[from]`.
+ */
+export function computeDirectUnitRateFromIlsPivot(
+  fromCurrency: string,
+  toCurrency: string,
+  ilsToForeign: Record<string, number>,
+): number | null {
+  if (fromCurrency === toCurrency) return 1;
+
+  const fromIlsToForeign = fromCurrency === 'ILS' ? 1 : ilsToForeign[fromCurrency];
+  const toIlsToForeign = toCurrency === 'ILS' ? 1 : ilsToForeign[toCurrency];
+
+  if (
+    typeof fromIlsToForeign !== 'number' ||
+    fromIlsToForeign <= 0 ||
+    typeof toIlsToForeign !== 'number' ||
+    toIlsToForeign <= 0
+  ) {
+    return null;
+  }
+
+  return toIlsToForeign / fromIlsToForeign;
+}
+
 export function hasExchangeRate(currency: string, rates: ExchangeRates): boolean {
   if (currency === 'ILS') return true;
   const rate = rates.ilsToForeign[currency];
@@ -484,7 +510,7 @@ export function needsNetworkHistoricalFetch(
 
 /**
  * Ensures `rate` means: 1 `fromCurrency` = `rate` units of `toCurrency`.
- * Repairs inverted historical/cache values when they are closer to 1/rate than rate.
+ * When live rates exist, repairs only clear inversions (rate ≈ 1/expected), never valid magnitudes.
  */
 function sanitizeDirectUnitRate(
   fromCurrency: string,
@@ -495,24 +521,19 @@ function sanitizeDirectUnitRate(
   if (!(rate > 0)) return rate;
 
   if (liveRates) {
-    const expected = convertAmountViaIls(1, fromCurrency, toCurrency, liveRates);
+    const expected = computeDirectUnitRateFromIlsPivot(
+      fromCurrency,
+      toCurrency,
+      liveRates.ilsToForeign,
+    );
     if (expected != null && expected > 0) {
-      const directError = Math.abs(rate - expected) / expected;
       const inverted = 1 / rate;
-      const inverseError = Math.abs(inverted - expected) / expected;
-      if (inverseError + 1e-9 < directError) {
+      const logDirect = Math.abs(Math.log(rate / expected));
+      const logInverted = Math.abs(Math.log(inverted / expected));
+      if (logInverted + 1e-12 < logDirect) {
         return inverted;
       }
     }
-  }
-
-  if (toCurrency === 'ILS' && fromCurrency !== 'ILS' && rate < 1) {
-    const inverted = 1 / rate;
-    if (inverted > 1) return inverted;
-  }
-  if (fromCurrency === 'ILS' && toCurrency !== 'ILS' && rate > 1) {
-    const inverted = 1 / rate;
-    if (inverted > 0 && inverted < 1) return inverted;
   }
 
   return rate;
@@ -535,6 +556,51 @@ async function fetchRateFromFrankfurter(
   } catch {
     return null;
   }
+}
+
+async function fetchIlsToForeignMapForDate(dateIso: string): Promise<Record<string, number> | null> {
+  const endpoints = [
+    `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${dateIso}/v1/currencies/ils.min.json`,
+    `https://${dateIso}.currency-api.pages.dev/v1/currencies/ils.min.json`,
+    `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${dateIso}/v1/currencies/ils.json`,
+    `https://${dateIso}.currency-api.pages.dev/v1/currencies/ils.json`,
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) continue;
+
+      const payload = (await response.json()) as Record<string, unknown>;
+      const ilsPayload = payload.ils as Record<string, unknown> | undefined;
+      if (!ilsPayload || typeof ilsPayload !== 'object') continue;
+
+      const ilsToForeign: Record<string, number> = { ILS: 1 };
+      for (const [code, value] of Object.entries(ilsPayload)) {
+        if (typeof value === 'number' && value > 0) {
+          ilsToForeign[code.toUpperCase()] = value;
+        }
+      }
+
+      if (Object.keys(ilsToForeign).length > 1) {
+        return ilsToForeign;
+      }
+    } catch {
+      // Try next endpoint.
+    }
+  }
+
+  return null;
+}
+
+async function fetchHistoricalRateViaIlsPivot(
+  dateIso: string,
+  fromCurrency: string,
+  toCurrency: string,
+): Promise<number | null> {
+  const ilsToForeign = await fetchIlsToForeignMapForDate(dateIso);
+  if (!ilsToForeign) return null;
+  return computeDirectUnitRateFromIlsPivot(fromCurrency, toCurrency, ilsToForeign);
 }
 
 async function fetchRateFromCurrencyApi(
@@ -616,6 +682,14 @@ export async function fetchHistoricalDirectRateSnapshot(
   const frankfurterRate = await fetchRateFromFrankfurter(safeDate, fromCurrency, toCurrency);
   if (frankfurterRate != null) {
     const sanitized = sanitizeDirectUnitRate(fromCurrency, toCurrency, frankfurterRate, liveRates);
+    setCachedCurrencyRate(safeDate, fromCurrency, toCurrency, sanitized, 'historical_api');
+    const stored = getCachedCurrencyRate(safeDate, fromCurrency, toCurrency);
+    return { rate: sanitized, fetchedAt: stored?.timestamp ?? Date.now() };
+  }
+
+  const ilsPivotRate = await fetchHistoricalRateViaIlsPivot(safeDate, fromCurrency, toCurrency);
+  if (ilsPivotRate != null) {
+    const sanitized = sanitizeDirectUnitRate(fromCurrency, toCurrency, ilsPivotRate, liveRates);
     setCachedCurrencyRate(safeDate, fromCurrency, toCurrency, sanitized, 'historical_api');
     const stored = getCachedCurrencyRate(safeDate, fromCurrency, toCurrency);
     return { rate: sanitized, fetchedAt: stored?.timestamp ?? Date.now() };

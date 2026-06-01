@@ -47,6 +47,12 @@ export interface CloudManualExchangeOverride {
   updatedAt: number;
 }
 
+export interface CloudCurrencyCommission {
+  currency: ExpenseCurrency;
+  percent: number;
+  updatedAt: number;
+}
+
 export const EMPTY_USER_SETTINGS: UserSettings = {
   lang: 'he',
   keepOriginalValues: false,
@@ -76,6 +82,7 @@ const expensesRef = (uid: string) => doc(db, 'users', uid, 'expenses', DOC_ID);
 const categoriesRef = (uid: string) => doc(db, 'users', uid, 'categories', DOC_ID);
 const settingsRef = (uid: string) => doc(db, 'users', uid, 'settings', DOC_ID);
 const manualOverridesRef = (uid: string) => doc(db, 'users', uid, 'manual_exchange_overrides', DOC_ID);
+const currencyCommissionsRef = (uid: string) => doc(db, 'users', uid, 'currency_commissions', DOC_ID);
 const legacyAppRef = (uid: string) => doc(db, 'users', uid, 'data', 'app');
 
 export type SnapshotMeta = { hasPendingWrites: boolean; exists: boolean };
@@ -118,6 +125,30 @@ function parseCategories(raw: Record<string, unknown> | undefined): UserCategori
 
 function parseExpenses(raw: Record<string, unknown> | undefined): StoredExpense[] {
   return (raw?.expenses as StoredExpense[] | undefined) ?? [];
+}
+
+function parseCloudCurrencyCommissions(
+  raw: Record<string, unknown> | undefined,
+): CloudCurrencyCommission[] {
+  if (!raw) return [];
+  const commissionsRaw = (raw.commissions ?? {}) as Record<string, unknown>;
+  if (!commissionsRaw || typeof commissionsRaw !== 'object') return [];
+
+  return Object.values(commissionsRaw)
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+    .map((item) => {
+      const currency = normalizeDisplayCurrency(item.currency);
+      const percent = typeof item.percent === 'number' ? item.percent : 0;
+      const updatedAt = typeof item.updatedAt === 'number' ? item.updatedAt : Date.now();
+      return { currency, percent, updatedAt };
+    })
+    .filter(
+      (item) =>
+        item.currency !== 'ILS' &&
+        Number.isFinite(item.percent) &&
+        item.percent > 0 &&
+        item.percent <= 100,
+    );
 }
 
 function parseCloudManualOverrides(
@@ -386,6 +417,19 @@ export function subscribeManualExchangeOverrides(
   );
 }
 
+export function subscribeCurrencyCommissions(
+  uid: string,
+  onData: (entries: CloudCurrencyCommission[], meta: SnapshotMeta) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  return subscribeDoc(
+    currencyCommissionsRef(uid),
+    (raw) => parseCloudCurrencyCommissions(raw),
+    onData,
+    onError,
+  );
+}
+
 export async function saveExpensesToCloud(uid: string, expenses: StoredExpense[]): Promise<void> {
   await setDoc(expensesRef(uid), { expenses, updatedAt: serverTimestamp() }, { merge: true });
 }
@@ -461,6 +505,49 @@ export async function saveManualExchangeOverrideToCloud(
           rate: normalized.normalizedRate,
           updatedAt: Date.now(),
         },
+      },
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+export async function saveCurrencyCommissionToCloud(
+  uid: string,
+  currency: ExpenseCurrency,
+  percent: number,
+): Promise<void> {
+  if (currency === 'ILS' || !(Number.isFinite(percent) && percent > 0 && percent <= 100)) {
+    return;
+  }
+
+  await setDoc(
+    currencyCommissionsRef(uid),
+    {
+      commissions: {
+        [currency]: {
+          currency,
+          percent,
+          updatedAt: Date.now(),
+        },
+      },
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+export async function deleteCurrencyCommissionFromCloud(
+  uid: string,
+  currency: ExpenseCurrency,
+): Promise<void> {
+  if (currency === 'ILS') return;
+
+  await setDoc(
+    currencyCommissionsRef(uid),
+    {
+      commissions: {
+        [currency]: deleteField(),
       },
       updatedAt: serverTimestamp(),
     },

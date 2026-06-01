@@ -52,11 +52,15 @@ import { LocalizedUserText, LtrNumeric, useLanguage } from './LanguageContext';
 import { localizeCategoryLabel } from './translations';
 import { symbolToCurrency } from './services/displayCurrencyUtils';
 import {
+  clearCloudCurrencyCommissions,
+  replaceCloudCurrencyCommissions,
+} from './services/currencyCommissionService';
+import { convertExpenseAmountToIls } from './services/expenseConversionService';
+import {
   clearCloudManualExchangeOverrides,
   replaceCloudManualExchangeOverrides,
 } from './services/manualExchangeOverrideService';
 import {
-  convertForeignToIls,
   currencySymbol,
   fetchExchangeRates,
   getCachedExchangeRates,
@@ -72,6 +76,7 @@ import {
   saveCategoriesToCloud,
   saveExpensesToCloud,
   saveSettingsToCloud,
+  subscribeCurrencyCommissions,
   subscribeManualExchangeOverrides,
   subscribeCategories,
   subscribeExpenses,
@@ -2272,6 +2277,7 @@ function App() {
     let unsubCategories: (() => void) | undefined;
     let unsubSettings: (() => void) | undefined;
     let unsubManualOverrides: (() => void) | undefined;
+    let unsubCurrencyCommissions: (() => void) | undefined;
     let initialExpenses = false;
     let initialCategories = false;
     let initialSettings = false;
@@ -2292,6 +2298,7 @@ function App() {
       if (!user) {
         setSettingsPersistence('local');
         clearCloudManualExchangeOverrides();
+        clearCloudCurrencyCommissions();
         resetAppData();
         setDataReady(true);
         return;
@@ -2300,6 +2307,7 @@ function App() {
       if (user.isAnonymous) {
         setSettingsPersistence('local');
         clearCloudManualExchangeOverrides();
+        clearCloudCurrencyCommissions();
         applyAppData(loadFromLocalStorage());
         setDataReady(true);
         return;
@@ -2411,6 +2419,19 @@ function App() {
             }
           },
         );
+
+        unsubCurrencyCommissions = subscribeCurrencyCommissions(
+          uid,
+          (entries, meta) => {
+            if (cancelled || meta.hasPendingWrites) return;
+            replaceCloudCurrencyCommissions(entries);
+          },
+          () => {
+            if (!cancelled) {
+              clearCloudCurrencyCommissions();
+            }
+          },
+        );
       } catch {
         if (!cancelled) {
           resetAppData();
@@ -2427,6 +2448,7 @@ function App() {
       unsubCategories?.();
       unsubSettings?.();
       unsubManualOverrides?.();
+      unsubCurrencyCommissions?.();
     };
   }, [user, authReady, applySettingsFromCloud, setSettingsPersistence]);
 
@@ -2558,7 +2580,7 @@ function App() {
       const rates = getCachedExchangeRates() ?? (await fetchExchangeRates().catch(() => null));
       if (!rates) return null;
 
-      const converted = convertForeignToIls(foreignAmount, newExpense.currency, rates);
+      const converted = convertExpenseAmountToIls(foreignAmount, newExpense.currency, rates);
       if (converted == null) return null;
 
       return Math.round(converted * 100) / 100;

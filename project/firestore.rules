@@ -69,6 +69,11 @@ service cloud.firestore {
         && request.resource.data.overrides is map;
     }
 
+    function isValidCurrencyCommissionsDoc() {
+      return request.resource.data.keys().hasAll(['commissions'])
+        && request.resource.data.commissions is map;
+    }
+
     match /users/{userId} {
       allow read, write: if false;
 
@@ -105,6 +110,15 @@ service cloud.firestore {
           && isPersistedAccount()
           && docId == 'data'
           && isValidManualOverridesDoc();
+        allow delete: if isOwner(userId) && isPersistedAccount() && docId == 'data';
+      }
+
+      match /currency_commissions/{docId} {
+        allow read: if isOwner(userId) && isPersistedAccount();
+        allow create, update: if isOwner(userId)
+          && isPersistedAccount()
+          && docId == 'data'
+          && isValidCurrencyCommissionsDoc();
         allow delete: if isOwner(userId) && isPersistedAccount() && docId == 'data';
       }
 

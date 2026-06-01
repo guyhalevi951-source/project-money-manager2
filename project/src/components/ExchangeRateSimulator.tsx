@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUpDown, ChevronDown, Plus, Settings2 } from 'lucide-react';
+import { ArrowUpDown, ChevronDown, Copy, Plus, Settings2, Trash2 } from 'lucide-react';
 import { auth } from '../firebase';
 import { LtrNumeric, useLanguage } from '../LanguageContext';
 import { usePinnedCurrencies } from '../hooks/usePinnedCurrencies';
@@ -9,9 +9,25 @@ import {
   type CurrencyCode,
   type ExpenseCurrency,
 } from '../constants/currencies';
+import CommissionSaveModal from './CommissionSaveModal';
 import CurrencyFlag from './CurrencyFlag';
 import CurrencyLibraryModal from './CurrencyLibraryModal';
 import {
+  applyCommissionToRate,
+  parseCommissionPercentInput,
+} from '../services/commissionMath';
+import {
+  getActiveCurrencyCommissionPercent,
+  listActiveCurrencyCommissions,
+  removeCloudCurrencyCommissionLocal,
+  removeLocalCurrencyCommission,
+  saveCurrencyCommission24h,
+  subscribeCurrencyCommissionsUpdated,
+  upsertCloudCurrencyCommission,
+  type CurrencyCommissionEntry,
+} from '../services/currencyCommissionService';
+import {
+  computeDirectUnitRateFromIlsPivot,
   fetchExchangeRates,
   fetchHistoricalDirectRateSnapshot,
   getLocalTodayIso,
@@ -29,6 +45,8 @@ import {
 } from '../services/manualExchangeOverrideService';
 import {
   deleteManualExchangeOverrideFromCloud,
+  deleteCurrencyCommissionFromCloud,
+  saveCurrencyCommissionToCloud,
   saveManualExchangeOverrideToCloud,
 } from '../services/userFirebaseSync';
 
@@ -126,6 +144,16 @@ export default function ExchangeRateSimulator({
     listActiveManualExchangeOverrides(),
   );
   const [, setClockTick] = useState(Date.now());
+  const [commissionExpanded, setCommissionExpanded] = useState(false);
+  const [commissionPercentInput, setCommissionPercentInput] = useState('2.5');
+  const [commissionSaveModalOpen, setCommissionSaveModalOpen] = useState(false);
+  const [commissionSaveError, setCommissionSaveError] = useState<string | null>(null);
+  const [commissionCloudSaving, setCommissionCloudSaving] = useState(false);
+  const [commissionManagementExpanded, setCommissionManagementExpanded] = useState(false);
+  const [storedCommissions, setStoredCommissions] = useState<CurrencyCommissionEntry[]>(() =>
+    listActiveCurrencyCommissions(),
+  );
+  const [copyFeedback, setCopyFeedback] = useState(false);
 
   const selectorContainerRef = useRef<HTMLDivElement>(null);
   const shouldSeedSecondaryRef = useRef(true);
@@ -183,6 +211,10 @@ export default function ExchangeRateSimulator({
     setStoredOverrides(listActiveManualExchangeOverrides());
   }, []);
 
+  const refreshStoredCommissions = useCallback(() => {
+    setStoredCommissions(listActiveCurrencyCommissions());
+  }, []);
+
   useEffect(() => {
     setMainCurrency(displayCurrency);
   }, [displayCurrency]);
@@ -224,12 +256,20 @@ export default function ExchangeRateSimulator({
   }, [dateIso, mainCurrency, secondaryCurrency, sessionOverride]);
 
   useEffect(() => {
-    const rateContextKey = `${dateIso}|${mainCurrency}|${secondaryCurrency}|${sessionOverride?.rate ?? resolvedRate ?? ''}`;
+    const rateContextKey = `${dateIso}|${mainCurrency}|${secondaryCurrency}|${sessionOverride?.rate ?? resolvedRate ?? ''}|${commissionExpanded}|${commissionPercentInput}`;
     if (rateContextKeyRef.current !== rateContextKey) {
       rateContextKeyRef.current = rateContextKey;
       shouldSeedSecondaryRef.current = true;
     }
-  }, [dateIso, mainCurrency, secondaryCurrency, resolvedRate, sessionOverride?.rate]);
+  }, [
+    dateIso,
+    mainCurrency,
+    secondaryCurrency,
+    resolvedRate,
+    sessionOverride?.rate,
+    commissionExpanded,
+    commissionPercentInput,
+  ]);
 
   useEffect(() => {
     if (mainCurrency === secondaryCurrency) return;
@@ -246,7 +286,12 @@ export default function ExchangeRateSimulator({
     if (!shouldSeedSecondaryRef.current) return;
 
     const mainAmount = parsePositiveAmount(mainAmountInput) ?? 1;
-    setSecondaryAmountInput(formatAmountForInput(mainAmount * unitRate));
+    const commissionPercent =
+      commissionExpanded && parseCommissionPercentInput(commissionPercentInput) > 0
+        ? parseCommissionPercentInput(commissionPercentInput)
+        : getActiveCurrencyCommissionPercent(secondaryCurrency) ?? 0;
+    const conversionRate = applyCommissionToRate(unitRate, commissionPercent);
+    setSecondaryAmountInput(formatAmountForInput(mainAmount * conversionRate));
     shouldSeedSecondaryRef.current = false;
   }, [
     resolvedRate,
@@ -255,6 +300,8 @@ export default function ExchangeRateSimulator({
     sessionOverride,
     mainAmountInput,
     dateIso,
+    commissionExpanded,
+    commissionPercentInput,
   ]);
 
   useEffect(() => {
@@ -331,20 +378,12 @@ export default function ExchangeRateSimulator({
         return;
       }
 
-      const fromIlsToForeign = mainCurrency === 'ILS' ? 1 : liveRates.ilsToForeign[mainCurrency];
-      const toIlsToForeign = secondaryCurrency === 'ILS' ? 1 : liveRates.ilsToForeign[secondaryCurrency];
-      if (
-        typeof fromIlsToForeign !== 'number' ||
-        fromIlsToForeign <= 0 ||
-        typeof toIlsToForeign !== 'number' ||
-        toIlsToForeign <= 0
-      ) {
-        setTodayMarketRate(null);
-        return;
-      }
-
-      const marketRate = toIlsToForeign / fromIlsToForeign;
-      setTodayMarketRate(Number.isFinite(marketRate) && marketRate > 0 ? marketRate : null);
+      const marketRate = computeDirectUnitRateFromIlsPivot(
+        mainCurrency,
+        secondaryCurrency,
+        liveRates.ilsToForeign,
+      );
+      setTodayMarketRate(marketRate != null && marketRate > 0 ? marketRate : null);
     };
 
     void fetchTodayMarketRate();
@@ -366,6 +405,34 @@ export default function ExchangeRateSimulator({
     const unsub = subscribeManualOverridesUpdated(() => refreshStoredOverrides());
     return unsub;
   }, [refreshStoredOverrides]);
+
+  const syncCommissionInputFromStorage = useCallback((currency: CurrencyCode) => {
+    const savedPercent = getActiveCurrencyCommissionPercent(currency);
+    if (savedPercent != null) {
+      setCommissionPercentInput(String(savedPercent));
+    }
+  }, []);
+
+  useEffect(() => {
+    syncCommissionInputFromStorage(secondaryCurrency);
+  }, [secondaryCurrency, syncCommissionInputFromStorage]);
+
+  useEffect(() => {
+    const unsub = subscribeCurrencyCommissionsUpdated(() => {
+      refreshStoredCommissions();
+      syncCommissionInputFromStorage(secondaryCurrency);
+      shouldSeedSecondaryRef.current = true;
+    });
+    return unsub;
+  }, [secondaryCurrency, syncCommissionInputFromStorage, refreshStoredCommissions]);
+
+  useEffect(() => {
+    if (!commissionManagementExpanded) return;
+    const timer = window.setInterval(() => {
+      refreshStoredCommissions();
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, [commissionManagementExpanded, refreshStoredCommissions]);
 
   useEffect(() => {
     if (!managementExpanded) return;
@@ -470,7 +537,13 @@ export default function ExchangeRateSimulator({
       const unitRate = hasActiveSession ? sessionOverride.rate : resolvedRate;
 
       if (unitRate != null && unitRate > 0) {
-        setSecondaryAmountInput(formatAmountForInput(mainAmount * unitRate));
+        const typed = parseCommissionPercentInput(commissionPercentInput);
+        const commissionPercent =
+          commissionExpanded && typed > 0
+            ? typed
+            : getActiveCurrencyCommissionPercent(secondaryCurrency) ?? 0;
+        const conversionRate = applyCommissionToRate(unitRate, commissionPercent);
+        setSecondaryAmountInput(formatAmountForInput(mainAmount * conversionRate));
         return;
       }
 
@@ -488,6 +561,8 @@ export default function ExchangeRateSimulator({
       sessionOverride,
       resolvedRate,
       dateIso,
+      commissionExpanded,
+      commissionPercentInput,
     ],
   );
 
@@ -615,16 +690,118 @@ export default function ExchangeRateSimulator({
     return Array.from(codes);
   }, [mainCurrency, pinnedCurrencies, secondaryCurrency]);
 
+  const activeCommissionPercent = useMemo(() => {
+    const typed = parseCommissionPercentInput(commissionPercentInput);
+    if (commissionExpanded && typed > 0) return typed;
+    return getActiveCurrencyCommissionPercent(secondaryCurrency) ?? 0;
+  }, [commissionExpanded, commissionPercentInput, secondaryCurrency]);
+
+  const commissionActive = activeCommissionPercent > 0;
+
+  const displayUnitRate = useMemo(() => {
+    if (effectiveUnitRate == null || !(effectiveUnitRate > 0)) return null;
+    return applyCommissionToRate(effectiveUnitRate, activeCommissionPercent);
+  }, [effectiveUnitRate, activeCommissionPercent]);
+
   const summaryMainAmount = parsePositiveAmount(mainAmountInput) ?? 1;
   const showUnitRateLine =
-    Math.abs(summaryMainAmount - 1) > 1e-9 && effectiveUnitRate != null && effectiveUnitRate > 0;
+    Math.abs(summaryMainAmount - 1) > 1e-9 && displayUnitRate != null && displayUnitRate > 0;
   const summarySecondaryAmount = useMemo(() => {
     const typedSecondary = parsePositiveAmount(secondaryAmountInput);
-    if (effectiveUnitRate != null && effectiveUnitRate > 0) {
-      return summaryMainAmount * effectiveUnitRate;
+    if (displayUnitRate != null && displayUnitRate > 0) {
+      return summaryMainAmount * displayUnitRate;
     }
     return typedSecondary;
-  }, [secondaryAmountInput, effectiveUnitRate, summaryMainAmount]);
+  }, [secondaryAmountInput, displayUnitRate, summaryMainAmount]);
+
+  const copyConvertedAmount = useCallback(async () => {
+    if (summarySecondaryAmount == null || !(summarySecondaryAmount > 0)) return;
+    const text = formatRate(summarySecondaryAmount);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyFeedback(true);
+      window.setTimeout(() => setCopyFeedback(false), 2000);
+    } catch {
+      /* clipboard unavailable */
+    }
+  }, [summarySecondaryAmount]);
+
+  const toggleCommissionPanel = useCallback(() => {
+    setCommissionExpanded((prev) => {
+      if (!prev) {
+        const saved = getActiveCurrencyCommissionPercent(secondaryCurrency);
+        setCommissionPercentInput(saved != null ? String(saved) : '2.5');
+        shouldSeedSecondaryRef.current = true;
+      }
+      return !prev;
+    });
+  }, [secondaryCurrency]);
+
+  const persistCommission24h = useCallback(() => {
+    const percent = parseCommissionPercentInput(commissionPercentInput);
+    if (!(percent > 0)) return;
+    saveCurrencyCommission24h(secondaryCurrency, percent);
+    refreshStoredCommissions();
+    setCommissionSaveModalOpen(false);
+    setCommissionSaveError(null);
+  }, [commissionPercentInput, refreshStoredCommissions, secondaryCurrency]);
+
+  const persistCommissionForever = useCallback(async () => {
+    const percent = parseCommissionPercentInput(commissionPercentInput);
+    if (!(percent > 0)) return;
+
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) {
+      setCommissionSaveError(tr('exchangeRateForeverSignedInOnly'));
+      return;
+    }
+
+    setCommissionCloudSaving(true);
+    setCommissionSaveError(null);
+    try {
+      upsertCloudCurrencyCommission(secondaryCurrency, percent);
+      await saveCurrencyCommissionToCloud(currentUser.uid, secondaryCurrency, percent);
+      refreshStoredCommissions();
+      setCommissionSaveModalOpen(false);
+    } catch {
+      setCommissionSaveError(tr('exchangeRateCloudSaveFailed'));
+    } finally {
+      setCommissionCloudSaving(false);
+    }
+  }, [commissionPercentInput, refreshStoredCommissions, secondaryCurrency, tr]);
+
+  const deleteCommission = useCallback(
+    async (entry: CurrencyCommissionEntry) => {
+      if (entry.source === 'local_24h') {
+        removeLocalCurrencyCommission(entry.currency);
+        refreshStoredCommissions();
+        if (entry.currency === secondaryCurrency) {
+          syncCommissionInputFromStorage(secondaryCurrency);
+          shouldSeedSecondaryRef.current = true;
+        }
+        return;
+      }
+
+      const currentUser = auth.currentUser;
+      if (!currentUser || currentUser.isAnonymous) {
+        setCloudError(tr('exchangeRateForeverCancelSignedInOnly'));
+        return;
+      }
+
+      try {
+        removeCloudCurrencyCommissionLocal(entry.currency);
+        await deleteCurrencyCommissionFromCloud(currentUser.uid, entry.currency);
+        refreshStoredCommissions();
+        if (entry.currency === secondaryCurrency) {
+          syncCommissionInputFromStorage(secondaryCurrency);
+          shouldSeedSecondaryRef.current = true;
+        }
+      } catch {
+        setCloudError(tr('exchangeRateCloudCancelFailed'));
+      }
+    },
+    [refreshStoredCommissions, secondaryCurrency, syncCommissionInputFromStorage, tr],
+  );
 
   const rateComparison = useMemo(() => {
     const todayIso = getLocalTodayIso();
@@ -632,7 +809,7 @@ export default function ExchangeRateSimulator({
     if (!(effectiveUnitRate != null && effectiveUnitRate > 0)) return null;
     if (!(todayMarketRate != null && todayMarketRate > 0)) return null;
 
-    const rawDeltaPercent = ((todayMarketRate - effectiveUnitRate) / effectiveUnitRate) * 100;
+    const rawDeltaPercent = ((effectiveUnitRate - todayMarketRate) / todayMarketRate) * 100;
     if (!Number.isFinite(rawDeltaPercent)) return null;
 
     const roundedDelta = Number(rawDeltaPercent.toFixed(2));
@@ -752,8 +929,8 @@ export default function ExchangeRateSimulator({
           {renderSelector('secondary', secondaryCurrency, tr('exchangeRateSecondaryCurrency'))}
         </div>
 
-        <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start">
-          <div className="flex w-full shrink-0 flex-col sm:w-52">
+        <div className="grid grid-cols-1 gap-2 transition-all duration-300 ease-in-out sm:grid-cols-[minmax(0,auto)_minmax(0,1fr)] sm:items-start sm:gap-1.5">
+          <div className="flex w-full flex-col sm:w-max">
             <label className="mb-1.5 block text-xs font-medium text-neutral-400">{tr('date')}</label>
             <input
               type="date"
@@ -762,31 +939,83 @@ export default function ExchangeRateSimulator({
               max={toIsoDateLocal(new Date())}
               className={`${controlBaseClass} w-full shrink-0 [color-scheme:dark]`}
             />
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {currenciesToPin.map((code) => (
+            <div className="mt-2 space-y-1.5">
+              <div className="flex w-max flex-row items-center gap-2">
+                {currenciesToPin.map((code) => (
+                  <button
+                    key={`pin-${code}`}
+                    type="button"
+                    onClick={() => pinTemporaryCurrency(code)}
+                    className="shrink-0 whitespace-nowrap rounded-lg border border-violet-500/45 bg-violet-500/10 px-2.5 py-1.5 text-xs font-medium text-violet-200 transition-all hover:bg-violet-500/20 active:scale-[0.98]"
+                  >
+                    {replaceTokens(tr('exchangeRatePinCurrency'), { code })}
+                  </button>
+                ))}
                 <button
-                  key={`pin-${code}`}
                   type="button"
-                  onClick={() => pinTemporaryCurrency(code)}
-                  className="rounded-lg border border-violet-500/45 bg-violet-500/10 px-2.5 py-1.5 text-xs font-medium text-violet-200 transition-all hover:bg-violet-500/20 active:scale-[0.98]"
+                  onClick={toggleCommissionPanel}
+                  aria-expanded={commissionExpanded}
+                  className="shrink-0 whitespace-nowrap rounded-lg border border-violet-500/45 bg-violet-500/10 px-2.5 py-1.5 text-xs font-medium text-violet-200 transition-all hover:bg-violet-500/20 active:scale-[0.98]"
                 >
-                  {replaceTokens(tr('exchangeRatePinCurrency'), { code })}
+                  {tr('exchangeRateAddCommission')}
                 </button>
-              ))}
+                {commissionExpanded && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCommissionSaveError(null);
+                      setCommissionSaveModalOpen(true);
+                    }}
+                    className="shrink-0 whitespace-nowrap rounded-lg border border-violet-500/45 bg-violet-500/10 px-2.5 py-1.5 text-xs font-medium text-violet-200 transition-all hover:bg-violet-500/20 active:scale-[0.98]"
+                  >
+                    {tr('exchangeRateSaveCommission')}
+                  </button>
+                )}
+              </div>
+              {commissionExpanded && (
+                <div className="mt-1 w-full">
+                  <div className="flex max-w-xs items-center gap-2">
+                    <label
+                      htmlFor="exchange-rate-commission-percent"
+                      className="shrink-0 text-xs font-medium text-neutral-400"
+                    >
+                      {tr('exchangeRateCommissionPercent')}
+                    </label>
+                    <input
+                      id="exchange-rate-commission-percent"
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      value={commissionPercentInput}
+                      onChange={(event) => {
+                        setCommissionPercentInput(event.target.value);
+                        shouldSeedSecondaryRef.current = true;
+                      }}
+                      className="h-8 w-16 rounded-lg border border-neutral-700 bg-neutral-800 px-2 text-xs text-neutral-100 outline-none transition-all focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/25 [color-scheme:dark]"
+                      aria-label={tr('exchangeRateCommissionPercent')}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex min-w-0 flex-1 flex-col transition-all duration-300 ease-in-out">
             <label className="mb-1.5 block text-xs font-medium text-neutral-400">
               {tr('exchangeRateConversionCalculation')}
             </label>
-            <div className="min-h-12 flex-1 rounded-xl border border-blue-900/40 bg-blue-950/25 px-3.5 py-3 text-sm text-blue-100">
+            <div className="min-h-12 flex-1 rounded-xl border border-blue-900/40 bg-blue-950/25 px-3 py-2.5 text-sm text-blue-100 transition-all duration-300 ease-in-out">
             {loadingRate ? (
               <span className="text-blue-200/80">{tr('exchangeRateLoadingHistorical')}</span>
             ) : (
-              <div className="flex min-h-[6rem] items-center justify-between gap-4">
-                <div className="min-w-0 space-y-0.5">
-                  <div className="flex min-w-0 items-center gap-2">
+              <div className="flex min-h-[5.5rem] items-center gap-1 sm:gap-2">
+                <div className="min-w-0 flex-1 space-y-0.5">
+                  <div
+                    dir="ltr"
+                    className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1"
+                  >
                     <input
                       type="number"
                       inputMode="decimal"
@@ -797,19 +1026,33 @@ export default function ExchangeRateSimulator({
                       className="h-10 w-24 min-w-[4.5rem] rounded-lg border border-blue-800/60 bg-blue-950/50 px-2.5 text-sm font-semibold text-blue-50 outline-none transition-all focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 [color-scheme:dark]"
                       aria-label={tr('exchangeRateMainAmountLabel')}
                     />
-                    <span dir="ltr" className="shrink-0 font-semibold text-blue-100">
-                      {mainCurrency}
-                    </span>
+                    <span className="shrink-0 font-semibold text-blue-100">{mainCurrency}</span>
                     <span className="shrink-0 text-blue-300/80" aria-hidden>
                       =
                     </span>
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <LtrNumeric className="text-base font-semibold text-blue-50">
-                        {summarySecondaryAmount != null ? formatRate(summarySecondaryAmount) : '-'}
-                      </LtrNumeric>
-                      <span dir="ltr" className="shrink-0 font-semibold text-blue-100">
-                        {secondaryCurrency}
-                      </span>
+                    <div
+                      className="inline-flex min-w-0 shrink-0 items-center gap-2"
+                      dir={dir}
+                    >
+                      <div
+                        dir="ltr"
+                        className="inline-flex min-w-0 items-center gap-x-1.5 text-base font-semibold leading-none"
+                      >
+                        <LtrNumeric className="text-blue-50">
+                          {summarySecondaryAmount != null ? formatRate(summarySecondaryAmount) : '-'}
+                        </LtrNumeric>
+                        <span className="shrink-0 text-blue-100">{secondaryCurrency}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void copyConvertedAmount()}
+                        disabled={summarySecondaryAmount == null || !(summarySecondaryAmount > 0)}
+                        className="inline-flex size-[1em] shrink-0 items-center justify-center rounded border border-blue-800/60 bg-blue-950/50 text-blue-200 transition-all hover:border-blue-700/80 hover:bg-blue-900/50 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
+                        aria-label={tr('exchangeRateCopyAmount')}
+                        title={copyFeedback ? tr('exchangeRateCopied') : tr('exchangeRateCopyAmount')}
+                      >
+                        <Copy className="size-[0.65em]" strokeWidth={2.25} aria-hidden />
+                      </button>
                     </div>
                   </div>
                   {historicalRateUpdatedAt != null && (
@@ -817,20 +1060,25 @@ export default function ExchangeRateSimulator({
                       {formatHistoricalRateUpdatedLabel(historicalRateUpdatedAt)}
                     </p>
                   )}
-                  {showUnitRateLine && (
+                  {showUnitRateLine && displayUnitRate != null && (
                     <p className="mt-1 text-xs text-blue-200/75">
                       <LtrNumeric>
-                        {replaceTokens(tr('exchangeRateUnitRateLine'), {
-                          mainCurrency,
-                          secondaryCurrency,
-                          rate: formatRate(effectiveUnitRate),
-                        })}
+                        {replaceTokens(
+                          commissionActive
+                            ? tr('exchangeRateUnitRateLineInclFee')
+                            : tr('exchangeRateUnitRateLine'),
+                          {
+                            mainCurrency,
+                            secondaryCurrency,
+                            rate: formatRate(displayUnitRate),
+                          },
+                        )}
                       </LtrNumeric>
                     </p>
                   )}
                 </div>
                 {rateComparison && (
-                  <div className="my-auto flex shrink-0 items-center gap-3 py-2">
+                  <div className="my-auto ms-auto flex shrink-0 items-center gap-2 py-2 sm:gap-2.5">
                     <div className="flex min-h-[4.5rem] flex-col justify-center">
                       <LtrNumeric
                         className={`whitespace-nowrap text-4xl font-black leading-none ${
@@ -883,6 +1131,16 @@ export default function ExchangeRateSimulator({
             >
               <Settings2 className="h-4 w-4" />
               {tr('exchangeRateManageManual')}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCommissionManagementExpanded((prev) => !prev)}
+              aria-expanded={commissionManagementExpanded}
+              className="inline-flex min-h-[2.75rem] items-center gap-1.5 rounded-xl border border-violet-500/35 bg-violet-500/10 px-3.5 text-sm font-medium text-violet-100 transition-colors hover:bg-violet-500/20"
+            >
+              <Settings2 className="h-4 w-4" />
+              {tr('exchangeRateManageCommissions')}
             </button>
           </div>
 
@@ -985,6 +1243,59 @@ export default function ExchangeRateSimulator({
             </div>
           )}
 
+          {commissionManagementExpanded && (
+            <div className="mt-3 rounded-xl border border-violet-500/25 bg-violet-500/5 p-3">
+              <p className="text-xs text-violet-200/80">{tr('exchangeRateActiveCommissions')}</p>
+              <div className="mt-2 space-y-2">
+                {storedCommissions.length === 0 ? (
+                  <p className="text-sm text-neutral-500">{tr('exchangeRateNoActiveCommissions')}</p>
+                ) : (
+                  storedCommissions.map((entry) => {
+                    const meta = getCurrencyMeta(entry.currency);
+                    let validityText = tr('exchangeRateSave24h');
+                    if (entry.source === 'cloud') {
+                      validityText = tr('exchangeRateValidForeverCloud');
+                    } else if (entry.expiresAt != null) {
+                      validityText = formatRemainingTime(entry.expiresAt);
+                    }
+
+                    return (
+                      <div
+                        key={`commission-${entry.currency}-${entry.source}`}
+                        className="flex flex-col gap-2 rounded-lg border border-violet-500/20 bg-neutral-950/60 p-2.5 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div className="min-w-0">
+                          <p dir="ltr" className="flex items-center gap-2 text-sm font-medium text-neutral-200">
+                            <CurrencyFlag countryCode={meta.countryCode} size="xs" alt={meta.name} />
+                            {entry.currency}
+                          </p>
+                          <p className="text-xs text-neutral-400">
+                            <LtrNumeric>
+                              {replaceTokens(tr('exchangeRateCommissionEntry'), {
+                                currency: entry.currency,
+                                percent: entry.percent,
+                              })}
+                            </LtrNumeric>
+                          </p>
+                          <p className="text-[11px] text-neutral-500">{validityText}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void deleteCommission(entry)}
+                          className="inline-flex min-h-[2.25rem] items-center justify-center gap-1.5 rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-200 transition-colors hover:bg-rose-500/20"
+                          aria-label={tr('exchangeRateDeleteCommission')}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                          {tr('exchangeRateDeleteCommission')}
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+
           {managementExpanded && (
             <div className="mt-3 rounded-xl border border-neutral-700 bg-neutral-900/70 p-3">
               <p className="text-xs text-neutral-400">{tr('exchangeRateActiveOverrides')}</p>
@@ -1044,6 +1355,18 @@ export default function ExchangeRateSimulator({
           )}
         </div>
       </div>
+
+      <CommissionSaveModal
+        open={commissionSaveModalOpen}
+        onClose={() => {
+          setCommissionSaveModalOpen(false);
+          setCommissionSaveError(null);
+        }}
+        onSave24h={persistCommission24h}
+        onSaveForever={() => void persistCommissionForever()}
+        savingForever={commissionCloudSaving}
+        errorMessage={commissionSaveError}
+      />
 
       <CurrencyLibraryModal
         open={libraryTarget !== null}
