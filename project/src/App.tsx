@@ -97,6 +97,7 @@ import {
   YAxis,
   CartesianGrid,
   ResponsiveContainer,
+  Tooltip,
 } from 'recharts';
 
 interface Expense {
@@ -180,6 +181,18 @@ const shiftISODate = (iso: string, dayOffset: number): string => {
   return toISODate(d);
 };
 
+const isSameCalendarMonth = (a: Date, b: Date): boolean =>
+  a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
+
+/** Daily chart date for a viewed month: today if it is the real-world current month, else the 1st. */
+const chartDateIsoForMonth = (monthDate: Date): string => {
+  const now = new Date();
+  if (isSameCalendarMonth(monthDate, now)) {
+    return toISODate(now);
+  }
+  return toISODate(new Date(monthDate.getFullYear(), monthDate.getMonth(), 1));
+};
+
 // Parse an ISO 'YYYY-MM-DD' into a local Date (midnight).
 const parseISO = (iso: string): Date => {
   const [y, m, d] = iso.split('-').map((n) => parseInt(n, 10));
@@ -243,6 +256,84 @@ const ANALYTICS_CHART_HEIGHT = 320;
 const ANALYTICS_DONUT_SIZE = 192;
 const ANALYTICS_LINE_HEIGHT = 240;
 const GENERAL_KEY = '__general__';
+/** Persisted on a month with no allocations so deletes are not re-filled by inheritance. */
+const SUB_BUDGET_MONTH_MARKER = '__sb_init__';
+
+const isSubBudgetCategoryKey = (key: string): boolean =>
+  key !== GENERAL_KEY && key !== SUB_BUDGET_MONTH_MARKER;
+
+const subBudgetCategoryKeys = (monthMap: Record<string, number>): string[] =>
+  Object.keys(monthMap).filter(isSubBudgetCategoryKey);
+
+const hasPositiveSubBudgets = (monthMap: Record<string, number>): boolean =>
+  subBudgetCategoryKeys(monthMap).some((k) => (monthMap[k] ?? 0) > 0);
+
+const markSubBudgetMonthInitialized = (monthMap: Record<string, number>): Record<string, number> => {
+  if (hasPositiveSubBudgets(monthMap)) {
+    const next = { ...monthMap };
+    delete next[SUB_BUDGET_MONTH_MARKER];
+    return next;
+  }
+  return { [SUB_BUDGET_MONTH_MARKER]: 0 };
+};
+
+const withoutSubBudgetKey = (
+  monthMap: Record<string, number>,
+  keyToRemove: string,
+): Record<string, number> =>
+  Object.fromEntries(
+    Object.entries(monthMap).filter(([k]) => k !== keyToRemove),
+  ) as Record<string, number>;
+
+const monthHasSubBudgetRecord = (
+  data: Record<string, Record<string, number>>,
+  monthKey: string,
+): boolean => Object.prototype.hasOwnProperty.call(data, monthKey);
+
+const compareSubBudgetCategoryKeys = (a: string, b: string): number =>
+  a.localeCompare(b, undefined, { sensitivity: 'base' });
+
+const mergeRemoteSubBudgetsByMonth = (
+  local: Record<string, Record<string, number>>,
+  remote: Record<string, Record<string, number>>,
+  editedMonths: Set<string>,
+): Record<string, Record<string, number>> => {
+  if (editedMonths.size === 0) {
+    return remote;
+  }
+  const merged = { ...remote };
+  for (const monthKey of editedMonths) {
+    if (!monthHasSubBudgetRecord(local, monthKey)) continue;
+    const localMonth = local[monthKey];
+    const remoteMonth = remote[monthKey] ?? {};
+    if (JSON.stringify(localMonth) !== JSON.stringify(remoteMonth)) {
+      merged[monthKey] = localMonth;
+    }
+  }
+  for (const monthKey of [...editedMonths]) {
+    if (
+      monthHasSubBudgetRecord(local, monthKey) &&
+      JSON.stringify(local[monthKey]) === JSON.stringify(remote[monthKey] ?? {})
+    ) {
+      editedMonths.delete(monthKey);
+    }
+  }
+  return merged;
+};
+
+const findNearestPriorMonthWithSubBudgets = (
+  targetMonthKey: string,
+  subBudgetsByMonth: Record<string, Record<string, number>>,
+): string | null => {
+  const targetOrder = monthOrder(targetMonthKey);
+  const candidates = Object.keys(subBudgetsByMonth).filter((key) => {
+    if (monthOrder(key) >= targetOrder) return false;
+    return hasPositiveSubBudgets(subBudgetsByMonth[key] ?? {});
+  });
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => monthOrder(b) - monthOrder(a));
+  return candidates[0] ?? null;
+};
 
 type SummaryView = 'week' | 'month' | 'year';
 
@@ -751,6 +842,40 @@ function defaultTrendSelectionIso(
   return lastWithAmount?.iso ?? series[series.length - 1].iso;
 }
 
+function useCoarsePointer(): boolean {
+  const [coarse, setCoarse] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+  });
+
+  useEffect(() => {
+    const mq = window.matchMedia('(hover: none) and (pointer: coarse)');
+    const onChange = () => setCoarse(mq.matches);
+    onChange();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  return coarse;
+}
+
+function trendPointFromChartState(
+  state: unknown,
+  dailySeries: TrendSeriesPoint[],
+): TrendSeriesPoint | null {
+  if (!state || typeof state !== 'object') return null;
+  const chartState = state as {
+    activeTooltipIndex?: number;
+    activeIndex?: number;
+    activePayload?: ReadonlyArray<{ payload?: TrendSeriesPoint }>;
+  };
+  const fromPayload = chartState.activePayload?.[0]?.payload;
+  if (fromPayload?.iso) return fromPayload;
+  const idx = chartState.activeTooltipIndex ?? chartState.activeIndex;
+  if (typeof idx === 'number' && dailySeries[idx]) return dailySeries[idx];
+  return null;
+}
+
 // Dark-themed analytics: swipeable category / daily donuts + daily trend line.
 function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
   const { tr, lang } = useLanguage();
@@ -758,6 +883,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
   const [anchor, setAnchor] = useState<Date>(() => new Date());
   const [chartSlide, setChartSlide] = useState(0);
   const [selectedTrendIso, setSelectedTrendIso] = useState<string | null>(null);
+  const isCoarsePointer = useCoarsePointer();
 
   const shift = (dir: number) => {
     setAnchor((a) => {
@@ -846,6 +972,41 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
     [dailySeries, selectedTrendIso],
   );
 
+  const applyTrendSelectionFromChartState = useCallback(
+    (state: unknown) => {
+      const point = trendPointFromChartState(state, dailySeries);
+      if (point) setSelectedTrendIso(point.iso);
+    },
+    [dailySeries],
+  );
+
+  const trendChartHostRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (chartSlide !== 2) return;
+    const root = trendChartHostRef.current;
+    if (!root) return;
+
+    const neutralizeRechartsFocus = () => {
+      root.querySelectorAll('.recharts-wrapper, .recharts-surface, svg').forEach((node) => {
+        if (node instanceof HTMLElement) {
+          node.setAttribute('tabindex', '-1');
+          node.style.outline = 'none';
+          node.style.boxShadow = 'none';
+        }
+        if (node instanceof SVGElement) {
+          node.setAttribute('focusable', 'false');
+          node.style.outline = 'none';
+        }
+      });
+    };
+
+    neutralizeRechartsFocus();
+    const observer = new MutationObserver(neutralizeRechartsFocus);
+    observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['tabindex'] });
+    return () => observer.disconnect();
+  }, [chartSlide, chartPeriodKey, dailySeries.length]);
+
   let periodLabel = '';
   let periodSubtitle = '';
   if (view === 'year') {
@@ -910,9 +1071,9 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
   return (
     <div className="max-w-2xl mx-auto">
       <div>
-        <div className="flex items-center gap-2 mb-4 text-neutral-100">
-          <PieChartIcon className="w-6 h-6 text-emerald-400" />
-          <h2 className="text-lg sm:text-xl font-bold">{tr('analyticsTitle')}</h2>
+        <div className="mb-4 flex items-center gap-2 text-neutral-100">
+          <PieChartIcon className="h-6 w-6 shrink-0 text-emerald-400" />
+          <h2 className="text-lg font-bold sm:text-xl">{tr('tabAnalytics')}</h2>
         </div>
 
         <div className="flex p-1 bg-neutral-900 border border-neutral-800 rounded-2xl">
@@ -981,7 +1142,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
 
         {/* Swipeable chart carousel — only mount active slide so Recharts gets real dimensions */}
         <div
-          className={`relative mt-6 w-full touch-pan-y rounded-2xl bg-neutral-950 ${
+          className={`relative mt-6 w-full touch-pan-y rounded-2xl bg-neutral-950 outline-none focus:outline-none focus-visible:outline-none ${
             chartSlide === 2 ? 'overflow-visible' : 'overflow-hidden'
           }`}
           style={{ height: ANALYTICS_CHART_HEIGHT, minHeight: ANALYTICS_CHART_HEIGHT }}
@@ -1001,13 +1162,17 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
             {chartSlide === 0 && (
               <motion.div
                 key={`slide-0-${chartPeriodKey}`}
-                className="absolute inset-0 w-full h-full px-1 flex items-center"
+                className="absolute inset-0 flex h-full w-full flex-col px-1"
                 style={{ height: ANALYTICS_CHART_HEIGHT }}
                 initial={{ opacity: 0, x: 24 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -24 }}
                 transition={{ duration: 0.28, ease: 'easeInOut' }}
               >
+                <h3 className="mb-3 shrink-0 text-center text-lg font-bold text-neutral-100 md:text-xl">
+                  {tr('chartCategorySplit')}
+                </h3>
+                <div className="flex min-h-0 flex-1 items-center">
                 <AnalyticsDonutPanel
                   chartKey={`category-donut-${chartPeriodKey}`}
                   total={total}
@@ -1015,22 +1180,27 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                   legend={categoryLegend}
                   paddingSlices={breakdown.length > 1}
                 />
+                </div>
               </motion.div>
             )}
 
             {chartSlide === 1 && (
               <motion.div
                 key={`slide-1-${chartPeriodKey}`}
-                className="absolute inset-0 w-full h-full px-1 flex items-center"
+                className="absolute inset-0 flex h-full w-full flex-col px-1"
                 style={{ height: ANALYTICS_CHART_HEIGHT }}
                 initial={{ opacity: 0, x: 24 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -24 }}
                 transition={{ duration: 0.28, ease: 'easeInOut' }}
               >
+                <h3 className="mb-3 shrink-0 text-center text-lg font-bold text-neutral-100 md:text-xl">
+                  {tr('chartDailySplit')}
+                </h3>
+                <div className="flex min-h-0 flex-1 items-center">
                 {dailyBreakdown.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center w-full h-full text-center px-4">
-                    <PieChartIcon className="w-10 h-10 text-neutral-600 mb-2" />
+                  <div className="flex h-full w-full flex-col items-center justify-center px-4 text-center">
+                    <PieChartIcon className="mb-2 h-10 w-10 text-neutral-600" />
                     <p className="text-sm text-neutral-400">{tr('noDailyBreakdown')}</p>
                   </div>
                 ) : (
@@ -1042,21 +1212,25 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                     paddingSlices={dailyBreakdown.length > 1}
                   />
                 )}
+                </div>
               </motion.div>
             )}
 
             {chartSlide === 2 && (
               <motion.div
                 key={`slide-2-${chartPeriodKey}`}
-                className="absolute inset-0 w-full h-full flex flex-col px-2 pt-2 overflow-visible z-20"
+                className="absolute inset-0 z-20 flex h-full w-full flex-col overflow-visible px-2 pt-2 outline-none focus:outline-none focus-visible:outline-none"
                 style={{ height: ANALYTICS_CHART_HEIGHT }}
                 initial={{ opacity: 0, x: 24 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -24 }}
                 transition={{ duration: 0.28, ease: 'easeInOut' }}
               >
-                <div className="flex items-start justify-between gap-3 mb-2 shrink-0">
-                  <div className="text-sm text-neutral-300 space-y-0.5">
+                <h3 className="mb-3 shrink-0 text-center text-lg font-bold text-neutral-100 md:text-xl">
+                  {tr('chartSpendingOverTime')}
+                </h3>
+                <div className="mb-2 flex shrink-0 items-start justify-between gap-3">
+                  <div className="space-y-0.5 text-sm text-neutral-300">
                     <p>
                       <span className="text-neutral-500">{tr('totalShort')}: </span>
                       <DisplayMoney amount={total} className="font-semibold text-neutral-100 inline-block" />
@@ -1074,37 +1248,59 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                   </div>
                 ) : (
                   <div
-                    className="w-full flex-1 min-h-0 overflow-visible relative z-20"
-                    style={{ height: ANALYTICS_LINE_HEIGHT, minHeight: ANALYTICS_LINE_HEIGHT }}
+                    ref={trendChartHostRef}
+                    className="insights-trend-chart relative z-20 min-h-0 w-full flex-1 overflow-visible outline-none [-webkit-tap-highlight-color:transparent] focus:outline-none focus-visible:outline-none active:outline-none [&_*:active]:shadow-none [&_*:active]:outline-none [&_*:focus-visible]:shadow-none [&_*:focus-visible]:outline-none [&_*:focus]:shadow-none [&_*:focus]:outline-none [&_.recharts-surface:active]:outline-none [&_.recharts-surface:focus-visible]:outline-none [&_.recharts-surface:focus]:outline-none [&_.recharts-wrapper:active]:outline-none [&_.recharts-wrapper:focus-visible]:outline-none [&_.recharts-wrapper:focus]:outline-none [&_canvas:active]:outline-none [&_canvas:focus]:outline-none [&_svg:active]:outline-none [&_svg:focus]:outline-none"
+                    style={{
+                      height: ANALYTICS_LINE_HEIGHT,
+                      minHeight: ANALYTICS_LINE_HEIGHT,
+                      outline: 'none',
+                    }}
+                    tabIndex={-1}
+                    onPointerDownCapture={() => {
+                      queueMicrotask(() => {
+                        trendChartHostRef.current
+                          ?.querySelectorAll('.recharts-wrapper, .recharts-surface, svg')
+                          .forEach((node) => {
+                            if (node instanceof HTMLElement) {
+                              node.setAttribute('tabindex', '-1');
+                              node.blur();
+                              node.style.outline = 'none';
+                              node.style.boxShadow = 'none';
+                            }
+                          });
+                      });
+                    }}
                   >
                     <ResponsiveContainer
                       width="100%"
                       height={ANALYTICS_LINE_HEIGHT}
                       key={`line-chart-${chartPeriodKey}`}
-                      className="overflow-visible"
+                      className="overflow-visible outline-none focus:outline-none focus-visible:outline-none"
+                      style={{ outline: 'none' }}
                     >
                       <LineChart
                         data={dailySeries}
                         margin={{ top: 28, right: 12, left: 4, bottom: 8 }}
-                        style={{ overflow: 'visible' }}
+                        className="outline-none focus:outline-none focus-visible:outline-none"
+                        style={{ overflow: 'visible', outline: 'none' }}
+                        onMouseMove={(state) => {
+                          if (isCoarsePointer) return;
+                          applyTrendSelectionFromChartState(state);
+                        }}
                         onClick={(state) => {
-                          if (!state) return;
-                          const chartState = state as {
-                            activeTooltipIndex?: number;
-                            activeIndex?: number;
-                            activePayload?: ReadonlyArray<{ payload?: TrendSeriesPoint }>;
-                          };
-                          const fromPayload = chartState.activePayload?.[0]?.payload;
-                          if (fromPayload) {
-                            setSelectedTrendIso(fromPayload.iso);
-                            return;
-                          }
-                          const idx = chartState.activeTooltipIndex ?? chartState.activeIndex;
-                          if (typeof idx === 'number' && dailySeries[idx]) {
-                            setSelectedTrendIso(dailySeries[idx].iso);
-                          }
+                          applyTrendSelectionFromChartState(state);
                         }}
                       >
+                        <Tooltip
+                          trigger={isCoarsePointer ? 'click' : 'hover'}
+                          cursor={{
+                            stroke: '#525252',
+                            strokeWidth: 1,
+                            strokeDasharray: '4 4',
+                          }}
+                          content={() => null}
+                          isAnimationActive={false}
+                        />
                         <CartesianGrid stroke="#2a2a2a" strokeDasharray="3 6" vertical={false} />
                         <XAxis
                           dataKey="dayLabel"
@@ -1144,7 +1340,10 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                             return (
                               <g
                                 key={`trend-dot-${index}`}
-                                style={{ cursor: 'pointer' }}
+                                style={{ cursor: 'pointer', outline: 'none' }}
+                                onMouseEnter={() => {
+                                  if (!isCoarsePointer) setSelectedTrendIso(p.iso);
+                                }}
                                 onClick={(event) => {
                                   event.stopPropagation();
                                   setSelectedTrendIso(p.iso);
@@ -1267,12 +1466,21 @@ interface Envelope {
   isGeneral: boolean;
 }
 
+const dashboardShortcutButtonClass =
+  'max-w-full rounded-xl border border-neutral-700 bg-neutral-800 px-2.5 py-2 text-xs font-medium leading-snug text-neutral-200 shadow-sm transition-all hover:border-neutral-600 hover:bg-neutral-700 active:scale-[0.98] md:px-3 md:text-sm';
+
+const dashboardTealActionButtonClass =
+  'flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 px-4 py-3 text-sm font-medium text-white shadow-md transition-all hover:from-emerald-600 hover:to-teal-700 hover:shadow-lg active:scale-[0.98] sm:w-auto sm:px-6 sm:text-base';
+
 interface SpendingDonutProps {
   dayExpenses: Expense[];
   categories: Category[];
   dateLabel: string;
   onPreviousDay: () => void;
   onNextDay: () => void;
+  isNotCurrentMonth: boolean;
+  onNavigateToAnalytics: () => void;
+  onNavigateToExpenses: () => void;
 }
 
 // Compact donut of how much was spent per category on the selected day.
@@ -1282,8 +1490,29 @@ function SpendingDonut({
   dateLabel,
   onPreviousDay,
   onNextDay,
+  isNotCurrentMonth,
+  onNavigateToAnalytics,
+  onNavigateToExpenses,
 }: SpendingDonutProps) {
   const { tr } = useLanguage();
+  const shortcutButtons = (
+    <div className="ms-auto flex max-w-full flex-row flex-wrap items-center justify-end gap-2 md:gap-3">
+      <button
+        type="button"
+        onClick={onNavigateToAnalytics}
+        className={dashboardShortcutButtonClass}
+      >
+        {tr('tabAnalytics')}
+      </button>
+      <button
+        type="button"
+        onClick={onNavigateToExpenses}
+        className={dashboardShortcutButtonClass}
+      >
+        {tr('tabExpenses')}
+      </button>
+    </div>
+  );
   const total = dayExpenses.reduce((s, e) => s + e.amount, 0);
   const breakdown = aggregateByCategory(dayExpenses, categories);
 
@@ -1294,25 +1523,25 @@ function SpendingDonut({
 
   return (
     <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 mb-6 sm:mb-8">
-      <h2 className="text-base sm:text-lg font-semibold text-neutral-100 flex items-center gap-2 mb-3">
-        <PieChartIcon className="w-5 h-5 text-emerald-400" />
+      <h2 className="mb-3 flex items-center gap-2 text-base font-semibold text-neutral-100 sm:text-lg">
+        <PieChartIcon className="h-5 w-5 shrink-0 text-emerald-400" />
         {tr('expenseByCategory')}
       </h2>
 
       <div
         dir="ltr"
-        className="flex items-center justify-center gap-2 sm:gap-3 mb-4"
+        className="mb-4 flex items-center justify-center gap-2 sm:gap-3"
       >
         <button
           type="button"
           onClick={onPreviousDay}
           aria-label={tr('prevDay')}
           title={tr('prevDay')}
-          className="shrink-0 w-9 h-9 flex items-center justify-center rounded-xl text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 border border-transparent hover:border-neutral-700 active:scale-95 transition-all"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-transparent text-neutral-400 transition-all hover:border-neutral-700 hover:bg-neutral-800 hover:text-neutral-100 active:scale-95"
         >
-          <ChevronLeft className="w-5 h-5" />
+          <ChevronLeft className="h-5 w-5" />
         </button>
-        <span className="text-sm font-medium text-neutral-400 min-w-[6.5rem] text-center tabular-nums">
+        <span className="min-w-[6.5rem] text-center text-sm font-medium tabular-nums text-neutral-400">
           {dateLabel}
         </span>
         <button
@@ -1320,52 +1549,67 @@ function SpendingDonut({
           onClick={onNextDay}
           aria-label={tr('nextDay')}
           title={tr('nextDay')}
-          className="shrink-0 w-9 h-9 flex items-center justify-center rounded-xl text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 border border-transparent hover:border-neutral-700 active:scale-95 transition-all"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-transparent text-neutral-400 transition-all hover:border-neutral-700 hover:bg-neutral-800 hover:text-neutral-100 active:scale-95"
         >
-          <ChevronRight className="w-5 h-5" />
+          <ChevronRight className="h-5 w-5" />
         </button>
       </div>
 
       {breakdown.length === 0 ? (
-        <div className="text-center py-8">
-          <div className="bg-neutral-800 w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3">
-            <TrendingDown className="w-7 h-7 text-neutral-500" />
-          </div>
-          <p className="text-neutral-400">{tr('noExpensesOnDate')}</p>
-          <p className="text-neutral-500 text-sm mt-1">{tr('addExpenseToSeeBreakdown')}</p>
-        </div>
-      ) : (
-        <div className="flex flex-col sm:flex-row items-center gap-6">
-          <div className="relative w-44 h-44 shrink-0">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={donutData}
-                  dataKey="value"
-                  nameKey="id"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius="64%"
-                  outerRadius="100%"
-                  paddingAngle={breakdown.length > 1 ? 2 : 0}
-                  stroke="#0a0a0a"
-                  strokeWidth={2}
-                  isAnimationActive={false}
-                >
-                  {donutData.map((s) => (
-                    <Cell key={s.id} fill={s.hex} />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <DisplayMoney amount={total} className="text-xl font-bold leading-none" />
-              <span className="text-[11px] text-neutral-500 mt-1">{tr('totalShort')}</span>
+        <>
+          <div className="mb-4 mt-2 max-w-full">{shortcutButtons}</div>
+          <div className="py-8 text-center">
+            <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-neutral-800">
+              <TrendingDown className="h-7 w-7 text-neutral-500" />
             </div>
+            <p className="text-neutral-400">{tr('noExpensesOnDate')}</p>
+            <p className="mt-1 text-sm text-neutral-500">{tr('addExpenseToSeeBreakdown')}</p>
+          </div>
+        </>
+      ) : (
+        <div className="flex max-w-full flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="order-2 flex min-w-0 flex-col items-center gap-6 sm:order-1 sm:flex-1 sm:flex-row sm:items-center">
+            <div className="relative h-44 w-44 shrink-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={donutData}
+                    dataKey="value"
+                    nameKey="id"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius="64%"
+                    outerRadius="100%"
+                    paddingAngle={breakdown.length > 1 ? 2 : 0}
+                    stroke="#0a0a0a"
+                    strokeWidth={2}
+                    isAnimationActive={false}
+                  >
+                    {donutData.map((s) => (
+                      <Cell key={s.id} fill={s.hex} />
+                    ))}
+                  </Pie>
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                <DisplayMoney amount={total} className="text-xl font-bold leading-none" />
+                <span className="mt-1 text-[11px] text-neutral-500">{tr('totalShort')}</span>
+              </div>
+            </div>
+
+            <CategoryBreakdownLegend items={breakdown} layout="grid" />
           </div>
 
-          <CategoryBreakdownLegend items={breakdown} layout="grid" />
+          <div className="order-1 mb-4 mt-2 max-w-full shrink-0 sm:order-2 sm:mb-0 sm:mt-0 sm:self-start">
+            {shortcutButtons}
+          </div>
         </div>
+      )}
+
+      {isNotCurrentMonth && (
+        <p className="mt-4 text-center text-xs leading-relaxed text-neutral-400">
+          {tr('expenseByCategoryPastMonthFootnote')}
+        </p>
       )}
     </div>
   );
@@ -1375,11 +1619,23 @@ interface DashboardCategoryChartProps {
   expenses: Expense[];
   categories: Category[];
   chartDateSetterRef: MutableRefObject<((iso: string) => void) | null>;
+  initialChartDateIso: string;
+  isCurrentCalendarMonth: boolean;
+  onNavigateToAnalytics: () => void;
+  onNavigateToExpenses: () => void;
 }
 
-// Mounts only on the Home tab; unmounting resets selectedChartDate to today.
-function DashboardCategoryChart({ expenses, categories, chartDateSetterRef }: DashboardCategoryChartProps) {
-  const [selectedChartDate, setSelectedChartDate] = useState(() => toISODate(new Date()));
+// Mounts only on the Home tab; remounting picks today (current month) or the 1st (other months).
+function DashboardCategoryChart({
+  expenses,
+  categories,
+  chartDateSetterRef,
+  initialChartDateIso,
+  isCurrentCalendarMonth,
+  onNavigateToAnalytics,
+  onNavigateToExpenses,
+}: DashboardCategoryChartProps) {
+  const [selectedChartDate, setSelectedChartDate] = useState(() => initialChartDateIso);
 
   useEffect(() => {
     chartDateSetterRef.current = setSelectedChartDate;
@@ -1408,6 +1664,9 @@ function DashboardCategoryChart({ expenses, categories, chartDateSetterRef }: Da
       dateLabel={formatChartDateLabel(selectedChartDate)}
       onPreviousDay={goToPreviousChartDay}
       onNextDay={goToNextChartDay}
+      isNotCurrentMonth={!isCurrentCalendarMonth}
+      onNavigateToAnalytics={onNavigateToAnalytics}
+      onNavigateToExpenses={onNavigateToExpenses}
     />
   );
 }
@@ -1447,7 +1706,10 @@ function SubBudgetTracker({
   }, {});
 
   const budgetedValues = useMemo(
-    () => Object.keys(subBudgets).filter((v) => subBudgets[v] > 0),
+    () =>
+      subBudgetCategoryKeys(subBudgets)
+        .filter((v) => subBudgets[v] > 0)
+        .sort(compareSubBudgetCategoryKeys),
     [subBudgets],
   );
 
@@ -1465,8 +1727,8 @@ function SubBudgetTracker({
 
   const totalSpent = monthExpenses.reduce((s, e) => s + e.amount, 0);
 
-  const envelopes: Envelope[] = budgetedValues
-    .map((v) => {
+  const envelopes: Envelope[] = useMemo(() => {
+    const list: Envelope[] = budgetedValues.map((v) => {
       const cat = lookupCategory(v, categories);
       return {
         key: v,
@@ -1478,21 +1740,31 @@ function SubBudgetTracker({
         spent: spentByCat[v] || 0,
         isGeneral: false,
       };
-    })
-    .sort((a, b) => b.allocated - a.allocated);
-
-  if (generalAllocated > 0 || unbudgetedSpent > 0) {
-    envelopes.push({
-      key: GENERAL_KEY,
-      label: tr('generalUnallocated'),
-      icon: Wallet,
-      color: 'bg-gray-500',
-      hex: '#737373',
-      allocated: generalAllocated,
-      spent: unbudgetedSpent,
-      isGeneral: true,
     });
-  }
+
+    if (generalAllocated > 0 || unbudgetedSpent > 0) {
+      list.push({
+        key: GENERAL_KEY,
+        label: tr('generalUnallocated'),
+        icon: Wallet,
+        color: 'bg-gray-500',
+        hex: '#737373',
+        allocated: generalAllocated,
+        spent: unbudgetedSpent,
+        isGeneral: true,
+      });
+    }
+
+    return list;
+  }, [
+    budgetedValues,
+    categories,
+    subBudgets,
+    spentByCat,
+    generalAllocated,
+    unbudgetedSpent,
+    tr,
+  ]);
 
   // Build the flat two-tone donut segments.
   const segments: {
@@ -1775,12 +2047,17 @@ function SubBudgetTracker({
                     </div>
                     {!env.isGeneral && (
                       <button
-                        onClick={() => onRemoveSubBudget(env.key)}
-                        className="shrink-0 text-neutral-500 hover:text-rose-400 hover:bg-rose-500/10 p-2 rounded-lg transition-all"
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onRemoveSubBudget(env.key);
+                        }}
+                        className="relative z-10 shrink-0 rounded-lg p-2 text-neutral-500 transition-all hover:bg-rose-500/10 hover:text-rose-400"
                         title={tr('removeSubBudget')}
                         aria-label={tr('removeSubBudget')}
                       >
-                        <X className="w-4 h-4" />
+                        <X className="h-4 w-4" />
                       </button>
                     )}
                   </div>
@@ -2077,6 +2354,7 @@ function App() {
   const [dataReady, setDataReady] = useState(false);
   const [settingsCloudReady, setSettingsCloudReady] = useState(false);
   const suppressCloudSaveRef = useRef(true);
+  const locallyEditedSubBudgetMonthsRef = useRef<Set<string>>(new Set());
   const skipNextSettingsSaveRef = useRef(false);
   const pendingAuthLangRef = useRef<'he' | 'en' | null>(null);
   const hadAuthenticatedUserRef = useRef(false);
@@ -2212,6 +2490,30 @@ function App() {
   const budget = budgetsByMonth[selectedMonthKey] ?? 0;
   const subBudgets = subBudgetsByMonth[selectedMonthKey] ?? {};
 
+  const patchSubBudgetsByMonth = useCallback(
+    (
+      monthKey: string,
+      patch: (monthMap: Record<string, number>) => Record<string, number>,
+    ) => {
+      locallyEditedSubBudgetMonthsRef.current.add(monthKey);
+      setSubBudgetsByMonth((prev) => {
+        const currentMonth = prev[monthKey] ?? {};
+        const patchedMonth = patch(currentMonth);
+        const next = { ...prev, [monthKey]: patchedMonth };
+        if (dataReady && user?.isAnonymous) {
+          saveToLocalStorage({
+            expenses,
+            customCategories,
+            budgetsByMonth,
+            subBudgetsByMonth: next,
+          });
+        }
+        return next;
+      });
+    },
+    [budgetsByMonth, customCategories, dataReady, expenses, user],
+  );
+
   useEffect(() => {
     const texts = new Set<string>();
     customCategories.forEach((c) => {
@@ -2223,7 +2525,7 @@ function App() {
       texts.add(e.description);
     });
     Object.values(subBudgetsByMonth).forEach((monthMap) => {
-      Object.keys(monthMap).forEach((key) => texts.add(key));
+      subBudgetCategoryKeys(monthMap).forEach((key) => texts.add(key));
     });
     void ensureUserContents(Array.from(texts));
   }, [customCategories, expenses, subBudgetsByMonth, ensureUserContents, lang, keepOriginalValues]);
@@ -2233,8 +2535,11 @@ function App() {
   // sub-budgets from the nearest prior month that has data.
   useEffect(() => {
     const hasBudget = budgetsByMonth[selectedMonthKey] !== undefined;
-    const hasSubBudgets = subBudgetsByMonth[selectedMonthKey] !== undefined;
-    if (hasBudget && hasSubBudgets) return;
+    const hasExplicitSubBudgetMonth = monthHasSubBudgetRecord(
+      subBudgetsByMonth,
+      selectedMonthKey,
+    );
+    if (hasBudget && hasExplicitSubBudgetMonth) return;
 
     const sourceMonthKey = findNearestPriorMonthWithData(
       selectedMonthKey,
@@ -2248,12 +2553,19 @@ function App() {
       setBudgetsByMonth((prev) => ({ ...prev, [selectedMonthKey]: inheritedBudget }));
     }
 
-    if (!hasSubBudgets && subBudgetsByMonth[sourceMonthKey] !== undefined) {
-      const inheritedSubBudgets = subBudgetsByMonth[sourceMonthKey] ?? {};
-      setSubBudgetsByMonth((prev) => ({
-        ...prev,
-        [selectedMonthKey]: { ...inheritedSubBudgets },
-      }));
+    if (!hasExplicitSubBudgetMonth) {
+      const subSourceMonthKey = findNearestPriorMonthWithSubBudgets(
+        selectedMonthKey,
+        subBudgetsByMonth,
+      );
+      if (subSourceMonthKey) {
+        const inheritedSubBudgets = { ...(subBudgetsByMonth[subSourceMonthKey] ?? {}) };
+        delete inheritedSubBudgets[SUB_BUDGET_MONTH_MARKER];
+        setSubBudgetsByMonth((prev) => ({
+          ...prev,
+          [selectedMonthKey]: inheritedSubBudgets,
+        }));
+      }
     }
   }, [selectedMonthKey, budgetsByMonth, subBudgetsByMonth]);
 
@@ -2265,6 +2577,7 @@ function App() {
   };
 
   const resetAppData = () => {
+    locallyEditedSubBudgetMonthsRef.current.clear();
     setExpenses([]);
     setCustomCategories([]);
     setBudgetsByMonth({});
@@ -2395,11 +2708,14 @@ function App() {
                 ? prev
                 : data.budgetsByMonth,
             );
-            setSubBudgetsByMonth((prev) =>
-              JSON.stringify(prev) === JSON.stringify(data.subBudgetsByMonth)
-                ? prev
-                : data.subBudgetsByMonth,
-            );
+            setSubBudgetsByMonth((prev) => {
+              const merged = mergeRemoteSubBudgetsByMonth(
+                prev,
+                data.subBudgetsByMonth,
+                locallyEditedSubBudgetMonthsRef.current,
+              );
+              return JSON.stringify(prev) === JSON.stringify(merged) ? prev : merged;
+            });
             if (!initialCategories) {
               initialCategories = true;
               markReadyIfComplete();
@@ -2586,7 +2902,7 @@ function App() {
     const amount = parseFloat(budgetInput);
     if (isNaN(amount) || amount < 0) return;
 
-    const hasAllocations = Object.values(subBudgets).some((v) => v > 0);
+    const hasAllocations = hasPositiveSubBudgets(subBudgets);
     if (hasAllocations) {
       setPendingBudget(amount);
       setShowBudgetModal(true);
@@ -2603,7 +2919,7 @@ function App() {
 
     if (mode === 'reset') {
       // Wipe this month's allocations only.
-      setSubBudgetsByMonth((prev) => ({ ...prev, [selectedMonthKey]: {} }));
+      patchSubBudgetsByMonth(selectedMonthKey, () => markSubBudgetMonthInitialized({}));
     }
 
     setBudgetInput('');
@@ -2756,37 +3072,53 @@ function App() {
     }
 
     const key = value as string;
-    setSubBudgetsByMonth((prev) => ({
-      ...prev,
-      [selectedMonthKey]: { ...(prev[selectedMonthKey] ?? {}), [key]: amount },
-    }));
+    patchSubBudgetsByMonth(selectedMonthKey, (monthMap) =>
+      markSubBudgetMonthInitialized({
+        ...monthMap,
+        [key]: amount,
+      }),
+    );
   };
 
   const handleSetSubBudget = (value: string, amount: number) => {
-    setSubBudgetsByMonth((prev) => {
-      const monthMap = { ...(prev[selectedMonthKey] ?? {}) };
-      if (!(amount > 0)) delete monthMap[value];
-      else monthMap[value] = amount;
-      return { ...prev, [selectedMonthKey]: monthMap };
+    if (!isSubBudgetCategoryKey(value)) return;
+    patchSubBudgetsByMonth(selectedMonthKey, (monthMap) => {
+      const next =
+        amount > 0
+          ? { ...monthMap, [value]: amount }
+          : withoutSubBudgetKey(monthMap, value);
+      return markSubBudgetMonthInitialized(next);
     });
   };
 
   const handleRemoveSubBudget = (value: string) => {
-    setSubBudgetsByMonth((prev) => {
-      const monthMap = { ...(prev[selectedMonthKey] ?? {}) };
-      delete monthMap[value];
-      return { ...prev, [selectedMonthKey]: monthMap };
+    if (!isSubBudgetCategoryKey(value)) return;
+    patchSubBudgetsByMonth(selectedMonthKey, (monthMap) => {
+      if (!(value in monthMap)) return monthMap;
+      return markSubBudgetMonthInitialized(withoutSubBudgetKey(monthMap, value));
     });
   };
 
   // Month navigation (selectedMonthKey is derived above with budget/subBudgets).
   const monthLabel = selectedDate.toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US', { month: 'long', year: 'numeric' });
   const isCurrentMonth = selectedMonthKey === monthKeyOfDate(new Date());
-  const goToMonth = (offset: number) =>
-    setSelectedDate((d) => new Date(d.getFullYear(), d.getMonth() + offset, 1));
+  const syncCategoryChartDateForMonth = (monthDate: Date) => {
+    chartDateSetterRef.current?.(chartDateIsoForMonth(monthDate));
+  };
+
+  const goToMonth = (offset: number) => {
+    setSelectedDate((d) => {
+      const next = new Date(d.getFullYear(), d.getMonth() + offset, 1);
+      syncCategoryChartDateForMonth(next);
+      return next;
+    });
+  };
+
   const goToCurrentMonth = () => {
     const now = new Date();
-    setSelectedDate(new Date(now.getFullYear(), now.getMonth(), 1));
+    const next = new Date(now.getFullYear(), now.getMonth(), 1);
+    syncCategoryChartDateForMonth(now);
+    setSelectedDate(next);
   };
 
   // Expenses for the selected month only (filtered by ISO date).
@@ -2912,15 +3244,20 @@ function App() {
       >
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
           <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="bg-gradient-to-br from-emerald-500 to-teal-600 p-2.5 rounded-xl shadow-lg shadow-emerald-500/20 shrink-0">
-                <Wallet className="w-6 h-6 text-white" />
+            <button
+              type="button"
+              onClick={() => handleTabSelect('dashboard')}
+              aria-label={tr('tabDashboard')}
+              className="flex min-w-0 cursor-pointer items-center gap-3 rounded-xl text-start outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-emerald-500/50 active:opacity-80"
+            >
+              <div className="shrink-0 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 p-2.5 shadow-lg shadow-emerald-500/20">
+                <Wallet className="h-6 w-6 text-white" />
               </div>
               <div className="min-w-0">
-                <h1 className="text-lg sm:text-2xl font-bold text-neutral-100 truncate">{tr('appName')}</h1>
-                <p className="text-neutral-400 text-xs truncate hidden sm:block">{tr('appTagline')}</p>
+                <h1 className="truncate text-lg font-bold text-neutral-100 sm:text-2xl">{tr('appName')}</h1>
+                <p className="hidden truncate text-xs text-neutral-400 sm:block">{tr('appTagline')}</p>
               </div>
-            </div>
+            </button>
 
             <div className="flex items-center gap-2 sm:gap-3 shrink-0">
               <UserProfileMenu
@@ -3038,6 +3375,58 @@ function App() {
           </div>
         </div>
 
+            {/* Monthly budget setter */}
+            <div className="mb-4 w-full rounded-2xl border border-neutral-800 bg-neutral-900 p-4 shadow-lg shadow-black/20 sm:mb-6 sm:p-6">
+              <h2 className="mb-4 flex items-center gap-2 text-base font-semibold text-neutral-100 sm:text-lg">
+                <Wallet className="h-5 w-5 shrink-0 text-emerald-400" />
+                {tr('addMonthlyBudget')}
+              </h2>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-4">
+                <div className="min-w-0 flex-1 sm:max-w-xs">
+                  <label className="mb-2 block text-sm font-medium text-neutral-300">
+                    {tr('budgetAmountLabel')}
+                  </label>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    value={budgetInput}
+                    onChange={(e) => setBudgetInput(e.target.value)}
+                    placeholder={
+                      budget > 0
+                        ? `${tr('currentAmountPrefix')}: ${formatMoney(budget)}`
+                        : tr('enterAmount')
+                    }
+                    className="w-full rounded-xl border border-neutral-700 bg-neutral-800 px-4 py-3 text-base text-neutral-100 placeholder-neutral-500 outline-none transition-all focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 sm:text-lg"
+                    min="0"
+                    step="100"
+                  />
+                </div>
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:gap-3">
+                  <button
+                    type="button"
+                    onClick={handleSetBudget}
+                    className={dashboardTealActionButtonClass}
+                  >
+                    {showBudgetSaved ? (
+                      <>
+                        <Check className="h-5 w-5" />
+                        {tr('budgetSaved')}
+                      </>
+                    ) : (
+                      tr('updateBudget')
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleTabSelect('subbudgets')}
+                    className={dashboardTealActionButtonClass}
+                  >
+                    {tr('tabSubbudgets')}
+                  </button>
+                </div>
+              </div>
+            </div>
+
         {/* Add Expense Form */}
         <div className="relative isolate z-10 bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 mb-6 sm:mb-8">
           <h2 className="text-base sm:text-lg font-semibold text-neutral-100 mb-4 sm:mb-6 flex items-center gap-2">
@@ -3143,6 +3532,10 @@ function App() {
               expenses={expenses}
               categories={allCategories}
               chartDateSetterRef={chartDateSetterRef}
+              initialChartDateIso={chartDateIsoForMonth(selectedDate)}
+              isCurrentCalendarMonth={isCurrentMonth}
+              onNavigateToAnalytics={() => handleTabSelect('analytics')}
+              onNavigateToExpenses={() => handleTabSelect('expenses')}
             />
           </>
         )}
@@ -3156,43 +3549,6 @@ function App() {
         {activeTab === 'subbudgets' && (
           <>
             {monthSelector}
-
-            {/* Global budget setter */}
-            <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 mb-6 sm:mb-8">
-              <h2 className="text-base sm:text-lg font-semibold text-neutral-100 mb-4">{tr('setMonthlyBudget')}</h2>
-              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 sm:items-end">
-                <div className="flex-1 sm:max-w-xs">
-                  <label className="block text-sm font-medium text-neutral-300 mb-2">{tr('budgetAmountLabel')}</label>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    value={budgetInput}
-                    onChange={(e) => setBudgetInput(e.target.value)}
-                    placeholder={
-                      budget > 0
-                        ? `${tr('currentAmountPrefix')}: ${formatMoney(budget)}`
-                        : tr('enterAmount')
-                    }
-                    className="w-full px-4 py-3 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base sm:text-lg"
-                    min="0"
-                    step="100"
-                  />
-                </div>
-                <button
-                  onClick={handleSetBudget}
-                  className="w-full sm:w-auto bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-8 py-3 rounded-xl font-medium hover:from-emerald-600 hover:to-teal-700 transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 active:scale-[0.98]"
-                >
-                  {showBudgetSaved ? (
-                    <>
-                      <Check className="w-5 h-5" />
-                      {tr('budgetSaved')}
-                    </>
-                  ) : (
-                    tr('updateBudget')
-                  )}
-                </button>
-              </div>
-            </div>
 
             <SubBudgetTracker
               budget={budget}

@@ -116,9 +116,9 @@ const he: TranslationDict = {
 
   // Nav / tabs
   tabDashboard: 'בית',
-  tabAnalytics: 'תובנות',
-  tabSubbudgets: 'תקציבים',
-  tabExpenses: 'הוצאות',
+  tabAnalytics: 'תובנות וסיכומים נוספים',
+  tabSubbudgets: 'הוספת וניהול תתי תקציבים',
+  tabExpenses: 'היסטוריית הוצאות',
   closeMenu: 'סגור תפריט',
 
   // Time filters
@@ -164,6 +164,7 @@ const he: TranslationDict = {
   updateBudget: 'עדכן תקציב',
   budgetSaved: 'נשמר!',
   setMonthlyBudget: 'הגדר תקציב חודשי',
+  addMonthlyBudget: 'הוספת תקציב חודשי',
   budgetAmountLabel: 'סכום התקציב (₪)',
   enterAmount: 'הזן סכום',
   currentAmountPrefix: 'נוכחי',
@@ -172,7 +173,10 @@ const he: TranslationDict = {
   nextMonth: 'חודש הבא',
 
   // Charts / analytics
-  analyticsTitle: 'תובנות',
+  analyticsTitle: 'תובנות וסיכומים נוספים',
+  chartCategorySplit: 'פילוג הוצאות לפי קטגוריות',
+  chartDailySplit: 'פילוג הוצאות לפי ימים',
+  chartSpendingOverTime: 'הוצאות לאורך זמן',
   prev: 'קודם',
   next: 'הבא',
   analyticsViews: 'תצוגות תובנות',
@@ -186,7 +190,9 @@ const he: TranslationDict = {
   weekPrefix: 'שבוע',
 
   // Dashboard donut
-  expenseByCategory: 'הוצאות לפי קטגוריה',
+  expenseByCategory: 'הוצאות יומיות לפי קטגוריה',
+  expenseByCategoryPastMonthFootnote:
+    '* מציג את ההוצאות של הראשון לחודש, במידה שתרצה תאריך ספציפי בבקשה תבחר בממשק למעלה',
   prevDay: 'יום קודם',
   nextDay: 'יום הבא',
   noExpensesOnDate: 'אין הוצאות בתאריך זה',
@@ -363,9 +369,9 @@ const en: TranslationDict = {
   signInWith: 'Sign in with',
   authSwitchLanguage: 'Switch interface language',
   tabDashboard: 'Home',
-  tabAnalytics: 'Insights',
-  tabSubbudgets: 'Budgets',
-  tabExpenses: 'Expenses',
+  tabAnalytics: 'Insights & additional summaries',
+  tabSubbudgets: 'Add & manage sub-budgets',
+  tabExpenses: 'Expense history',
   closeMenu: 'Close menu',
   filterDaily: 'Daily',
   filterWeekly: 'Weekly',
@@ -407,13 +413,17 @@ const en: TranslationDict = {
   updateBudget: 'Update budget',
   budgetSaved: 'Saved!',
   setMonthlyBudget: 'Set monthly budget',
+  addMonthlyBudget: 'Add monthly budget',
   budgetAmountLabel: 'Budget amount (₪)',
   enterAmount: 'Enter amount',
   currentAmountPrefix: 'Current',
   backToCurrentMonth: 'Back to current month',
   prevMonth: 'Previous month',
   nextMonth: 'Next month',
-  analyticsTitle: 'Insights',
+  analyticsTitle: 'Insights & additional summaries',
+  chartCategorySplit: 'Expenses by category',
+  chartDailySplit: 'Expenses by day',
+  chartSpendingOverTime: 'Spending over time',
   prev: 'Previous',
   next: 'Next',
   analyticsViews: 'Insight views',
@@ -425,7 +435,9 @@ const en: TranslationDict = {
   choosePeriodOrAdd: 'Choose another period or add expenses',
   noDailyBreakdown: 'No date breakdown in this period',
   weekPrefix: 'Week',
-  expenseByCategory: 'Expenses by category',
+  expenseByCategory: 'Daily expenses by category',
+  expenseByCategoryPastMonthFootnote:
+    '* Showing expenses for the 1st of the month; use the date controls above to pick a specific day.',
   prevDay: 'Previous day',
   nextDay: 'Next day',
   noExpensesOnDate: 'No expenses on this date',

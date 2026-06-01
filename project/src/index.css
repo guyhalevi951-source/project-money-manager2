@@ -126,6 +126,45 @@ button:focus {
   margin: 0 !important;
 }
 
+/* Insights trend line chart: kill browser focus ring on Recharts SVG/wrapper (tap/click) */
+.insights-trend-chart,
+.insights-trend-chart * {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.insights-trend-chart .recharts-responsive-container,
+.insights-trend-chart .recharts-wrapper,
+.insights-trend-chart .recharts-surface,
+.insights-trend-chart svg {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.insights-trend-chart .recharts-wrapper,
+.insights-trend-chart .recharts-surface,
+.insights-trend-chart svg.recharts-surface {
+  border: none !important;
+}
+
+.insights-trend-chart .recharts-wrapper:focus,
+.insights-trend-chart .recharts-wrapper:focus-visible,
+.insights-trend-chart .recharts-wrapper:active,
+.insights-trend-chart .recharts-surface:focus,
+.insights-trend-chart .recharts-surface:focus-visible,
+.insights-trend-chart .recharts-surface:active,
+.insights-trend-chart svg:focus,
+.insights-trend-chart svg:focus-visible,
+.insights-trend-chart svg:active,
+.insights-trend-chart *:focus,
+.insights-trend-chart *:focus-visible,
+.insights-trend-chart *:active {
+  outline: none !important;
+  outline-width: 0 !important;
+  outline-style: none !important;
+  box-shadow: none !important;
+  border-color: transparent !important;
+}
+
 .advanced-hue-slider {
   background-color: transparent;
 }

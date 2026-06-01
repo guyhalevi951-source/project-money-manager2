@@ -19,7 +19,7 @@ export default function SelectedDaySummary({ point, formatDate }: SelectedDaySum
       dir={dir}
       role="status"
       aria-live="polite"
-      className="mx-auto mt-4 w-full max-w-sm rounded-xl border border-sky-900/45 bg-[#0f172a]/95 px-4 py-3.5 text-center shadow-lg shadow-black/40"
+      className="mx-auto mt-4 w-full max-w-sm rounded-xl border border-sky-900/45 bg-[#0f172a]/95 px-4 py-3.5 text-center shadow-lg shadow-black/40 outline-none focus:outline-none focus-visible:outline-none"
     >
       <p className="text-sm leading-relaxed text-slate-400">
         {tr('date')}:{' '}

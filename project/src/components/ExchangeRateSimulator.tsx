@@ -795,6 +795,10 @@ export default function ExchangeRateSimulator({
     });
   }, [secondaryCurrency]);
 
+  const toggleCommissionManagement = useCallback(() => {
+    setCommissionManagementExpanded((prev) => !prev);
+  }, []);
+
   const persistCommission24h = useCallback(() => {
     const percent = parseCommissionPercentInput(commissionPercentInput);
     if (!(percent > 0)) return;
@@ -1035,9 +1039,9 @@ export default function ExchangeRateSimulator({
                 <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center">
                   <button
                     type="button"
-                    onClick={() => setCommissionManagementExpanded((prev) => !prev)}
+                    onClick={toggleCommissionManagement}
                     aria-expanded={commissionManagementExpanded}
-                    className="order-first inline-flex min-h-[2.75rem] w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-violet-500/35 bg-violet-500/10 px-2.5 py-1.5 text-xs font-medium text-violet-100 transition-all hover:bg-violet-500/20 active:scale-[0.98] md:order-none md:w-auto"
+                    className="order-first inline-flex min-h-[2.75rem] w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-violet-500/35 bg-violet-500/10 px-2.5 py-1.5 text-xs font-medium text-violet-100 transition-all hover:bg-violet-500/20 active:scale-[0.98] md:hidden"
                   >
                     <Settings2 className="h-4 w-4 shrink-0" />
                     {tr('exchangeRateManageCommissions')}
@@ -1103,12 +1107,13 @@ export default function ExchangeRateSimulator({
               <span className="text-blue-200/80">{tr('exchangeRateLoadingHistorical')}</span>
             ) : (
               <div className="flex min-h-[5.5rem] w-full flex-col flex-wrap items-start gap-2 md:flex-row md:items-center">
-                <div className="flex min-w-0 w-full flex-1 flex-col items-start justify-center gap-0.5">
-                  <div
-                    dir="ltr"
-                    className="flex w-full min-w-0 flex-row items-center justify-center gap-1 overflow-hidden whitespace-nowrap md:gap-2 md:text-base"
-                    style={{ fontSize: `${conversionSummaryLayout.fontSizePx}px` }}
-                  >
+                <div className="flex min-w-0 w-full flex-1 flex-col items-start gap-0.5">
+                  <div className="flex w-full min-w-0 justify-start">
+                    <div
+                      dir="ltr"
+                      className="inline-flex min-w-0 max-w-full flex-row items-center justify-start gap-2 overflow-hidden whitespace-nowrap md:text-base"
+                      style={{ fontSize: `${conversionSummaryLayout.fontSizePx}px` }}
+                    >
                     <input
                       type="number"
                       inputMode="decimal"
@@ -1145,6 +1150,7 @@ export default function ExchangeRateSimulator({
                     >
                       <Copy className="h-[0.7em] w-[0.7em]" strokeWidth={2.25} aria-hidden />
                     </button>
+                    </div>
                   </div>
                   {historicalRateUpdatedAt != null && (
                     <p className="w-full self-start text-start text-xs leading-snug text-blue-200/75">
@@ -1219,9 +1225,19 @@ export default function ExchangeRateSimulator({
 
             <button
               type="button"
+              onClick={toggleCommissionManagement}
+              aria-expanded={commissionManagementExpanded}
+              className="hidden min-h-[2.75rem] shrink-0 items-center gap-1.5 rounded-xl border border-violet-500/35 bg-violet-500/10 px-3.5 text-sm font-medium text-violet-100 transition-colors hover:bg-violet-500/20 md:inline-flex"
+            >
+              <Settings2 className="h-4 w-4 shrink-0" />
+              {tr('exchangeRateManageCommissions')}
+            </button>
+
+            <button
+              type="button"
               onClick={() => setManagementExpanded((prev) => !prev)}
               aria-expanded={managementExpanded}
-              className="inline-flex min-h-[2.75rem] items-center gap-1.5 rounded-xl border border-amber-500/35 bg-amber-500/10 px-3.5 text-sm font-medium text-amber-100 transition-colors hover:bg-amber-500/20"
+              className="inline-flex min-h-[2.75rem] shrink-0 items-center gap-1.5 rounded-xl border border-amber-500/35 bg-amber-500/10 px-3.5 text-sm font-medium text-amber-100 transition-colors hover:bg-amber-500/20"
             >
               <Settings2 className="h-4 w-4" />
               {tr('exchangeRateManageManual')}
