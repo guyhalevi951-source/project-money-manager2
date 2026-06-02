@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback, type MutableRefObject, type TouchEvent } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, type MutableRefObject, type ReactNode, type TouchEvent } from 'react';
 import { AnimatePresence, motion, type PanInfo } from 'framer-motion';
 import {
   Wallet,
@@ -52,7 +52,7 @@ import ExpenseAmountDisplay from './components/ExpenseAmountDisplay';
 import DisplayMoney from './components/DisplayMoney';
 import CategoryColorChip from './components/CategoryColorChip';
 import { LocalizedUserText, LtrNumeric, useLanguage } from './LanguageContext';
-import { localizeCategoryLabel } from './translations';
+import { formatTranslation, localizeCategoryLabel } from './translations';
 import { formatAmountWithSymbol, symbolToCurrency } from './services/displayCurrencyUtils';
 import {
   clearAllCurrencyCommissionsLocal,
@@ -93,6 +93,7 @@ import {
   sanitizeAvatarUrl,
 } from './services/avatarService';
 import {
+  clearLegacyLocalStorage,
   ensureCloudDataMigrated,
   pruneExpiredCloudExchangeFees,
   saveCategoriesToCloud,
@@ -249,7 +250,9 @@ const DAILY_SLICE_COLORS = [
 ];
 
 const ANALYTICS_SLIDE_COUNT = 3;
-const ANALYTICS_CHART_ORDER = [0, 1, 2] as const;
+// Dots render right-to-left: index 0 = rightmost dot, index 2 = leftmost dot.
+// dir="ltr" is forced on the container so this is language-independent.
+const ANALYTICS_CHART_ORDER = [2, 1, 0] as const;
 const ANALYTICS_CHART_HEIGHT = 320;
 const ANALYTICS_DONUT_SIZE = 192;
 const ANALYTICS_LINE_HEIGHT = 240;
@@ -516,7 +519,7 @@ function CollapsibleNavMenu({
         <div
           role="menu"
           aria-hidden={!open}
-          className={`absolute top-full mt-2 end-0 z-50 flex w-[min(100vw-2rem,22rem)] flex-col gap-1.5 rounded-2xl border border-slate-700/80 bg-slate-900/95 p-2 shadow-2xl shadow-black/50 backdrop-blur-md transition-all duration-200 ease-out origin-top ${
+          className={`absolute top-full mt-2 end-0 z-[60] flex w-[min(100vw-2rem,22rem)] flex-col gap-1.5 rounded-2xl border border-slate-700/80 bg-slate-900/95 p-2 shadow-2xl shadow-black/50 backdrop-blur-md transition-all duration-200 ease-out origin-top ${
             open
               ? 'pointer-events-auto translate-y-0 scale-100 opacity-100'
               : 'pointer-events-none -translate-y-1 scale-95 opacity-0'
@@ -1815,6 +1818,61 @@ interface SubBudgetTrackerProps {
   onRemoveSubBudget: (value: string) => void;
 }
 
+function BudgetOverLimitBanner({ label }: { label: string }) {
+  return (
+    <div className="absolute inset-x-0 bottom-0 rounded-b-xl border-t border-rose-500/40 bg-rose-500/15 px-2 py-1.5 text-center text-[11px] font-bold leading-tight text-rose-300 sm:text-xs">
+      {label}
+    </div>
+  );
+}
+
+const budgetChartContainerClass =
+  'relative h-40 w-40 shrink-0 pointer-events-none sm:h-48 sm:w-48';
+
+/** Accent panel wrapping only numeric stats + color legend (not the donut chart). */
+function BudgetStatsLegendPanel({
+  isOver,
+  overBanner,
+  children,
+}: {
+  isOver: boolean;
+  overBanner?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={[
+        'relative w-full rounded-xl border p-3 shadow-inner',
+        isOver ? 'border-rose-500/60 bg-rose-950/80' : 'border-emerald-500/25 bg-neutral-900/80',
+        isOver ? 'pb-9' : '',
+      ].join(' ')}
+    >
+      <div className="space-y-2.5">{children}</div>
+      {overBanner}
+    </div>
+  );
+}
+
+function BudgetChartLegend({
+  items,
+  title,
+}: {
+  title: string;
+  items: ReadonlyArray<{ color: string; label: string }>;
+}) {
+  return (
+    <div className="w-full space-y-1 px-0.5 text-[11px] text-neutral-300">
+      <p className="font-semibold text-neutral-200">{title}</p>
+      {items.map((item) => (
+        <div key={item.label} className="flex items-center gap-2">
+          <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
+          <span>{item.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // Envelope budgeting: allocate the global budget into per-category sub-budgets,
 // with a two-tone donut (spent vs. remaining) and per-envelope progress bars.
 function SubBudgetTracker({
@@ -1827,7 +1885,7 @@ function SubBudgetTracker({
   onSetSubBudget,
   onRemoveSubBudget,
 }: SubBudgetTrackerProps) {
-  const { tr, ensureUserContents, formatMoney, dir } = useLanguage();
+  const { tr, ensureUserContents, formatMoney, dir, lang } = useLanguage();
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [newSubBudgetColor, setNewSubBudgetColor] = useState(DEFAULT_CATEGORY_COLOR);
@@ -1901,6 +1959,11 @@ function SubBudgetTracker({
   ]);
   const usedOverviewAmount = Math.min(totalSpent, budget);
   const remainingOverviewAmount = Math.max(0, budget - totalSpent);
+  const isBudgetStatusOver = budget > 0 && totalSpent > budget;
+  const budgetStatusExceededAmount = roundMoneyAmount(Math.max(0, totalSpent - budget));
+  const budgetStatusOverLabel = formatTranslation(lang, 'overBudgetExceededBy', {
+    amount: formatMoney(budgetStatusExceededAmount),
+  });
   const overviewChartData = (
     [
       { id: 'used', value: Math.max(usedOverviewAmount, 0), fill: '#15803d' },
@@ -1916,6 +1979,8 @@ function SubBudgetTracker({
           ...env,
           spentAmount: Math.min(env.spent, env.allocated),
           remainingAmount: Math.max(0, env.allocated - env.spent),
+          isOverBudget: env.spent > env.allocated,
+          exceededAmount: roundMoneyAmount(Math.max(0, env.spent - env.allocated)),
         })),
     [envelopes],
   );
@@ -1936,15 +2001,23 @@ function SubBudgetTracker({
     [subCategoryCharts.length],
   );
 
+  const activeSubChart = subCategoryCharts[subChartSlide] ?? null;
+  const activeSubOverLabel =
+    activeSubChart && activeSubChart.isOverBudget
+      ? formatTranslation(lang, 'overBudgetExceededBy', { amount: formatMoney(activeSubChart.exceededAmount) })
+      : '';
+
   const subChartVariants = useMemo(
     () => ({
+      // forward (later index): slides LEFT — new enters from left, old exits right
+      // backward (earlier index): slides RIGHT — new enters from right, old exits left
       enter: (direction: 'forward' | 'backward') => ({
-        x: direction === 'forward' ? '100%' : '-100%',
+        x: direction === 'forward' ? '-100%' : '100%',
         opacity: 0,
       }),
       center: { x: 0, opacity: 1 },
       exit: (direction: 'forward' | 'backward') => ({
-        x: direction === 'forward' ? '-100%' : '100%',
+        x: direction === 'forward' ? '100%' : '-100%',
         opacity: 0,
       }),
     }),
@@ -1982,79 +2055,82 @@ function SubBudgetTracker({
       ) : (
         <>
           {/* Main budget chart: used vs remaining */}
-          <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-3 sm:p-4">
-            <h3 className="mb-3 text-center text-sm font-semibold text-neutral-200 sm:text-base">
+          <div className="rounded-2xl border border-neutral-800 p-3 sm:p-5">
+            <h3 className="mb-4 text-center text-sm font-semibold text-neutral-200 sm:text-base">
               {tr('budgetStatus')}
             </h3>
-            <div className="relative flex min-h-[18rem] w-full flex-col items-center gap-3 overflow-hidden pt-2 sm:min-h-[19rem] sm:gap-0 sm:pt-0">
-              {/* Centered donut chart */}
-              <div className="relative h-40 w-40 shrink-0 pointer-events-none sm:absolute sm:inset-0 sm:m-auto sm:h-48 sm:w-48">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={overviewChartData.length > 0 ? overviewChartData : [{ id: 'remaining', value: 1, fill: '#86efac' }]}
-                      dataKey="value"
-                      nameKey="id"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius="64%"
-                      outerRadius="100%"
-                      paddingAngle={1}
-                      stroke="#0a0a0a"
-                      strokeWidth={2}
-                      isAnimationActive={false}
-                    >
-                      {(overviewChartData.length > 0 ? overviewChartData : [{ id: 'remaining', value: 1, fill: '#86efac' }]).map((slice) => (
-                        <Cell key={slice.id} fill={slice.fill} />
-                      ))}
-                    </Pie>
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                  <DisplayMoney amount={usedOverviewAmount} className="text-xl font-bold text-neutral-100" />
-                  <span className="mt-1 text-[11px] text-neutral-500">
-                    <LtrNumeric>{tr('outOf')} {formatMoney(budget)}</LtrNumeric>
-                  </span>
-                </div>
-              </div>
-              {/* Data block — mirrors sub-budget panel, no category title */}
-              <div
-                className={[
-                  'w-full max-w-[14rem] rounded-xl border border-white/10 bg-black/20 p-3',
-                  'sm:absolute sm:top-1/2 sm:w-48 sm:-translate-y-1/2 sm:p-3',
-                  dir === 'rtl' ? 'sm:right-4 text-right' : 'sm:left-4 text-left',
-                ].join(' ')}
-              >
-                <div className="space-y-1">
-                  <p className="text-xs text-neutral-400">
-                    {tr('spentLabel')}: <DisplayMoney amount={usedOverviewAmount} className="inline-block" />
-                  </p>
-                  <p className="text-xs text-neutral-400">
-                    {tr('remainingLabel')}: <DisplayMoney amount={remainingOverviewAmount} className="inline-block" />
-                  </p>
-                  <p className="text-xs text-neutral-500">
-                    {tr('totalBudgetLabel')}: <DisplayMoney amount={budget} className="inline-block" />
-                  </p>
-                  <p className="text-xs text-emerald-300">
-                    {tr('spentLabel')}{' '}
-                    {budget > 0 ? `${((usedOverviewAmount / budget) * 100).toFixed(0)}%` : '0%'}
-                  </p>
-                  <p className="text-xs text-emerald-200">
-                    {tr('remainingLabel')}{' '}
-                    {budget > 0 ? `${((remainingOverviewAmount / budget) * 100).toFixed(0)}%` : '0%'}
-                  </p>
-                  <div className="mt-2 space-y-1 border-t border-white/10 pt-2 text-[11px] text-neutral-300">
-                    <p className="font-semibold text-neutral-200">{tr('subBudgetLegendTitle')}</p>
-                    <div className="flex items-center gap-2">
-                      <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-green-700" />
-                      <span>{tr('subBudgetLegendUsed')}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-green-300" />
-                      <span>{tr('subBudgetLegendRemaining')}</span>
-                    </div>
+            <div className="grid min-h-[18rem] w-full grid-cols-1 items-center gap-4 sm:min-h-[19rem] sm:grid-cols-[1fr_minmax(11rem,12rem)] sm:gap-6">
+              <div className="flex justify-center">
+                <div className={budgetChartContainerClass}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={overviewChartData.length > 0 ? overviewChartData : [{ id: 'remaining', value: 1, fill: '#86efac' }]}
+                        dataKey="value"
+                        nameKey="id"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius="64%"
+                        outerRadius="100%"
+                        paddingAngle={1}
+                        stroke="#0a0a0a"
+                        strokeWidth={2}
+                        isAnimationActive={false}
+                      >
+                        {(overviewChartData.length > 0 ? overviewChartData : [{ id: 'remaining', value: 1, fill: '#86efac' }]).map((slice) => (
+                          <Cell key={slice.id} fill={slice.fill} />
+                        ))}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                    <DisplayMoney amount={usedOverviewAmount} className="text-xl font-bold text-neutral-100" />
+                    <span className="mt-1 text-[11px] text-neutral-500">
+                      <LtrNumeric>{tr('outOf')} {formatMoney(budget)}</LtrNumeric>
+                    </span>
                   </div>
                 </div>
+              </div>
+
+              <div
+                className={[
+                  'flex w-full max-w-[14rem] sm:max-w-none',
+                  dir === 'rtl' ? 'sm:items-end sm:text-right' : 'sm:items-start sm:text-left',
+                ].join(' ')}
+              >
+                <BudgetStatsLegendPanel
+                  isOver={isBudgetStatusOver}
+                  overBanner={
+                    isBudgetStatusOver ? <BudgetOverLimitBanner label={budgetStatusOverLabel} /> : undefined
+                  }
+                >
+                  <div className="space-y-1">
+                    <p className="text-xs text-neutral-400">
+                      {tr('spentLabel')}: <DisplayMoney amount={totalSpent} className="inline-block" />
+                    </p>
+                    <p className="text-xs text-neutral-400">
+                      {tr('remainingLabel')}: <DisplayMoney amount={remainingOverviewAmount} className="inline-block" />
+                    </p>
+                    <p className="text-xs text-neutral-500">
+                      {tr('totalBudgetLabel')}: <DisplayMoney amount={budget} className="inline-block" />
+                    </p>
+                    <p className={`text-xs ${isBudgetStatusOver ? 'text-rose-300' : 'text-emerald-300'}`}>
+                      {tr('spentLabel')}{' '}
+                      {budget > 0 ? `${((totalSpent / budget) * 100).toFixed(0)}%` : '0%'}
+                    </p>
+                    <p className="text-xs text-emerald-200">
+                      {tr('remainingLabel')}{' '}
+                      {budget > 0 ? `${((remainingOverviewAmount / budget) * 100).toFixed(0)}%` : '0%'}
+                    </p>
+                  </div>
+                  <BudgetChartLegend
+                    title={tr('subBudgetLegendTitle')}
+                    items={[
+                      { color: '#15803d', label: tr('subBudgetLegendUsed') },
+                      { color: '#86efac', label: tr('subBudgetLegendRemaining') },
+                    ]}
+                  />
+                </BudgetStatsLegendPanel>
               </div>
             </div>
           </div>
@@ -2088,7 +2164,7 @@ function SubBudgetTracker({
                   })}
                 </div>
 
-                <div className="relative w-full overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950/70 p-3 sm:p-4">
+                <div className="relative w-full overflow-hidden rounded-2xl border border-neutral-800 p-3 sm:p-4">
                   {subCategoryCharts[subChartSlide] && (
                     <button
                       type="button"
@@ -2105,9 +2181,9 @@ function SubBudgetTracker({
                     </button>
                   )}
                   <AnimatePresence mode="popLayout" initial={false}>
-                    {subCategoryCharts[subChartSlide] && (
+                    {activeSubChart && (
                       <motion.div
-                        key={`sub-chart-${subCategoryCharts[subChartSlide].key}-${subChartSlide}`}
+                        key={`sub-chart-${activeSubChart.key}-${subChartSlide}`}
                         custom={subChartDirection}
                         variants={subChartVariants}
                         initial="enter"
@@ -2123,97 +2199,101 @@ function SubBudgetTracker({
                         dragMomentum={false}
                         onDragEnd={(_, info: PanInfo) => {
                           if (Math.abs(info.offset.x) < 50) return;
+                          // left swipe (-x) = forward to next; right swipe (+x) = back to previous
                           if (info.offset.x < 0) {
                             goToSubChartSlide(subChartSlide + 1);
                             return;
                           }
                           goToSubChartSlide(subChartSlide - 1);
                         }}
-                        className="relative flex min-h-[18rem] w-full flex-col items-center gap-3 overflow-hidden pt-2 sm:min-h-[19rem] sm:gap-0 sm:pt-0"
+                        className="relative grid min-h-[18rem] w-full grid-cols-1 items-center gap-4 sm:min-h-[19rem] sm:grid-cols-[1fr_minmax(11rem,12rem)] sm:gap-6"
                       >
-                        <div className="relative h-40 w-40 shrink-0 pointer-events-none sm:absolute sm:inset-0 sm:m-auto sm:h-48 sm:w-48">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                              <Pie
-                                data={[
-                                  {
-                                    id: 'spent',
-                                    value: Math.max(subCategoryCharts[subChartSlide].spentAmount, 0),
-                                    fill: subCategoryCharts[subChartSlide].hex,
-                                  },
-                                  {
-                                    id: 'remaining',
-                                    value: Math.max(subCategoryCharts[subChartSlide].remainingAmount, 0),
-                                    fill: remainingFill(subCategoryCharts[subChartSlide].hex),
-                                  },
-                                ].filter((item) => item.value > 0)}
-                                dataKey="value"
-                                nameKey="id"
-                                cx="50%"
-                                cy="50%"
-                                innerRadius="62%"
-                                outerRadius="100%"
-                                paddingAngle={1}
-                                stroke="#0a0a0a"
-                                strokeWidth={2}
-                                isAnimationActive={false}
-                              >
-                                <Cell fill={subCategoryCharts[subChartSlide].hex} />
-                                <Cell fill={remainingFill(subCategoryCharts[subChartSlide].hex)} />
-                              </Pie>
-                            </PieChart>
-                          </ResponsiveContainer>
+                        <div className="flex justify-center">
+                          <div className={budgetChartContainerClass}>
+                            <ResponsiveContainer width="100%" height="100%">
+                              <PieChart>
+                                <Pie
+                                  data={[
+                                    {
+                                      id: 'spent',
+                                      value: Math.max(activeSubChart.spentAmount, 0),
+                                      fill: activeSubChart.hex,
+                                    },
+                                    {
+                                      id: 'remaining',
+                                      value: Math.max(activeSubChart.remainingAmount, 0),
+                                      fill: remainingFill(activeSubChart.hex),
+                                    },
+                                  ].filter((item) => item.value > 0)}
+                                  dataKey="value"
+                                  nameKey="id"
+                                  cx="50%"
+                                  cy="50%"
+                                  innerRadius="62%"
+                                  outerRadius="100%"
+                                  paddingAngle={1}
+                                  stroke="#0a0a0a"
+                                  strokeWidth={2}
+                                  isAnimationActive={false}
+                                >
+                                  <Cell fill={activeSubChart.hex} />
+                                  <Cell fill={remainingFill(activeSubChart.hex)} />
+                                </Pie>
+                              </PieChart>
+                            </ResponsiveContainer>
+                          </div>
                         </div>
                         <div
                           className={[
-                            'w-full max-w-[14rem] rounded-xl border border-white/10 bg-black/20 p-3',
-                            'sm:absolute sm:top-1/2 sm:w-48 sm:-translate-y-1/2 sm:p-3',
-                            dir === 'rtl' ? 'sm:right-4 text-right' : 'sm:left-4 text-left',
+                            'flex w-full max-w-[14rem] flex-col gap-2 sm:max-w-none',
+                            dir === 'rtl' ? 'sm:items-end sm:text-right' : 'sm:items-start sm:text-left',
                           ].join(' ')}
                         >
-                          <div className="space-y-1">
-                            <p className="text-sm font-semibold text-neutral-100 sm:text-base">
-                              <LocalizedUserText text={subCategoryCharts[subChartSlide].key} />
-                            </p>
-                            <p className="text-xs text-neutral-400">
-                              {tr('spentLabel')}: <DisplayMoney amount={subCategoryCharts[subChartSlide].spentAmount} className="inline-block" />
-                            </p>
-                            <p className="text-xs text-neutral-400">
-                              {tr('remainingLabel')}: <DisplayMoney amount={subCategoryCharts[subChartSlide].remainingAmount} className="inline-block" />
-                            </p>
-                            <p className="text-xs text-neutral-500">
-                              {tr('totalBudgetLabel')}: <DisplayMoney amount={subCategoryCharts[subChartSlide].allocated} className="inline-block" />
-                            </p>
-                            <p className="text-xs text-emerald-300">
-                              {tr('spentLabel')}{' '}
-                              {subCategoryCharts[subChartSlide].allocated > 0
-                                ? `${((subCategoryCharts[subChartSlide].spentAmount / subCategoryCharts[subChartSlide].allocated) * 100).toFixed(0)}%`
-                                : '0%'}
-                            </p>
-                            <p className="text-xs text-emerald-200">
-                              {tr('remainingLabel')}{' '}
-                              {subCategoryCharts[subChartSlide].allocated > 0
-                                ? `${((subCategoryCharts[subChartSlide].remainingAmount / subCategoryCharts[subChartSlide].allocated) * 100).toFixed(0)}%`
-                                : '0%'}
-                            </p>
-                            <div className="mt-2 space-y-1 border-t border-white/10 pt-2 text-[11px] text-neutral-300">
-                              <p className="font-semibold text-neutral-200">{tr('subBudgetLegendTitle')}</p>
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className="h-2.5 w-2.5 rounded-full"
-                                  style={{ backgroundColor: subCategoryCharts[subChartSlide].hex }}
-                                />
-                                <span>{tr('subBudgetLegendUsed')}</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className="h-2.5 w-2.5 rounded-full"
-                                  style={{ backgroundColor: remainingFill(subCategoryCharts[subChartSlide].hex) }}
-                                />
-                                <span>{tr('subBudgetLegendRemaining')}</span>
-                              </div>
+                          <p className="text-sm font-semibold text-neutral-100 sm:text-base">
+                            <LocalizedUserText text={activeSubChart.key} />
+                          </p>
+                          <BudgetStatsLegendPanel
+                            isOver={activeSubChart.isOverBudget}
+                            overBanner={
+                              activeSubChart.isOverBudget ? (
+                                <BudgetOverLimitBanner label={activeSubOverLabel} />
+                              ) : undefined
+                            }
+                          >
+                            <div className="space-y-1">
+                              <p className="text-xs text-neutral-400">
+                                {tr('spentLabel')}: <DisplayMoney amount={activeSubChart.spent} className="inline-block" />
+                              </p>
+                              <p className="text-xs text-neutral-400">
+                                {tr('remainingLabel')}: <DisplayMoney amount={activeSubChart.remainingAmount} className="inline-block" />
+                              </p>
+                              <p className="text-xs text-neutral-500">
+                                {tr('totalBudgetLabel')}: <DisplayMoney amount={activeSubChart.allocated} className="inline-block" />
+                              </p>
+                              <p className={`text-xs ${activeSubChart.isOverBudget ? 'text-rose-300' : 'text-emerald-300'}`}>
+                                {tr('spentLabel')}{' '}
+                                {activeSubChart.allocated > 0
+                                  ? `${((activeSubChart.spent / activeSubChart.allocated) * 100).toFixed(0)}%`
+                                  : '0%'}
+                              </p>
+                              <p className="text-xs text-emerald-200">
+                                {tr('remainingLabel')}{' '}
+                                {activeSubChart.allocated > 0
+                                  ? `${((activeSubChart.remainingAmount / activeSubChart.allocated) * 100).toFixed(0)}%`
+                                  : '0%'}
+                              </p>
                             </div>
-                          </div>
+                            <BudgetChartLegend
+                              title={tr('subBudgetLegendTitle')}
+                              items={[
+                                { color: activeSubChart.hex, label: tr('subBudgetLegendUsed') },
+                                {
+                                  color: remainingFill(activeSubChart.hex),
+                                  label: tr('subBudgetLegendRemaining'),
+                                },
+                              ]}
+                            />
+                          </BudgetStatsLegendPanel>
                         </div>
                       </motion.div>
                     )}
@@ -2663,14 +2743,19 @@ function App() {
 
   const handleLogout = async () => {
     try {
-      await signOutUser();
       clearAllCurrencyCommissionsLocal();
       clearAllManualExchangeOverridesLocal();
       clearCloudCurrencyCommissions();
       clearCloudManualExchangeOverrides();
+      clearLegacyLocalStorage();
+      saveToLocalStorage(EMPTY_USER_APP_DATA);
+      window.localStorage.removeItem(GUEST_AVATAR_STORAGE_KEY);
+      resetAppData();
+      setAvatarUrl(DEFAULT_GUEST_AVATAR_URL);
       setNavOpen(false);
       setActiveTab('dashboard');
       setProfileOpen(false);
+      await signOutUser();
     } catch {
       // sign-out errors are rare; user state will sync via onAuthStateChanged
     }
@@ -3004,16 +3089,18 @@ function App() {
       if (!user) {
         if (hadAuthenticatedUserRef.current) {
           resetAppData();
+          clearAllCurrencyCommissionsLocal();
+          clearAllManualExchangeOverridesLocal();
         }
         hadAuthenticatedUserRef.current = false;
 
         setGuestLangActive(false);
         pendingAuthLangRef.current = null;
         setSettingsPersistence('local');
-        void listActiveCurrencyCommissions();
-        void listActiveManualExchangeOverrides();
         clearCloudManualExchangeOverrides();
         clearCloudCurrencyCommissions();
+        void listActiveCurrencyCommissions();
+        void listActiveManualExchangeOverrides();
         setDataReady(true);
         return;
       }
@@ -3171,6 +3258,7 @@ function App() {
           (entries, meta) => {
             if (cancelled || meta.hasPendingWrites) return;
             replaceCloudManualExchangeOverrides(entries);
+            void pruneExpiredCloudExchangeFees(uid);
           },
           () => {
             if (!cancelled) {
@@ -3184,6 +3272,7 @@ function App() {
           (entries, meta) => {
             if (cancelled || meta.hasPendingWrites) return;
             replaceCloudCurrencyCommissions(entries);
+            void pruneExpiredCloudExchangeFees(uid);
           },
           () => {
             if (!cancelled) {
@@ -3210,6 +3299,28 @@ function App() {
       unsubCurrencyCommissions?.();
     };
   }, [user, authReady, applySettingsFromCloud, setSettingsPersistence, setLang]);
+
+  // Purge exchange-fee documents older than 24h while a signed-in user session is active.
+  useEffect(() => {
+    if (!user || user.isAnonymous) return;
+
+    const uid = user.uid;
+    const runPrune = () => {
+      void pruneExpiredCloudExchangeFees(uid);
+    };
+
+    runPrune();
+    const intervalId = window.setInterval(runPrune, 24 * 60 * 60 * 1000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') runPrune();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [user]);
 
   // Persist financial changes: localStorage for guests, debounced Firestore for accounts.
   useEffect(() => {
@@ -3807,11 +3918,11 @@ function App() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.45, ease: 'easeOut' }}
-      className="min-h-screen bg-neutral-950 text-neutral-100"
+      className="flex min-h-screen flex-col bg-neutral-950 text-neutral-100"
     >
       {/* Header + desktop nav */}
       <header
-        className="bg-neutral-900/80 backdrop-blur shadow-lg shadow-black/20 border-b border-neutral-800 sticky top-0 z-50"
+        className="sticky top-0 z-50 shrink-0 bg-neutral-900/80 backdrop-blur shadow-lg shadow-black/20 border-b border-neutral-800"
         style={{ paddingTop: 'env(safe-area-inset-top)' }}
       >
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
@@ -3869,20 +3980,18 @@ function App() {
           </div>
         </div>
       </header>
-      {/* Mobile overlay — rendered OUTSIDE the header to escape its backdrop-filter stacking context */}
-      {!settingsOpen && (
+
+      {!settingsOpen && navOpen && (
         <button
           type="button"
           aria-label={tr('closeMenu')}
           onClick={() => setNavOpen(false)}
-          className={`fixed inset-x-0 bottom-0 z-40 bg-black/50 backdrop-blur-sm transition-opacity duration-300 md:hidden ${
-            navOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
-          }`}
-          style={{ top: 'calc(64px + env(safe-area-inset-top, 0px))' }}
+          className="fixed top-[64px] inset-x-0 bottom-0 z-40 bg-black/50 backdrop-blur-sm transition-opacity duration-300 md:hidden"
         />
       )}
 
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 pb-24 md:pb-10">
+      <div className="relative flex flex-1 flex-col">
+      <main className="relative z-0 mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-6 sm:py-8 pb-24 md:pb-10 lg:px-8">
         {profileOpen ? (
           <ProfilePage
             user={user}
@@ -3905,45 +4014,64 @@ function App() {
           <>
             {monthSelector}
 
-            {/* Financial summary */}
+            {/* Financial summary — row 2 uses a fixed height so all three amount cells share one baseline */}
             <div className="mb-6 rounded-xl border border-neutral-800 bg-neutral-900 p-4 shadow-sm sm:mb-8 sm:p-6">
               <h2 className="mb-4 text-lg font-bold text-white md:text-xl">{tr('financialSummaryTitle')}</h2>
-              {/* Row 1: labels — shared grid so all three sit on the same baseline */}
-              <div className="grid grid-cols-3 divide-x divide-x-reverse divide-gray-700">
-                <p className="min-w-0 px-2 pb-1 text-center text-xs text-gray-400 md:text-sm">{tr('monthlyBudget')}</p>
-                <p className="min-w-0 px-2 pb-1 text-center text-xs text-gray-400 md:text-sm">{tr('totalExpenses')}</p>
-                <p className="min-w-0 px-2 pb-1 text-center text-xs text-gray-400 md:text-sm">{tr('budgetStatus')}</p>
-              </div>
-              {/* Row 2: values — identical h-12 cells so the baseline is always shared */}
-              <div className="grid grid-cols-3 divide-x divide-x-reverse divide-gray-700">
-                <div className="flex h-12 min-w-0 items-center justify-center px-2">
-                  <LtrNumeric className="truncate text-sm font-bold text-neutral-100 sm:text-base md:text-2xl">
-                    {selectedBudgetDisplayLabel}
-                  </LtrNumeric>
-                </div>
-                <div className="flex h-12 min-w-0 items-center justify-center px-2">
-                  <LtrNumeric
-                    className={`truncate text-sm font-bold sm:text-base md:text-2xl ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}
-                  >
-                    {totalExpensesStatusDisplayLabel}
-                  </LtrNumeric>
-                </div>
-                <div className="flex h-12 min-w-0 items-center justify-center px-2">
-                  <LtrNumeric
-                    className={`truncate text-sm font-bold sm:text-base md:text-2xl ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}
-                  >
-                    {remainingStatusDisplayLabel}
-                  </LtrNumeric>
-                </div>
-              </div>
-              {/* Row 3: status note sits under column 3 only — cols 1 & 2 are untouched */}
-              <div className="grid grid-cols-3">
-                <div />
-                <div />
-                <p className="px-2 pt-0.5 text-center text-[10px] text-gray-400 md:text-xs">
-                  {remaining >= 0 ? tr('remainingInBudget') : tr('overBudget')}
-                </p>
-              </div>
+              <table className="w-full table-fixed border-collapse">
+                <tbody>
+                  <tr>
+                    <td className="w-1/3 border-x border-gray-700/80 px-2 pb-2 text-center align-bottom">
+                      <span className="flex min-h-[2.5rem] items-end justify-center text-xs leading-snug text-gray-400 md:text-sm">
+                        {tr('monthlyBudget')}
+                      </span>
+                    </td>
+                    <td className="w-1/3 border-x border-gray-700/80 px-2 pb-2 text-center align-bottom">
+                      <span className="flex min-h-[2.5rem] items-end justify-center text-xs leading-snug text-gray-400 md:text-sm">
+                        {tr('totalExpenses')}
+                      </span>
+                    </td>
+                    <td className="w-1/3 border-x border-gray-700/80 px-2 pb-2 text-center align-bottom">
+                      <span className="flex min-h-[2.5rem] items-end justify-center text-xs leading-snug text-gray-400 md:text-sm">
+                        {tr('budgetStatus')}
+                      </span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-gray-700/80 px-2 align-middle">
+                      <div className="flex h-full min-h-0 items-center justify-center">
+                        <LtrNumeric className="block w-full truncate text-sm font-bold leading-tight text-neutral-100 sm:text-base md:text-2xl">
+                          {selectedBudgetDisplayLabel}
+                        </LtrNumeric>
+                      </div>
+                    </td>
+                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-gray-700/80 px-2 align-middle">
+                      <div className="flex h-full min-h-0 items-center justify-center">
+                        <LtrNumeric
+                          className={`block w-full truncate text-sm font-bold leading-tight sm:text-base md:text-2xl ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}
+                        >
+                          {totalExpensesStatusDisplayLabel}
+                        </LtrNumeric>
+                      </div>
+                    </td>
+                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-gray-700/80 px-2 align-middle">
+                      <div className="flex h-full min-h-0 items-center justify-center">
+                        <LtrNumeric
+                          className={`block w-full truncate text-sm font-bold leading-tight sm:text-base md:text-2xl ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}
+                        >
+                          {remainingStatusDisplayLabel}
+                        </LtrNumeric>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="h-8 border-x border-gray-700/80 px-2 align-top" aria-hidden />
+                    <td className="h-8 border-x border-gray-700/80 px-2 align-top" aria-hidden />
+                    <td className="h-8 border-x border-gray-700/80 px-2 pt-1 text-center align-top text-[10px] leading-snug text-gray-400 md:text-xs">
+                      {remaining >= 0 ? tr('remainingInBudget') : tr('overBudget')}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
 
             {/* Monthly budget setter */}
@@ -4394,6 +4522,7 @@ function App() {
           </>
         )}
       </main>
+      </div>
 
       {editingExpenseId && editExpenseDraft && (
         <div

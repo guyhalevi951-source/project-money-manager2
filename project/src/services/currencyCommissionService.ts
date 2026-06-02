@@ -4,6 +4,45 @@ const STORAGE_KEY = 'money_manager_currency_commissions_v1';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const COMMISSIONS_UPDATED_EVENT = 'currency-commissions-updated';
 
+/**
+ * Safe localStorage helpers with an in-memory fallback.
+ * On iOS Safari private mode and some mobile WebViews, localStorage.setItem
+ * throws a SecurityError or QuotaExceededError. The fallback ensures data
+ * survives for the duration of the current page session even when persistent
+ * storage is unavailable (e.g. guest on a private-mode mobile browser).
+ */
+const _memStore = new Map<string, string>();
+
+function lsRead(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return _memStore.get(key) ?? null;
+  }
+}
+
+function lsWrite(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+    _memStore.delete(key); // real storage works — no need for the fallback copy
+  } catch {
+    _memStore.set(key, value); // persist in memory for this session
+  }
+}
+
+function lsDelete(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+  _memStore.delete(key);
+}
+
+function resetInMemoryFallback(): void {
+  _memStore.clear();
+}
+
 export type CommissionSource = 'local_24h' | 'cloud';
 
 export interface CurrencyCommissionEntry {
@@ -71,11 +110,11 @@ function safeParseEntries(raw: string | null): CurrencyCommissionEntry[] {
 }
 
 function readEntries(): CurrencyCommissionEntry[] {
-  return safeParseEntries(window.localStorage.getItem(STORAGE_KEY));
+  return safeParseEntries(lsRead(STORAGE_KEY));
 }
 
 function writeEntries(entries: CurrencyCommissionEntry[]): void {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+  lsWrite(STORAGE_KEY, JSON.stringify(entries));
 }
 
 function isExpired(entry: CurrencyCommissionEntry, now = Date.now()): boolean {
@@ -213,18 +252,22 @@ export function upsertCloudCurrencyCommission(currency: ExpenseCurrency, percent
 }
 
 export function replaceCloudCurrencyCommissions(cloudEntries: CloudCurrencyCommission[]): void {
+  const now = Date.now();
+  const threshold = now - DAY_MS;
   const localOnly = readActiveEntries().filter((entry) => entry.source !== 'cloud');
   const normalizedCloud: CurrencyCommissionEntry[] = [];
 
   cloudEntries.forEach((entry) => {
     if (!isSupportedCurrency(entry.currency) || entry.currency === 'ILS') return;
     if (!isFinitePercent(entry.percent)) return;
+    const updatedAt = entry.updatedAt ?? now;
+    if (updatedAt < threshold) return;
     normalizedCloud.push({
       currency: entry.currency,
       percent: entry.percent,
       source: 'cloud',
       expiresAt: null,
-      updatedAt: entry.updatedAt ?? Date.now(),
+      updatedAt,
     });
   });
 
@@ -241,6 +284,7 @@ export function clearCloudCurrencyCommissions(): void {
 }
 
 export function clearAllCurrencyCommissionsLocal(): void {
-  window.localStorage.removeItem(STORAGE_KEY);
+  lsDelete(STORAGE_KEY);
+  resetInMemoryFallback();
   dispatchCommissionsUpdated();
 }

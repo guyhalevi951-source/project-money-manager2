@@ -4,6 +4,43 @@ const STORAGE_KEY = 'money_manager_manual_exchange_overrides_v1';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const OVERRIDES_UPDATED_EVENT = 'manual-exchange-overrides-updated';
 
+/**
+ * Safe localStorage helpers with an in-memory session fallback.
+ * Handles iOS Safari private mode (QuotaExceededError) and restrictive
+ * mobile WebViews where localStorage.setItem can throw.
+ */
+const _memStore = new Map<string, string>();
+
+function lsRead(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return _memStore.get(key) ?? null;
+  }
+}
+
+function lsWrite(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+    _memStore.delete(key);
+  } catch {
+    _memStore.set(key, value);
+  }
+}
+
+function lsDelete(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+  _memStore.delete(key);
+}
+
+function resetInMemoryFallback(): void {
+  _memStore.clear();
+}
+
 export type ManualRateSaveMode = '24h' | 'forever';
 export type ManualOverrideSource = 'local_24h' | 'cloud';
 
@@ -102,11 +139,11 @@ function safeParseEntries(raw: string | null): ManualExchangeOverrideEntry[] {
 }
 
 function readEntries(): ManualExchangeOverrideEntry[] {
-  return safeParseEntries(window.localStorage.getItem(STORAGE_KEY));
+  return safeParseEntries(lsRead(STORAGE_KEY));
 }
 
 function writeEntries(entries: ManualExchangeOverrideEntry[]): void {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+  lsWrite(STORAGE_KEY, JSON.stringify(entries));
 }
 
 function isExpired(entry: ManualExchangeOverrideEntry, now = Date.now()): boolean {
@@ -233,19 +270,23 @@ export function removeLocalManualExchangeOverride(fromCurrency: string, toCurren
 export function replaceCloudManualExchangeOverrides(
   cloudOverrides: CloudManualExchangeOverride[],
 ): void {
+  const now = Date.now();
+  const threshold = now - DAY_MS;
   const localOnly = readActiveEntries().filter((entry) => entry.source !== 'cloud');
   const normalizedCloud: ManualExchangeOverrideEntry[] = [];
   cloudOverrides.forEach((entry) => {
-      if (!isFinitePositive(entry.rate) || entry.baseCurrency === entry.quoteCurrency) return;
-      normalizedCloud.push({
-        baseCurrency: entry.baseCurrency,
-        quoteCurrency: entry.quoteCurrency,
-        source: 'cloud' as const,
-        rate: entry.rate,
-        expiresAt: null,
-        updatedAt: entry.updatedAt ?? Date.now(),
-      });
+    if (!isFinitePositive(entry.rate) || entry.baseCurrency === entry.quoteCurrency) return;
+    const updatedAt = entry.updatedAt ?? now;
+    if (updatedAt < threshold) return;
+    normalizedCloud.push({
+      baseCurrency: entry.baseCurrency,
+      quoteCurrency: entry.quoteCurrency,
+      source: 'cloud' as const,
+      rate: entry.rate,
+      expiresAt: null,
+      updatedAt,
     });
+  });
 
   writeEntries([...localOnly, ...normalizedCloud]);
   dispatchOverridesUpdated();
@@ -322,7 +363,8 @@ export function clearCloudManualExchangeOverrides(): void {
 }
 
 export function clearAllManualExchangeOverridesLocal(): void {
-  window.localStorage.removeItem(STORAGE_KEY);
+  lsDelete(STORAGE_KEY);
+  resetInMemoryFallback();
   dispatchOverridesUpdated();
 }
 

@@ -263,14 +263,25 @@ export function loadLegacySettingsFromLocalStorage(): UserSettings {
   };
 }
 
+const EXCHANGE_FEE_LS_KEYS = [
+  'money_manager_currency_commissions_v1',
+  'money_manager_manual_exchange_overrides_v1',
+] as const;
+
 export function clearLegacyLocalStorage(): void {
   // Intentionally preserves `preferred_language` for login-screen language sync after logout.
+  for (const key of EXCHANGE_FEE_LS_KEYS) {
+    window.localStorage.removeItem(key);
+  }
   window.localStorage.removeItem('expenses');
   window.localStorage.removeItem('customCategories');
   window.localStorage.removeItem('budgetsByMonth');
+  window.localStorage.removeItem('budgetOriginalByMonth');
   window.localStorage.removeItem('subBudgetsByMonth');
+  window.localStorage.removeItem('autoTransferByMonth');
   window.localStorage.removeItem('monthlyBudget');
   window.localStorage.removeItem('subBudgets');
+  window.localStorage.removeItem('saved_colors');
   window.localStorage.removeItem(SETTINGS_LS_KEYS.lang);
   window.localStorage.removeItem(SETTINGS_LS_KEYS.keepOriginalValues);
   window.localStorage.removeItem(SETTINGS_LS_KEYS.displayCurrency);
@@ -633,6 +644,24 @@ export async function deleteManualExchangeOverrideFromCloud(
   );
 }
 
+function resolveFeeEntryTimestampMs(value: unknown): number | null {
+  if (!value || typeof value !== 'object') return null;
+  const item = value as { createdAt?: unknown; updatedAt?: unknown };
+
+  const createdAt = item.createdAt;
+  if (createdAt && typeof createdAt === 'object' && 'toMillis' in createdAt) {
+    const toMillis = (createdAt as { toMillis?: () => number }).toMillis;
+    if (typeof toMillis === 'function') {
+      const ms = toMillis.call(createdAt);
+      if (typeof ms === 'number' && Number.isFinite(ms)) return ms;
+    }
+  }
+  if (typeof createdAt === 'number' && Number.isFinite(createdAt)) return createdAt;
+
+  if (typeof item.updatedAt === 'number' && Number.isFinite(item.updatedAt)) return item.updatedAt;
+  return null;
+}
+
 export async function pruneExpiredCloudExchangeFees(uid: string): Promise<void> {
   const threshold = Date.now() - DAY_MS;
 
@@ -640,8 +669,8 @@ export async function pruneExpiredCloudExchangeFees(uid: string): Promise<void> 
   const commissionsRaw = (commissionsSnap.data()?.commissions ?? {}) as Record<string, unknown>;
   const expiredCommissions = Object.entries(commissionsRaw)
     .filter(([, value]) => {
-      const item = value as { updatedAt?: unknown } | undefined;
-      return typeof item?.updatedAt === 'number' && item.updatedAt < threshold;
+      const timestampMs = resolveFeeEntryTimestampMs(value);
+      return timestampMs != null && timestampMs < threshold;
     })
     .map(([currency]) => currency);
   if (expiredCommissions.length > 0) {
@@ -659,8 +688,8 @@ export async function pruneExpiredCloudExchangeFees(uid: string): Promise<void> 
   const overridesRaw = (overridesSnap.data()?.overrides ?? {}) as Record<string, unknown>;
   const expiredOverrides = Object.entries(overridesRaw)
     .filter(([, value]) => {
-      const item = value as { updatedAt?: unknown } | undefined;
-      return typeof item?.updatedAt === 'number' && item.updatedAt < threshold;
+      const timestampMs = resolveFeeEntryTimestampMs(value);
+      return timestampMs != null && timestampMs < threshold;
     })
     .map(([pairKey]) => pairKey);
   if (expiredOverrides.length > 0) {
