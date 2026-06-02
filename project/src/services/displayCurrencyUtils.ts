@@ -6,21 +6,26 @@ import {
   type ExpenseCurrency,
 } from '../constants/currencies';
 import { convertIlsToForeign, type ExchangeRates } from './exchangeRateService';
+import { roundMoney } from './money';
 
 export interface ExpenseDisplayAmount {
   primary: string;
   secondary?: string;
 }
 
-function formatNumeric(amount: number): string {
-  return amount.toLocaleString(undefined, {
-    minimumFractionDigits: 0,
+function formatNumeric(amount: number, forceTwoDecimals = false): string {
+  return roundMoney(amount).toLocaleString(undefined, {
+    minimumFractionDigits: forceTwoDecimals ? 2 : 0,
     maximumFractionDigits: 2,
   });
 }
 
-export function formatAmountWithSymbol(amount: number, currency: ExpenseCurrency): string {
-  const formatted = formatNumeric(Math.abs(amount));
+export function formatAmountWithSymbol(
+  amount: number,
+  currency: ExpenseCurrency,
+  options?: { forceTwoDecimals?: boolean },
+): string {
+  const formatted = formatNumeric(Math.abs(amount), options?.forceTwoDecimals ?? false);
   const sign = amount < 0 ? '-' : '';
   return `${sign}${currencySymbol(currency)}${formatted}`;
 }
@@ -56,8 +61,8 @@ export function formatMoneyFromIls(
     return formatAmountWithSymbol(ilsAmount, 'ILS');
   }
 
-  const rounded = Math.round(converted * 100) / 100;
-  return formatAmountWithSymbol(rounded, displayCurrency);
+  const rounded = roundMoney(converted);
+  return formatAmountWithSymbol(rounded, displayCurrency, { forceTwoDecimals: true });
 }
 
 export function resolveExpenseDisplayAmount(
@@ -71,7 +76,7 @@ export function resolveExpenseDisplayAmount(
     originalAmount != null && originalAmount > 0 && Boolean(originalCurrency?.trim());
   const originalCode = hasOriginal ? symbolToCurrency(originalCurrency!) : null;
   const originalFormatted = hasOriginal
-    ? `${originalCurrency}${formatNumeric(originalAmount!)}`
+    ? `${originalCurrency}${formatNumeric(originalAmount!, false)}`
     : null;
 
   if (displayCurrency === 'ILS') {
@@ -82,18 +87,21 @@ export function resolveExpenseDisplayAmount(
   }
 
   let primaryValue: number;
+  let primaryForceTwoDecimals = false;
 
   if (hasOriginal && originalCode === displayCurrency) {
     primaryValue = originalAmount!;
   } else if (rates) {
     const converted = convertIlsToForeign(ilsAmount, displayCurrency, rates);
-    primaryValue =
-      converted != null ? Math.round(converted * 100) / 100 : ilsAmount;
+    primaryValue = converted != null ? roundMoney(converted) : ilsAmount;
+    primaryForceTwoDecimals = converted != null;
   } else {
     primaryValue = ilsAmount;
   }
 
-  const primary = formatAmountWithSymbol(primaryValue, displayCurrency);
+  const primary = formatAmountWithSymbol(primaryValue, displayCurrency, {
+    forceTwoDecimals: primaryForceTwoDecimals,
+  });
 
   let secondary: string | undefined;
   if (hasOriginal && originalCode === displayCurrency) {

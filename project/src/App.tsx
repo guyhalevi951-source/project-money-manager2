@@ -3,7 +3,6 @@ import { AnimatePresence, motion, type PanInfo } from 'framer-motion';
 import {
   Wallet,
   TrendingDown,
-  AlertTriangle,
   Plus,
   Trash2,
   Check,
@@ -15,9 +14,12 @@ import {
   LayoutDashboard,
   Receipt,
   Search,
+  Pencil,
   RotateCcw,
+  Globe,
   Layers,
   ChevronUp,
+  Menu,
   LogOut,
   Loader2,
   type LucideIcon,
@@ -37,7 +39,6 @@ import CategoryColorPicker from './components/CategoryColorPicker';
 import CreateCategoryForm from './components/CreateCategoryForm';
 import CategoryIconBadge from './components/CategoryIconBadge';
 import CategoryBreakdownLegend from './components/CategoryBreakdownLegend';
-import SubBudgetProgressBar from './components/SubBudgetProgressBar';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { updateProfile } from 'firebase/auth';
 import { auth, signOutUser } from './firebase';
@@ -52,17 +53,23 @@ import DisplayMoney from './components/DisplayMoney';
 import CategoryColorChip from './components/CategoryColorChip';
 import { LocalizedUserText, LtrNumeric, useLanguage } from './LanguageContext';
 import { localizeCategoryLabel } from './translations';
-import { symbolToCurrency } from './services/displayCurrencyUtils';
+import { formatAmountWithSymbol, symbolToCurrency } from './services/displayCurrencyUtils';
 import {
+  clearAllCurrencyCommissionsLocal,
   clearCloudCurrencyCommissions,
+  listActiveCurrencyCommissions,
   replaceCloudCurrencyCommissions,
 } from './services/currencyCommissionService';
 import { convertExpenseAmountToIls } from './services/expenseConversionService';
 import {
+  clearAllManualExchangeOverridesLocal,
   clearCloudManualExchangeOverrides,
+  listActiveManualExchangeOverrides,
   replaceCloudManualExchangeOverrides,
 } from './services/manualExchangeOverrideService';
 import {
+  convertForeignToIls,
+  convertIlsToForeign,
   currencySymbol,
   fetchExchangeRates,
   getCachedExchangeRates,
@@ -77,6 +84,7 @@ import {
   consumePendingAuthLang,
   readGuestLang,
   setGuestLangActive,
+  writePreferredLanguage,
 } from './services/authLanguagePreference';
 import {
   DEFAULT_GUEST_AVATAR_URL,
@@ -86,6 +94,7 @@ import {
 } from './services/avatarService';
 import {
   ensureCloudDataMigrated,
+  pruneExpiredCloudExchangeFees,
   saveCategoriesToCloud,
   saveExpensesToCloud,
   saveSettingsToCloud,
@@ -107,6 +116,7 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from 'recharts';
+import { roundMoney, sumMoney } from './services/money';
 
 interface Expense {
   id: string;
@@ -135,24 +145,6 @@ const monthKeyOfDate = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)
 const monthOrder = (monthKey: string) => {
   const [y, m] = monthKey.split('-').map((n) => parseInt(n, 10));
   return y * 12 + (m - 1);
-};
-
-const findNearestPriorMonthWithData = (
-  targetMonthKey: string,
-  budgetsByMonth: Record<string, number>,
-  subBudgetsByMonth: Record<string, Record<string, number>>
-): string | null => {
-  const targetOrder = monthOrder(targetMonthKey);
-  const keys = new Set<string>([
-    ...Object.keys(budgetsByMonth),
-    ...Object.keys(subBudgetsByMonth),
-  ]);
-
-  const candidates = Array.from(keys).filter((key) => monthOrder(key) < targetOrder);
-  if (candidates.length === 0) return null;
-
-  candidates.sort((a, b) => monthOrder(b) - monthOrder(a));
-  return candidates[0] ?? null;
 };
 
 // Accepts either an ISO date or a legacy he-IL 'D.M.YYYY' string and returns ISO.
@@ -240,12 +232,9 @@ const mixHex = (hex: string, target: string, amount: number): string => {
 };
 
 // Two-tone chart fills: vibrant base for spent, soft tint for remaining budget.
-const spentFill = (hex: string) => hex;
 const remainingFill = (hex: string) => mixHex(hex, '#ffffff', 0.42);
 
 // Bright warning color for overspent envelopes.
-const WARNING_COLOR = '#ef4444';
-
 // Distinct slice colors for daily analytics donuts / trend dots.
 const DAILY_SLICE_COLORS = [
   '#eab308',
@@ -260,11 +249,11 @@ const DAILY_SLICE_COLORS = [
 ];
 
 const ANALYTICS_SLIDE_COUNT = 3;
+const ANALYTICS_CHART_ORDER = [0, 1, 2] as const;
 const ANALYTICS_CHART_HEIGHT = 320;
 const ANALYTICS_DONUT_SIZE = 192;
 const ANALYTICS_LINE_HEIGHT = 240;
 const GENERAL_KEY = '__general__';
-const AUTO_TRANSFER_BUDGET_STORAGE_KEY = 'auto_transfer_budget';
 /** Persisted on a month with no allocations so deletes are not re-filled by inheritance. */
 const SUB_BUDGET_MONTH_MARKER = '__sb_init__';
 
@@ -298,6 +287,24 @@ const monthHasSubBudgetRecord = (
   data: Record<string, Record<string, number>>,
   monthKey: string,
 ): boolean => Object.prototype.hasOwnProperty.call(data, monthKey);
+
+const monthHasExplicitBudgetRecord = (
+  data: Record<string, number>,
+  monthKey: string,
+): boolean => Object.prototype.hasOwnProperty.call(data, monthKey);
+
+const monthHasExplicitAutoTransferRecord = (
+  data: Record<string, boolean>,
+  monthKey: string,
+): boolean => Object.prototype.hasOwnProperty.call(data, monthKey);
+
+const previousMonthKey = (monthKey: string): string => {
+  const [y, m] = monthKey.split('-').map((n) => parseInt(n, 10));
+  const prev = new Date(y, (m || 1) - 2, 1);
+  return monthKeyOfDate(prev);
+};
+
+const roundMoneyAmount = (value: number): number => roundMoney(value);
 
 const compareSubBudgetCategoryKeys = (a: string, b: string): number =>
   a.localeCompare(b, undefined, { sensitivity: 'base' });
@@ -401,7 +408,7 @@ interface CollapsibleNavMenuProps {
   onLogout?: () => void;
 }
 
-// Space-saving collapsible nav: FAB on mobile, compact toggle in header on desktop.
+// Collapsible nav: header dropdown on mobile, compact toggle on desktop.
 function CollapsibleNavMenu({
   activeTab,
   open,
@@ -440,16 +447,18 @@ function CollapsibleNavMenu({
 
   const toggleOpen = () => onOpenChange(!open);
 
-  const backdrop = (
-    <button
-      type="button"
-      aria-label={tr('closeMenu')}
-      onClick={() => onOpenChange(false)}
-      className={`fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-all duration-300 ease-in-out ${
-        open ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
-      } ${variant === 'desktop' ? 'hidden md:block' : 'md:hidden'}`}
-    />
-  );
+  // Desktop-only backdrop (rendered inside the menu component for the sidebar)
+  const backdrop =
+    variant === 'desktop' ? (
+      <button
+        type="button"
+        aria-label={tr('closeMenu')}
+        onClick={() => onOpenChange(false)}
+        className={`fixed inset-0 z-40 hidden bg-black/50 backdrop-blur-sm transition-opacity duration-300 md:block ${
+          open ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        }`}
+      />
+    ) : null;
 
   const tabButton = (tab: (typeof TABS)[number], index: number) => {
     const Icon = tab.icon;
@@ -490,67 +499,50 @@ function CollapsibleNavMenu({
 
   if (variant === 'mobile') {
     return (
-      <>
+      <div className="relative md:hidden">
         {backdrop}
-        {/* FAB-only footprint when closed — avoids a full-width invisible hit layer over the form */}
-        <div
-          className="md:hidden fixed bottom-0 left-1/2 z-40 flex -translate-x-1/2 flex-col items-center"
-          style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+        <button
+          type="button"
+          onClick={toggleOpen}
+          aria-label={open ? tr('closeMenu') : tr('tabDashboard')}
+          aria-expanded={open}
+          aria-haspopup="menu"
+          className={`inline-flex h-10 w-10 items-center justify-center rounded-full border bg-neutral-900/80 text-neutral-300 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 active:scale-95 ${
+            open ? 'border-emerald-500/50 text-neutral-100' : 'border-neutral-700 hover:bg-neutral-800 hover:text-neutral-100'
+          }`}
         >
-          {open && (
-            <div
-              className="mb-3 flex w-[min(100vw-2rem,20rem)] flex-col gap-2 px-4 transition-all duration-300 ease-in-out opacity-100 translate-y-0"
-              role="menu"
-            >
-              {userEmail && (
-                <p
-                  className="text-center text-xs text-slate-500 truncate px-2 py-1 border-b border-slate-800/80 mb-1"
-                  title={userEmail}
-                >
-                  {userEmail}
-                </p>
-              )}
-              {[...TABS].reverse().map((tab, i) => tabButton(tab, TABS.length - 1 - i))}
-              {onLogout && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onLogout();
-                    onOpenChange(false);
-                  }}
-                  className="w-full flex items-center gap-2.5 px-4 py-3.5 rounded-2xl border border-rose-500/30 bg-rose-500/10 text-rose-300 text-sm font-medium hover:bg-rose-500/20 transition-all active:scale-[0.98]"
-                >
-                  <LogOut className="w-5 h-5 shrink-0" />
-                  <span className={`flex-1 ${dir === 'rtl' ? 'text-right' : 'text-left'}`}>{tr('logout')}</span>
-                </button>
-              )}
-            </div>
+          {open ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+        </button>
+        <div
+          role="menu"
+          aria-hidden={!open}
+          className={`absolute top-full mt-2 end-0 z-50 flex w-[min(100vw-2rem,22rem)] flex-col gap-1.5 rounded-2xl border border-slate-700/80 bg-slate-900/95 p-2 shadow-2xl shadow-black/50 backdrop-blur-md transition-all duration-200 ease-out origin-top ${
+            open
+              ? 'pointer-events-auto translate-y-0 scale-100 opacity-100'
+              : 'pointer-events-none -translate-y-1 scale-95 opacity-0'
+          }`}
+        >
+          {userEmail && (
+            <p className="truncate border-b border-slate-800/80 px-2 py-1 text-xs text-slate-500" title={userEmail}>
+              {userEmail}
+            </p>
           )}
-
-          {/* Collapsed / active FAB pill */}
-          <button
-            type="button"
-            onClick={toggleOpen}
-            aria-expanded={open}
-            aria-haspopup="menu"
-            className={`flex items-center gap-2.5 px-5 py-3.5 rounded-full bg-slate-900 border shadow-2xl shadow-black/50 transition-all duration-300 ease-in-out active:scale-[0.98] outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 ${
-              open
-                ? 'border-emerald-500/50 shadow-emerald-500/20'
-                : 'border-slate-700 hover:border-slate-600'
-            }`}
-          >
-            <span className="flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 shadow-lg shadow-emerald-500/30">
-              <ActiveIcon className="w-5 h-5 text-white" />
-            </span>
-            <span className="text-sm font-semibold text-slate-100 max-w-[8rem] truncate">{tabLabel(active.id)}</span>
-            <ChevronUp
-              className={`w-5 h-5 text-slate-400 transition-transform duration-300 ease-in-out ${
-                open ? 'rotate-180' : ''
-              }`}
-            />
-          </button>
+          {TABS.map((tab, i) => tabButton(tab, i))}
+          {onLogout && (
+            <button
+              type="button"
+              onClick={() => {
+                onLogout();
+                onOpenChange(false);
+              }}
+              className="w-full flex items-center gap-2.5 px-4 py-3 rounded-2xl border border-rose-500/30 bg-rose-500/10 text-rose-300 text-sm font-medium hover:bg-rose-500/20 transition-all active:scale-[0.98]"
+            >
+              <LogOut className="w-5 h-5 shrink-0" />
+              <span className={`flex-1 ${dir === 'rtl' ? 'text-right' : 'text-left'}`}>{tr('logout')}</span>
+            </button>
+          )}
         </div>
-      </>
+      </div>
     );
   }
 
@@ -898,9 +890,32 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
   const [view, setView] = useState<SummaryView>('month');
   const [anchor, setAnchor] = useState<Date>(() => new Date());
   const [chartSlide, setChartSlide] = useState(0);
+  const [chartDirection, setChartDirection] = useState<'forward' | 'backward'>('forward');
   const [selectedTrendIso, setSelectedTrendIso] = useState<string | null>(null);
   const isCoarsePointer = useCoarsePointer();
   const touchStartXRef = useRef<number | null>(null);
+  const goToChartSlide = useCallback((nextIndex: number) => {
+    const clampedNextIndex = Math.max(0, Math.min(ANALYTICS_SLIDE_COUNT - 1, nextIndex));
+    setChartSlide((current) => {
+      if (clampedNextIndex === current) return current;
+      setChartDirection(clampedNextIndex > current ? 'forward' : 'backward');
+      return clampedNextIndex;
+    });
+  }, []);
+  const chartSlideVariants = useMemo(
+    () => ({
+      enter: (direction: 'forward' | 'backward') => ({
+        x: direction === 'forward' ? '-100%' : '100%',
+        opacity: 0,
+      }),
+      center: { x: 0, opacity: 1 },
+      exit: (direction: 'forward' | 'backward') => ({
+        x: direction === 'forward' ? '100%' : '-100%',
+        opacity: 0,
+      }),
+    }),
+    [],
+  );
 
   const shift = (dir: number) => {
     setAnchor((a) => {
@@ -1085,9 +1100,9 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
     // finger left->right => move to the graph on the right (dot index -1)
     // finger right->left => move to the graph on the left (dot index +1)
     if (offset < -50 || velocity < -400) {
-      setChartSlide((s) => Math.max(0, s - 1));
+      goToChartSlide(chartSlide - 1);
     } else if (offset > 50 || velocity > 400) {
-      setChartSlide((s) => Math.min(ANALYTICS_SLIDE_COUNT - 1, s + 1));
+      goToChartSlide(chartSlide + 1);
     }
   };
 
@@ -1106,10 +1121,10 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
     if (Math.abs(deltaX) < threshold) return;
 
     if (deltaX > 0) {
-      setChartSlide((s) => Math.min(ANALYTICS_SLIDE_COUNT - 1, s + 1));
+      goToChartSlide(chartSlide + 1);
       return;
     }
-    setChartSlide((s) => Math.max(0, s - 1));
+    goToChartSlide(chartSlide - 1);
   };
 
   const categoryLegend: DonutLegendItem[] = breakdown.map((b) => ({
@@ -1207,11 +1222,10 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
           {periodSubtitle && <p className="text-xs text-neutral-500 mt-0.5">{periodSubtitle}</p>}
         </div>
 
-        {/* Swipeable chart carousel — only mount active slide so Recharts gets real dimensions */}
+        {/* Swipeable chart carousel — order is fixed and language-independent. */}
         <div
-          className={`relative mt-6 w-full touch-pan-y rounded-2xl bg-neutral-950 outline-none focus:outline-none focus-visible:outline-none ${
-            chartSlide === 2 ? 'overflow-visible' : 'overflow-hidden'
-          }`}
+          dir="ltr"
+          className="relative mt-6 w-full touch-pan-y overflow-hidden rounded-2xl bg-neutral-950 outline-none focus:outline-none focus-visible:outline-none"
           style={{ height: ANALYTICS_CHART_HEIGHT, minHeight: ANALYTICS_CHART_HEIGHT }}
         >
           {/* Swipe layer disabled on trend slide so hover/tap reaches the chart */}
@@ -1225,16 +1239,21 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
             aria-hidden
           />
 
-          <AnimatePresence mode="wait" initial={false}>
+          <AnimatePresence mode="popLayout" initial={false}>
             {chartSlide === 0 && (
               <motion.div
                 key={`slide-0-${chartPeriodKey}`}
                 className="absolute inset-0 flex h-full w-full flex-col px-1"
                 style={{ height: ANALYTICS_CHART_HEIGHT }}
-                initial={{ opacity: 0, x: 24 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -24 }}
-                transition={{ duration: 0.28, ease: 'easeInOut' }}
+                custom={chartDirection}
+                variants={chartSlideVariants}
+                initial="enter"
+                animate="center"
+                exit="exit"
+                transition={{
+                  x: { type: 'spring', stiffness: 300, damping: 30 },
+                  opacity: { duration: 0.2 },
+                }}
               >
                 <h3 className="mb-3 shrink-0 text-center text-lg font-bold text-neutral-100 md:text-xl">
                   {tr('chartCategorySplit')}
@@ -1256,10 +1275,15 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                 key={`slide-1-${chartPeriodKey}`}
                 className="absolute inset-0 flex h-full w-full flex-col px-1"
                 style={{ height: ANALYTICS_CHART_HEIGHT }}
-                initial={{ opacity: 0, x: 24 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -24 }}
-                transition={{ duration: 0.28, ease: 'easeInOut' }}
+                custom={chartDirection}
+                variants={chartSlideVariants}
+                initial="enter"
+                animate="center"
+                exit="exit"
+                transition={{
+                  x: { type: 'spring', stiffness: 300, damping: 30 },
+                  opacity: { duration: 0.2 },
+                }}
               >
                 <h3 className="mb-3 shrink-0 text-center text-lg font-bold text-neutral-100 md:text-xl">
                   {tr('chartDailySplit')}
@@ -1288,10 +1312,15 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                 key={`slide-2-${chartPeriodKey}`}
                 className="absolute inset-0 z-20 flex h-full w-full flex-col overflow-visible px-2 pt-2 outline-none focus:outline-none focus-visible:outline-none"
                 style={{ height: ANALYTICS_CHART_HEIGHT }}
-                initial={{ opacity: 0, x: 24 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -24 }}
-                transition={{ duration: 0.28, ease: 'easeInOut' }}
+                custom={chartDirection}
+                variants={chartSlideVariants}
+                initial="enter"
+                animate="center"
+                exit="exit"
+                transition={{
+                  x: { type: 'spring', stiffness: 300, damping: 30 },
+                  opacity: { duration: 0.2 },
+                }}
               >
                 <h3 className="mb-3 shrink-0 text-center text-lg font-bold text-neutral-100 md:text-xl">
                   {tr('chartSpendingOverTime')}
@@ -1460,18 +1489,19 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
 
         {/* Carousel pagination dots */}
         <div
-          className={`flex justify-center items-center gap-2 ${chartSlide === 2 && selectedTrendPoint ? 'mt-4' : 'mt-5'}`}
+          dir="ltr"
+          className={`flex flex-row justify-center items-center gap-2 ${chartSlide === 2 && selectedTrendPoint ? 'mt-4' : 'mt-5'}`}
           role="tablist"
           aria-label={tr('analyticsViews')}
         >
-          {Array.from({ length: ANALYTICS_SLIDE_COUNT }, (_, i) => (
+          {ANALYTICS_CHART_ORDER.map((i) => (
             <button
               key={i}
               type="button"
               role="tab"
               aria-selected={chartSlide === i}
               aria-label={`${tr('viewPrefix')} ${i + 1}`}
-              onClick={() => setChartSlide(i)}
+              onClick={() => goToChartSlide(i)}
               className={`rounded-full transition-all duration-300 ease-in-out ${
                 chartSlide === i
                   ? 'w-6 h-2 bg-sky-500/90 shadow shadow-sky-500/20'
@@ -1541,13 +1571,12 @@ interface Envelope {
 const dashboardShortcutButtonClass =
   'max-w-full rounded-xl border border-neutral-700 bg-neutral-800 px-2.5 py-2 text-xs font-medium leading-snug text-neutral-200 shadow-sm transition-all hover:border-neutral-600 hover:bg-neutral-700 active:scale-[0.98] md:px-3 md:text-sm';
 
-const dashboardTealActionButtonClass =
-  'flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 px-4 py-3 text-sm font-medium text-white shadow-md transition-all hover:from-emerald-600 hover:to-teal-700 hover:shadow-lg active:scale-[0.98] sm:w-auto sm:px-6 sm:text-base';
-
 interface SpendingDonutProps {
   dayExpenses: Expense[];
   categories: Category[];
+  selectedDateIso: string;
   dateLabel: string;
+  onSelectDate: (isoDate: string) => void;
   onPreviousDay: () => void;
   onNextDay: () => void;
   isNotCurrentMonth: boolean;
@@ -1559,7 +1588,9 @@ interface SpendingDonutProps {
 function SpendingDonut({
   dayExpenses,
   categories,
+  selectedDateIso,
   dateLabel,
+  onSelectDate,
   onPreviousDay,
   onNextDay,
   isNotCurrentMonth,
@@ -1567,6 +1598,7 @@ function SpendingDonut({
   onNavigateToExpenses,
 }: SpendingDonutProps) {
   const { tr } = useLanguage();
+  const dateInputRef = useRef<HTMLInputElement | null>(null);
   const shortcutButtons = (
     <div className="ms-auto flex max-w-full flex-row flex-wrap items-center justify-end gap-2 md:gap-3">
       <button
@@ -1585,13 +1617,24 @@ function SpendingDonut({
       </button>
     </div>
   );
-  const total = dayExpenses.reduce((s, e) => s + e.amount, 0);
+  const total = sumMoney(dayExpenses.map((expense) => expense.amount));
   const breakdown = aggregateByCategory(dayExpenses, categories);
 
   const donutData =
     breakdown.length > 0
       ? breakdown.map((b) => ({ id: b.value, value: b.amount, hex: b.hex }))
       : [{ id: 'empty', value: 1, hex: '#262626' }];
+
+  const handleOpenDatePicker = () => {
+    const inputEl = dateInputRef.current;
+    if (!inputEl) return;
+    const pickerCapable = inputEl as HTMLInputElement & { showPicker?: () => void };
+    if (typeof pickerCapable.showPicker === 'function') {
+      pickerCapable.showPicker();
+      return;
+    }
+    inputEl.click();
+  };
 
   return (
     <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 mb-6 sm:mb-8">
@@ -1613,9 +1656,25 @@ function SpendingDonut({
         >
           <ChevronLeft className="h-5 w-5" />
         </button>
-        <span className="min-w-[6.5rem] text-center text-sm font-medium tabular-nums text-neutral-400">
-          {dateLabel}
-        </span>
+        <button
+          type="button"
+          onClick={handleOpenDatePicker}
+          className="relative flex min-w-[7.5rem] items-center justify-center gap-1.5 rounded-lg px-2 py-1 text-center text-sm font-medium tabular-nums text-neutral-300 transition-colors hover:bg-neutral-800 hover:text-neutral-100"
+          aria-label={tr('date')}
+          title={tr('date')}
+        >
+          <CalendarDays className="h-3.5 w-3.5 shrink-0 text-neutral-400" />
+          <span>{dateLabel}</span>
+          <input
+            ref={dateInputRef}
+            type="date"
+            value={selectedDateIso}
+            onChange={(event) => onSelectDate(normalizeDate(event.target.value))}
+            className="pointer-events-none absolute inset-0 h-full w-full opacity-0"
+            tabIndex={-1}
+            aria-hidden
+          />
+        </button>
         <button
           type="button"
           onClick={onNextDay}
@@ -1641,7 +1700,7 @@ function SpendingDonut({
       ) : (
         <div className="flex max-w-full flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="order-2 flex min-w-0 flex-col items-center gap-6 sm:order-1 sm:flex-1 sm:flex-row sm:items-center">
-            <div className="relative h-44 w-44 shrink-0">
+            <div className="relative h-44 w-44 shrink-0 pointer-events-none">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -1733,7 +1792,9 @@ function DashboardCategoryChart({
     <SpendingDonut
       dayExpenses={dayExpenses}
       categories={categories}
+      selectedDateIso={selectedChartDate}
       dateLabel={formatChartDateLabel(selectedChartDate)}
+      onSelectDate={setSelectedChartDate}
       onPreviousDay={goToPreviousChartDay}
       onNextDay={goToNextChartDay}
       isNotCurrentMonth={!isCurrentCalendarMonth}
@@ -1766,11 +1827,12 @@ function SubBudgetTracker({
   onSetSubBudget,
   onRemoveSubBudget,
 }: SubBudgetTrackerProps) {
-  const { tr, ensureUserContents, formatMoney } = useLanguage();
+  const { tr, ensureUserContents, formatMoney, dir } = useLanguage();
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [newSubBudgetColor, setNewSubBudgetColor] = useState(DEFAULT_CATEGORY_COLOR);
-  const [hoveredDonutSliceId, setHoveredDonutSliceId] = useState<string | null>(null);
+  const [subChartSlide, setSubChartSlide] = useState(0);
+  const [subChartDirection, setSubChartDirection] = useState<'forward' | 'backward'>('forward');
 
   const spentByCat = monthExpenses.reduce<Record<string, number>>((acc, e) => {
     acc[e.category] = (acc[e.category] || 0) + e.amount;
@@ -1789,15 +1851,15 @@ function SubBudgetTracker({
     void ensureUserContents(budgetedValues);
   }, [budgetedValues, ensureUserContents]);
 
-  const allocatedTotal = budgetedValues.reduce((s, v) => s + subBudgets[v], 0);
-  const generalAllocated = Math.max(0, budget - allocatedTotal);
+  const allocatedTotal = sumMoney(budgetedValues.map((value) => subBudgets[value]));
+  const generalAllocated = roundMoneyAmount(Math.max(0, budget - allocatedTotal));
 
   // Spending that falls outside any budgeted category draws from the General pool.
   const unbudgetedSpent = Object.entries(spentByCat)
     .filter(([v]) => !budgetedValues.includes(v))
-    .reduce((s, [, amt]) => s + amt, 0);
+    .reduce((s, [, amt]) => roundMoneyAmount(s + amt), 0);
 
-  const totalSpent = monthExpenses.reduce((s, e) => s + e.amount, 0);
+  const totalSpent = sumMoney(monthExpenses.map((expense) => expense.amount));
 
   const envelopes: Envelope[] = useMemo(() => {
     const list: Envelope[] = budgetedValues.map((v) => {
@@ -1837,100 +1899,57 @@ function SubBudgetTracker({
     unbudgetedSpent,
     tr,
   ]);
+  const usedOverviewAmount = Math.min(totalSpent, budget);
+  const remainingOverviewAmount = Math.max(0, budget - totalSpent);
+  const overviewChartData = (
+    [
+      { id: 'used', value: Math.max(usedOverviewAmount, 0), fill: '#15803d' },
+      { id: 'remaining', value: Math.max(remainingOverviewAmount, 0), fill: '#86efac' },
+    ] as const
+  ).filter((item) => item.value > 0);
 
-  // Build the flat two-tone donut segments.
-  const segments: {
-    id: string;
-    categoryKey: string;
-    value: number;
-    fill: string;
-    label: string;
-    status: string;
-    amount: number;
-    percentage: number;
-    isGeneral: boolean;
-  }[] = [];
-  envelopes.forEach((env) => {
-    if (env.allocated <= 0 && env.spent <= 0) return;
-    const overspent = env.spent > env.allocated;
-    if (overspent) {
-      const amount = env.spent;
-      segments.push({
-        id: `${env.key}-over`,
-        categoryKey: env.key,
-        value: Math.max(env.spent, env.allocated, 1),
-        fill: WARNING_COLOR,
-        label: env.label,
-        status: tr('spentLabel'),
-        amount,
-        percentage: budget > 0 ? (amount / budget) * 100 : 0,
-        isGeneral: env.isGeneral,
+  const subCategoryCharts = useMemo(
+    () =>
+      envelopes
+        .filter((env) => !env.isGeneral && env.allocated > 0)
+        .map((env) => ({
+          ...env,
+          spentAmount: Math.min(env.spent, env.allocated),
+          remainingAmount: Math.max(0, env.allocated - env.spent),
+        })),
+    [envelopes],
+  );
+
+  useEffect(() => {
+    setSubChartSlide((prev) => Math.min(prev, Math.max(subCategoryCharts.length - 1, 0)));
+  }, [subCategoryCharts.length]);
+
+  const goToSubChartSlide = useCallback(
+    (nextIndex: number) => {
+      const clamped = Math.max(0, Math.min(subCategoryCharts.length - 1, nextIndex));
+      setSubChartSlide((current) => {
+        if (clamped === current) return current;
+        setSubChartDirection(clamped > current ? 'forward' : 'backward');
+        return clamped;
       });
-      return;
-    }
-    if (env.spent > 0) {
-      const amount = env.spent;
-      segments.push({
-        id: `${env.key}-spent`,
-        categoryKey: env.key,
-        value: env.spent,
-        fill: spentFill(env.hex),
-        label: env.label,
-        status: tr('spentLabel'),
-        amount,
-        percentage: budget > 0 ? (amount / budget) * 100 : 0,
-        isGeneral: env.isGeneral,
-      });
-    }
-    const remaining = env.allocated - env.spent;
-    if (remaining > 0) {
-      segments.push({
-        id: `${env.key}-remaining`,
-        categoryKey: env.key,
-        value: remaining,
-        fill: remainingFill(env.hex),
-        label: env.label,
-        status: tr('remainingLabel'),
-        amount: remaining,
-        percentage: budget > 0 ? (remaining / budget) * 100 : 0,
-        isGeneral: env.isGeneral,
-      });
-    }
-  });
+    },
+    [subCategoryCharts.length],
+  );
 
-  const donutData =
-    segments.length > 0
-      ? segments
-      : [
-          {
-            id: 'empty',
-            categoryKey: '',
-            value: 1,
-            fill: '#262626',
-            label: tr('noData'),
-            status: tr('spentLabel'),
-            amount: 0,
-            percentage: 0,
-            isGeneral: false,
-          },
-        ];
-
-  const activeDonutSlice = hoveredDonutSliceId
-    ? donutData.find((slice) => slice.id === hoveredDonutSliceId) ?? null
-    : null;
-
-  const handleDonutSliceEnter = (slice: { payload?: { id?: string } }) => {
-    const sliceId = slice.payload?.id;
-    if (sliceId && sliceId !== 'empty') {
-      setHoveredDonutSliceId(sliceId);
-    }
-  };
-
-  const handleDonutSliceClick = (slice: { payload?: { id?: string } }) => {
-    const sliceId = slice.payload?.id;
-    if (!sliceId || sliceId === 'empty') return;
-    setHoveredDonutSliceId((current) => (current === sliceId ? null : sliceId));
-  };
+  const subChartVariants = useMemo(
+    () => ({
+      enter: (direction: 'forward' | 'backward') => ({
+        x: direction === 'forward' ? '100%' : '-100%',
+        opacity: 0,
+      }),
+      center: { x: 0, opacity: 1 },
+      exit: (direction: 'forward' | 'backward') => ({
+        x: direction === 'forward' ? '-100%' : '100%',
+        opacity: 0,
+      }),
+    }),
+    [],
+  );
 
   const handleAdd = () => {
     const amt = parseFloat(amount);
@@ -1962,179 +1981,245 @@ function SubBudgetTracker({
         </div>
       ) : (
         <>
-          {/* Donut chart + fixed info panel */}
-          <div className="flex flex-col md:flex-row-reverse items-center justify-center gap-8">
-            <div className="relative w-48 h-48 sm:w-56 sm:h-56 shrink-0">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={donutData}
-                    dataKey="value"
-                    nameKey="id"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius="64%"
-                    outerRadius="100%"
-                    paddingAngle={0}
-                    stroke="#0a0a0a"
-                    strokeWidth={2}
-                    isAnimationActive={false}
-                    onMouseEnter={handleDonutSliceEnter}
-                    onMouseLeave={() => setHoveredDonutSliceId(null)}
-                    onClick={handleDonutSliceClick}
-                  >
-                    {donutData.map((s) => (
-                      <Cell key={s.id} fill={s.fill} />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <DisplayMoney amount={totalSpent} className="text-2xl font-bold text-neutral-100 leading-none" />
-                <span className="text-[11px] text-neutral-500 mt-1">
-                  <LtrNumeric>
-                    {tr('outOf')} {formatMoney(budget)}
-                  </LtrNumeric>
-                </span>
+          {/* Main budget chart: used vs remaining */}
+          <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-3 sm:p-4">
+            <h3 className="mb-3 text-center text-sm font-semibold text-neutral-200 sm:text-base">
+              {tr('budgetStatus')}
+            </h3>
+            <div className="relative flex min-h-[18rem] w-full flex-col items-center gap-3 overflow-hidden pt-2 sm:min-h-[19rem] sm:gap-0 sm:pt-0">
+              {/* Centered donut chart */}
+              <div className="relative h-40 w-40 shrink-0 pointer-events-none sm:absolute sm:inset-0 sm:m-auto sm:h-48 sm:w-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={overviewChartData.length > 0 ? overviewChartData : [{ id: 'remaining', value: 1, fill: '#86efac' }]}
+                      dataKey="value"
+                      nameKey="id"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius="64%"
+                      outerRadius="100%"
+                      paddingAngle={1}
+                      stroke="#0a0a0a"
+                      strokeWidth={2}
+                      isAnimationActive={false}
+                    >
+                      {(overviewChartData.length > 0 ? overviewChartData : [{ id: 'remaining', value: 1, fill: '#86efac' }]).map((slice) => (
+                        <Cell key={slice.id} fill={slice.fill} />
+                      ))}
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                  <DisplayMoney amount={usedOverviewAmount} className="text-xl font-bold text-neutral-100" />
+                  <span className="mt-1 text-[11px] text-neutral-500">
+                    <LtrNumeric>{tr('outOf')} {formatMoney(budget)}</LtrNumeric>
+                  </span>
+                </div>
+              </div>
+              {/* Data block — mirrors sub-budget panel, no category title */}
+              <div
+                className={[
+                  'w-full max-w-[14rem] rounded-xl border border-white/10 bg-black/20 p-3',
+                  'sm:absolute sm:top-1/2 sm:w-48 sm:-translate-y-1/2 sm:p-3',
+                  dir === 'rtl' ? 'sm:right-4 text-right' : 'sm:left-4 text-left',
+                ].join(' ')}
+              >
+                <div className="space-y-1">
+                  <p className="text-xs text-neutral-400">
+                    {tr('spentLabel')}: <DisplayMoney amount={usedOverviewAmount} className="inline-block" />
+                  </p>
+                  <p className="text-xs text-neutral-400">
+                    {tr('remainingLabel')}: <DisplayMoney amount={remainingOverviewAmount} className="inline-block" />
+                  </p>
+                  <p className="text-xs text-neutral-500">
+                    {tr('totalBudgetLabel')}: <DisplayMoney amount={budget} className="inline-block" />
+                  </p>
+                  <p className="text-xs text-emerald-300">
+                    {tr('spentLabel')}{' '}
+                    {budget > 0 ? `${((usedOverviewAmount / budget) * 100).toFixed(0)}%` : '0%'}
+                  </p>
+                  <p className="text-xs text-emerald-200">
+                    {tr('remainingLabel')}{' '}
+                    {budget > 0 ? `${((remainingOverviewAmount / budget) * 100).toFixed(0)}%` : '0%'}
+                  </p>
+                  <div className="mt-2 space-y-1 border-t border-white/10 pt-2 text-[11px] text-neutral-300">
+                    <p className="font-semibold text-neutral-200">{tr('subBudgetLegendTitle')}</p>
+                    <div className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-green-700" />
+                      <span>{tr('subBudgetLegendUsed')}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-green-300" />
+                      <span>{tr('subBudgetLegendRemaining')}</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
-
-            <div
-              className="w-64 h-40 shrink-0 flex flex-col justify-center rounded-xl border border-gray-600 bg-neutral-900/80 px-4 py-3 text-right text-white shadow-lg shadow-black/40"
-              aria-live="polite"
-            >
-              {activeDonutSlice ? (
-                <>
-                  <p className="text-sm font-semibold text-white truncate">
-                    {activeDonutSlice.isGeneral ? (
-                      activeDonutSlice.label
-                    ) : (
-                      <LocalizedUserText text={activeDonutSlice.categoryKey} />
-                    )}
-                  </p>
-                  <p className="text-xs mt-0.5 text-gray-300">{activeDonutSlice.status}</p>
-                  <p className="text-base font-bold mt-2 text-white">
-                    <DisplayMoney amount={activeDonutSlice.amount} className="inline-block" />
-                  </p>
-                  <p className="text-xs mt-0.5 text-gray-300">
-                    <LtrNumeric>{activeDonutSlice.percentage.toFixed(0)}%</LtrNumeric>
-                  </p>
-                </>
-              ) : (
-                <>
-                  <p className="text-sm font-semibold text-white whitespace-nowrap">
-                    {tr('totalBudgetLabel')}:{' '}
-                    <DisplayMoney amount={budget} className="text-base font-bold inline-block" />
-                  </p>
-                  <p className="text-xs mt-0.5 text-gray-300">
-                    {tr('spentLabel')}:{' '}
-                    <LtrNumeric>
-                      {formatMoney(totalSpent)}
-                      {budget > 0 ? ` (${((totalSpent / budget) * 100).toFixed(0)}%)` : ''}
-                    </LtrNumeric>
-                  </p>
-                  <p className="text-xs mt-0.5 text-gray-400 whitespace-nowrap">
-                    {tr('cardHintHoverSlice')}
-                  </p>
-                </>
-              )}
-            </div>
           </div>
 
-          {/* Tone legend */}
-          <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 mt-4 text-xs text-neutral-400">
-            <span className="flex items-center gap-1.5">
-              <span
-                className="w-3 h-3 rounded-sm"
-                style={{ backgroundColor: spentFill(hexForColor(DEFAULT_CATEGORY_COLOR)) }}
-              />
-              {tr('spentLabel')}
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span
-                className="w-3 h-3 rounded-sm"
-                style={{ backgroundColor: remainingFill(hexForColor(DEFAULT_CATEGORY_COLOR)) }}
-              />
-              {tr('remainingLabel')}
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: WARNING_COLOR }} />
-              {tr('overspentLabel')}
-            </span>
-          </div>
-
-          {/* Breakdown list with progress bars */}
+          {/* Sub-category action buttons + animated per-category chart carousel */}
           <div className="mt-6 space-y-4">
-            {envelopes.length === 0 ? (
-              <p className="text-sm text-neutral-500 text-center">{tr('startByAddingSubBudget')}</p>
+            {subCategoryCharts.length === 0 ? (
+              <p className="text-center text-sm text-neutral-500">{tr('startByAddingSubBudget')}</p>
             ) : (
-              envelopes.map((env) => {
-                const Icon = env.icon;
-                const overspent = env.spent > env.allocated;
-                return (
-                  <div key={env.key} className="flex items-center gap-3">
-                    {overspent ? (
-                      <div
-                        className="shrink-0 w-11 h-11 rounded-full flex items-center justify-center text-white"
-                        style={{ backgroundColor: WARNING_COLOR }}
-                      >
-                        <Icon className="w-5 h-5" />
-                      </div>
-                    ) : (
-                      <CategoryIconBadge icon={Icon} hex={env.hex} colorClass={env.color} size="large" />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2 mb-1.5">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="font-medium text-neutral-100 truncate">
-                            {env.isGeneral ? (
-                              env.label
-                            ) : (
-                              <LocalizedUserText text={env.key} />
-                            )}
-                          </span>
-                          {overspent && (
-                            <span className="shrink-0 flex items-center gap-1 text-[10px] font-semibold text-rose-400 bg-rose-500/10 px-1.5 py-0.5 rounded-full">
-                              <AlertTriangle className="w-3 h-3" />
-                              {tr('overspentLabel')}
-                            </span>
-                          )}
-                        </div>
-                        <span className="text-sm shrink-0 text-neutral-300">
-                          <LtrNumeric>
-                            <span className={overspent ? 'text-rose-400 font-semibold' : 'text-neutral-100 font-semibold'}>
-                              {formatMoney(env.spent)}
-                            </span>
-                            <span className="text-neutral-500"> / {formatMoney(env.allocated)}</span>
-                          </LtrNumeric>
-                        </span>
-                      </div>
-                      <SubBudgetProgressBar
-                        allocated={env.allocated}
-                        spent={env.spent}
-                        usedColor={overspent ? WARNING_COLOR : spentFill(env.hex)}
-                        remainingColor={remainingFill(env.hex)}
-                        overspent={overspent}
-                      />
-                    </div>
-                    {!env.isGeneral && (
+              <>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {subCategoryCharts.map((env, index) => {
+                    const Icon = env.icon;
+                    const isActive = index === subChartSlide;
+                    return (
                       <button
+                        key={`sub-btn-${env.key}`}
                         type="button"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          onRemoveSubBudget(env.key);
-                        }}
-                        className="relative z-10 shrink-0 rounded-lg p-2 text-neutral-500 transition-all hover:bg-rose-500/10 hover:text-rose-400"
-                        title={tr('removeSubBudget')}
-                        aria-label={tr('removeSubBudget')}
+                        onClick={() => goToSubChartSlide(index)}
+                        className={`flex min-h-[3rem] w-full items-center justify-center gap-2 overflow-hidden rounded-xl border p-2 text-center transition-all ${
+                          isActive ? 'ring-2 ring-white/40' : 'hover:scale-[1.01]'
+                        }`}
+                        style={{ borderColor: `${env.hex}66`, backgroundColor: `${env.hex}22` }}
                       >
-                        <X className="h-4 w-4" />
+                        <Icon className="h-4 w-4 shrink-0 text-white" />
+                        <span className="truncate text-xs font-semibold text-white sm:text-sm">
+                          <LocalizedUserText text={env.key} />
+                        </span>
                       </button>
+                    );
+                  })}
+                </div>
+
+                <div className="relative w-full overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950/70 p-3 sm:p-4">
+                  {subCategoryCharts[subChartSlide] && (
+                    <button
+                      type="button"
+                      onClick={() => onRemoveSubBudget(subCategoryCharts[subChartSlide].key)}
+                      className={[
+                        'z-30 inline-flex items-center justify-center self-start rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-300 transition-colors hover:bg-rose-500/20',
+                        'sm:absolute sm:bottom-4',
+                        dir === 'rtl' ? 'sm:left-4' : 'sm:right-4',
+                      ].join(' ')}
+                      title={tr('removeSubBudget')}
+                      aria-label={tr('removeSubBudget')}
+                    >
+                      <span className="truncate">{tr('removeSubBudget')}</span>
+                    </button>
+                  )}
+                  <AnimatePresence mode="popLayout" initial={false}>
+                    {subCategoryCharts[subChartSlide] && (
+                      <motion.div
+                        key={`sub-chart-${subCategoryCharts[subChartSlide].key}-${subChartSlide}`}
+                        custom={subChartDirection}
+                        variants={subChartVariants}
+                        initial="enter"
+                        animate="center"
+                        exit="exit"
+                        transition={{
+                          x: { type: 'spring', stiffness: 300, damping: 30 },
+                          opacity: { duration: 0.2 },
+                        }}
+                        drag="x"
+                        dragConstraints={{ left: 0, right: 0 }}
+                        dragElastic={0.12}
+                        dragMomentum={false}
+                        onDragEnd={(_, info: PanInfo) => {
+                          if (Math.abs(info.offset.x) < 50) return;
+                          if (info.offset.x < 0) {
+                            goToSubChartSlide(subChartSlide + 1);
+                            return;
+                          }
+                          goToSubChartSlide(subChartSlide - 1);
+                        }}
+                        className="relative flex min-h-[18rem] w-full flex-col items-center gap-3 overflow-hidden pt-2 sm:min-h-[19rem] sm:gap-0 sm:pt-0"
+                      >
+                        <div className="relative h-40 w-40 shrink-0 pointer-events-none sm:absolute sm:inset-0 sm:m-auto sm:h-48 sm:w-48">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie
+                                data={[
+                                  {
+                                    id: 'spent',
+                                    value: Math.max(subCategoryCharts[subChartSlide].spentAmount, 0),
+                                    fill: subCategoryCharts[subChartSlide].hex,
+                                  },
+                                  {
+                                    id: 'remaining',
+                                    value: Math.max(subCategoryCharts[subChartSlide].remainingAmount, 0),
+                                    fill: remainingFill(subCategoryCharts[subChartSlide].hex),
+                                  },
+                                ].filter((item) => item.value > 0)}
+                                dataKey="value"
+                                nameKey="id"
+                                cx="50%"
+                                cy="50%"
+                                innerRadius="62%"
+                                outerRadius="100%"
+                                paddingAngle={1}
+                                stroke="#0a0a0a"
+                                strokeWidth={2}
+                                isAnimationActive={false}
+                              >
+                                <Cell fill={subCategoryCharts[subChartSlide].hex} />
+                                <Cell fill={remainingFill(subCategoryCharts[subChartSlide].hex)} />
+                              </Pie>
+                            </PieChart>
+                          </ResponsiveContainer>
+                        </div>
+                        <div
+                          className={[
+                            'w-full max-w-[14rem] rounded-xl border border-white/10 bg-black/20 p-3',
+                            'sm:absolute sm:top-1/2 sm:w-48 sm:-translate-y-1/2 sm:p-3',
+                            dir === 'rtl' ? 'sm:right-4 text-right' : 'sm:left-4 text-left',
+                          ].join(' ')}
+                        >
+                          <div className="space-y-1">
+                            <p className="text-sm font-semibold text-neutral-100 sm:text-base">
+                              <LocalizedUserText text={subCategoryCharts[subChartSlide].key} />
+                            </p>
+                            <p className="text-xs text-neutral-400">
+                              {tr('spentLabel')}: <DisplayMoney amount={subCategoryCharts[subChartSlide].spentAmount} className="inline-block" />
+                            </p>
+                            <p className="text-xs text-neutral-400">
+                              {tr('remainingLabel')}: <DisplayMoney amount={subCategoryCharts[subChartSlide].remainingAmount} className="inline-block" />
+                            </p>
+                            <p className="text-xs text-neutral-500">
+                              {tr('totalBudgetLabel')}: <DisplayMoney amount={subCategoryCharts[subChartSlide].allocated} className="inline-block" />
+                            </p>
+                            <p className="text-xs text-emerald-300">
+                              {tr('spentLabel')}{' '}
+                              {subCategoryCharts[subChartSlide].allocated > 0
+                                ? `${((subCategoryCharts[subChartSlide].spentAmount / subCategoryCharts[subChartSlide].allocated) * 100).toFixed(0)}%`
+                                : '0%'}
+                            </p>
+                            <p className="text-xs text-emerald-200">
+                              {tr('remainingLabel')}{' '}
+                              {subCategoryCharts[subChartSlide].allocated > 0
+                                ? `${((subCategoryCharts[subChartSlide].remainingAmount / subCategoryCharts[subChartSlide].allocated) * 100).toFixed(0)}%`
+                                : '0%'}
+                            </p>
+                            <div className="mt-2 space-y-1 border-t border-white/10 pt-2 text-[11px] text-neutral-300">
+                              <p className="font-semibold text-neutral-200">{tr('subBudgetLegendTitle')}</p>
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className="h-2.5 w-2.5 rounded-full"
+                                  style={{ backgroundColor: subCategoryCharts[subChartSlide].hex }}
+                                />
+                                <span>{tr('subBudgetLegendUsed')}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className="h-2.5 w-2.5 rounded-full"
+                                  style={{ backgroundColor: remainingFill(subCategoryCharts[subChartSlide].hex) }}
+                                />
+                                <span>{tr('subBudgetLegendRemaining')}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </motion.div>
                     )}
-                  </div>
-                );
-              })
+                  </AnimatePresence>
+                </div>
+              </>
             )}
           </div>
 
@@ -2463,29 +2548,46 @@ function App() {
   // Monthly budget is scoped per month ('YYYY-MM' -> amount) so changing one
   // month never affects another month's history.
   const [budgetsByMonth, setBudgetsByMonth] = useState<Record<string, number>>({});
+  const [budgetOriginalByMonth, setBudgetOriginalByMonth] = useState<
+    Record<string, { amount: number; currency: ExpenseCurrency }>
+  >({});
   const [budgetInput, setBudgetInput] = useState<string>('');
 
   // Budget-change confirmation modal state.
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [pendingBudget, setPendingBudget] = useState<number | null>(null);
+  const [pendingBudgetOriginal, setPendingBudgetOriginal] = useState<{
+    amount: number;
+    currency: ExpenseCurrency;
+  } | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [newExpense, setNewExpense] = useState({
     description: '',
     amount: '',
-    currency: 'ILS' as ExpenseCurrency,
+    currency: displayCurrency as ExpenseCurrency,
     category: CATEGORIES[0]?.value ?? '',
     date: toISODate(new Date()),
   });
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+  const [editExpenseDraft, setEditExpenseDraft] = useState<{
+    description: string;
+    amount: string;
+    currency: ExpenseCurrency;
+    category: string;
+    date: string;
+  } | null>(null);
+  const [editExpenseRatesReady, setEditExpenseRatesReady] = useState(true);
+  const [recentlyUpdatedExpenseId, setRecentlyUpdatedExpenseId] = useState<string | null>(null);
   const [expenseRatesReady, setExpenseRatesReady] = useState(true);
   const [showBudgetSaved, setShowBudgetSaved] = useState(false);
-  const [autoTransferBudget, setAutoTransferBudget] = useState<boolean>(() => {
-    const raw = window.localStorage.getItem(AUTO_TRANSFER_BUDGET_STORAGE_KEY);
-    return raw == null ? true : raw !== 'false';
-  });
+  const [autoTransferByMonth, setAutoTransferByMonth] = useState<Record<string, boolean>>({});
 
   // Active top-level navigation tab.
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialCurrencySection, setSettingsInitialCurrencySection] = useState<
+    'display' | 'exchange' | null
+  >(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const settingsReturnTabRef = useRef<TabId>('dashboard');
   const [navOpen, setNavOpen] = useState(false);
@@ -2508,6 +2610,7 @@ function App() {
     setActiveTab(id);
     setNavOpen(false);
     setSettingsOpen(false);
+    setSettingsInitialCurrencySection(null);
     setProfileOpen(false);
   };
 
@@ -2515,13 +2618,37 @@ function App() {
     settingsReturnTabRef.current = activeTab;
     setNavOpen(false);
     setProfileOpen(false);
+    setSettingsInitialCurrencySection(null);
     setSettingsOpen(true);
   };
+
+  const openSettingsDisplayCurrency = useCallback(() => {
+    settingsReturnTabRef.current = activeTab;
+    setNavOpen(false);
+    setProfileOpen(false);
+    setSettingsInitialCurrencySection('display');
+    setSettingsOpen(true);
+  }, [activeTab]);
+
+  const openSettingsExchangeRates = useCallback(() => {
+    settingsReturnTabRef.current = activeTab;
+    setNavOpen(false);
+    setProfileOpen(false);
+    setSettingsInitialCurrencySection('exchange');
+    setSettingsOpen(true);
+  }, [activeTab]);
 
   const openProfile = () => {
     setNavOpen(false);
     setSettingsOpen(false);
     setProfileOpen(true);
+  };
+
+  const handleQuickLanguageToggle = () => {
+    const nextLang = lang === 'he' ? 'en' : 'he';
+    // Keep parity with SettingsPage language switch flow.
+    writePreferredLanguage(nextLang);
+    setLang(nextLang);
   };
 
   const closeProfile = () => {
@@ -2530,12 +2657,17 @@ function App() {
 
   const closeSettings = () => {
     setSettingsOpen(false);
+    setSettingsInitialCurrencySection(null);
     setActiveTab(settingsReturnTabRef.current);
   };
 
   const handleLogout = async () => {
     try {
       await signOutUser();
+      clearAllCurrencyCommissionsLocal();
+      clearAllManualExchangeOverridesLocal();
+      clearCloudCurrencyCommissions();
+      clearCloudManualExchangeOverrides();
       setNavOpen(false);
       setActiveTab('dashboard');
       setProfileOpen(false);
@@ -2560,18 +2692,7 @@ function App() {
   };
 
   const handleAutoTransferBudgetChange = (nextValue: boolean) => {
-    setAutoTransferBudget(nextValue);
-    window.localStorage.setItem(AUTO_TRANSFER_BUDGET_STORAGE_KEY, String(nextValue));
-
-    if (!user || user.isAnonymous || !settingsCloudReady) return;
-    void saveSettingsToCloud(user.uid, {
-      lang,
-      keepOriginalValues,
-      displayCurrency,
-      saved_colors: savedColors,
-      custom_currencies: customCurrencies,
-      autoTransferBudget: nextValue,
-    });
+    setAutoTransferByMonth((prev) => ({ ...prev, [selectedMonthKey]: nextValue }));
   };
 
   // Search query for the Expenses history page.
@@ -2615,18 +2736,136 @@ function App() {
   // The month currently in focus ('YYYY-MM') and its budget + sub-budgets.
   // Deriving these keeps the rest of the component working with simple values.
   const selectedMonthKey = monthKeyOfDate(selectedDate);
-  const explicitBudget = budgetsByMonth[selectedMonthKey];
-  const inheritedBudget = useMemo(() => {
-    if (!autoTransferBudget || explicitBudget !== undefined) return 0;
-    const sourceMonthKey = findNearestPriorMonthWithData(
-      selectedMonthKey,
-      budgetsByMonth,
-      subBudgetsByMonth,
-    );
-    if (!sourceMonthKey) return 0;
-    return budgetsByMonth[sourceMonthKey] ?? 0;
-  }, [autoTransferBudget, explicitBudget, selectedMonthKey, budgetsByMonth, subBudgetsByMonth]);
-  const budget = explicitBudget ?? inheritedBudget;
+  const getAutoTransferStatusForMonth = useCallback(
+    (targetMonthKey: string): boolean => {
+      if (monthHasExplicitAutoTransferRecord(autoTransferByMonth, targetMonthKey)) {
+        return autoTransferByMonth[targetMonthKey] ?? true;
+      }
+
+      const explicitMonthKeys = Object.keys(autoTransferByMonth);
+      if (explicitMonthKeys.length === 0) return true;
+
+      const earliestOrder = Math.min(...explicitMonthKeys.map((key) => monthOrder(key)));
+      let cursorMonthKey = previousMonthKey(targetMonthKey);
+
+      while (monthOrder(cursorMonthKey) >= earliestOrder) {
+        if (monthHasExplicitAutoTransferRecord(autoTransferByMonth, cursorMonthKey)) {
+          return autoTransferByMonth[cursorMonthKey] ?? true;
+        }
+        cursorMonthKey = previousMonthKey(cursorMonthKey);
+      }
+
+      return true;
+    },
+    [autoTransferByMonth],
+  );
+
+  const getBudgetResolutionForMonth = useCallback(
+    (targetMonthKey: string): { amountIls: number; sourceMonthKey: string | null } => {
+      // STEP A: explicit month budget always wins.
+      if (monthHasExplicitBudgetRecord(budgetsByMonth, targetMonthKey)) {
+        return { amountIls: budgetsByMonth[targetMonthKey] ?? 0, sourceMonthKey: targetMonthKey };
+      }
+
+      // Auto-transfer state for this target month controls inheritance.
+      if (!getAutoTransferStatusForMonth(targetMonthKey)) {
+        return { amountIls: 0, sourceMonthKey: null };
+      }
+
+      const explicitBudgetMonthKeys = Object.keys(budgetsByMonth);
+      if (explicitBudgetMonthKeys.length === 0) return { amountIls: 0, sourceMonthKey: null };
+
+      const earliestBudgetOrder = Math.min(...explicitBudgetMonthKeys.map((key) => monthOrder(key)));
+      let cursorMonthKey = previousMonthKey(targetMonthKey);
+
+      while (monthOrder(cursorMonthKey) >= earliestBudgetOrder) {
+        if (!getAutoTransferStatusForMonth(cursorMonthKey)) {
+          return { amountIls: 0, sourceMonthKey: null };
+        }
+        if (monthHasExplicitBudgetRecord(budgetsByMonth, cursorMonthKey)) {
+          return { amountIls: budgetsByMonth[cursorMonthKey] ?? 0, sourceMonthKey: cursorMonthKey };
+        }
+        cursorMonthKey = previousMonthKey(cursorMonthKey);
+      }
+
+      return { amountIls: 0, sourceMonthKey: null };
+    },
+    [budgetsByMonth, getAutoTransferStatusForMonth],
+  );
+
+  const selectedBudgetResolution = useMemo(
+    () => getBudgetResolutionForMonth(selectedMonthKey),
+    [getBudgetResolutionForMonth, selectedMonthKey],
+  );
+  const budget = selectedBudgetResolution.amountIls;
+  const selectedBudgetSourceMonthKey = selectedBudgetResolution.sourceMonthKey;
+  const selectedBudgetDisplayLabel = useMemo(() => {
+    if (selectedBudgetSourceMonthKey) {
+      const original = budgetOriginalByMonth[selectedBudgetSourceMonthKey];
+      if (original && original.currency === displayCurrency) {
+        return formatAmountWithSymbol(original.amount, displayCurrency);
+      }
+    }
+    return formatMoney(budget);
+  }, [
+    selectedBudgetSourceMonthKey,
+    budgetOriginalByMonth,
+    displayCurrency,
+    budget,
+    formatMoney,
+  ]);
+  const budgetInputLength = useMemo(() => budgetInput.trim().length, [budgetInput]);
+  const budgetInputFlexGrow = useMemo(() => {
+    if (budgetInputLength <= 4) return 1;
+    return Math.min(2.8, 1 + (budgetInputLength - 4) * 0.22);
+  }, [budgetInputLength]);
+  const budgetInputVisibleLength = useMemo(() => {
+    const typedLen = budgetInput.trim().length;
+    if (typedLen > 0) return typedLen;
+    if (budget > 0) return `${tr('currentAmountPrefix')}: ${selectedBudgetDisplayLabel}`.length;
+    return tr('enterAmount').length;
+  }, [budgetInput, budget, tr, selectedBudgetDisplayLabel]);
+  const budgetInputTextClass = useMemo(() => {
+    if (budgetInputVisibleLength <= 8) return 'text-sm';
+    if (budgetInputVisibleLength <= 12) return 'text-xs';
+    return 'text-[11px]';
+  }, [budgetInputVisibleLength]);
+  const updateBudgetLabel = tr('updateBudget');
+  const budgetSavedLabel = tr('budgetSaved');
+  const subBudgetsButtonLabel = tr('tabSubbudgets');
+  const getBudgetButtonTextClass = useCallback((label: string): string => {
+    const len = label.trim().length;
+    if (len < 8) return 'text-sm sm:text-base leading-tight';
+    if (len <= 14) return 'text-sm sm:text-sm leading-tight';
+    return 'text-[10px] sm:text-xs leading-tight';
+  }, []);
+  const renderBudgetButtonText = useCallback(
+    (label: string) => {
+      const tokens = label.split(/(\s+)/);
+      return (
+        <span className={`w-full px-0.5 text-center break-keep ${getBudgetButtonTextClass(label)}`.trim()}>
+          {tokens.map((token, index) => {
+            const isWhitespace = /^\s+$/.test(token);
+            if (isWhitespace) return <span key={`ws-${index}`}>{token}</span>;
+            const hasCompoundConnector = token.includes('-') || token.includes('_');
+            if (hasCompoundConnector) {
+              return (
+                <span key={`tk-${index}`} className="inline-block whitespace-nowrap">
+                  {token}
+                </span>
+              );
+            }
+            return <span key={`tk-${index}`}>{token}</span>;
+          })}
+        </span>
+      );
+    },
+    [getBudgetButtonTextClass],
+  );
+  const isAutoTransferEnabledForSelectedMonth = useMemo(
+    () => getAutoTransferStatusForMonth(selectedMonthKey),
+    [getAutoTransferStatusForMonth, selectedMonthKey],
+  );
   const subBudgets = subBudgetsByMonth[selectedMonthKey] ?? {};
 
   const patchSubBudgetsByMonth = useCallback(
@@ -2644,13 +2883,15 @@ function App() {
             expenses,
             customCategories,
             budgetsByMonth,
+            budgetOriginalByMonth,
+            autoTransferByMonth,
             subBudgetsByMonth: next,
           });
         }
         return next;
       });
     },
-    [budgetsByMonth, customCategories, dataReady, expenses, user],
+    [budgetsByMonth, budgetOriginalByMonth, autoTransferByMonth, customCategories, dataReady, expenses, user],
   );
 
   useEffect(() => {
@@ -2699,6 +2940,11 @@ function App() {
     setExpenses(data.expenses.map((e) => ({ ...e, date: normalizeDate(e.date) })));
     setCustomCategories(data.customCategories);
     setBudgetsByMonth(data.budgetsByMonth);
+    setBudgetOriginalByMonth(
+      (data.budgetOriginalByMonth as Record<string, { amount: number; currency: ExpenseCurrency }> | undefined) ??
+        {},
+    );
+    setAutoTransferByMonth(data.autoTransferByMonth ?? {});
     setSubBudgetsByMonth(data.subBudgetsByMonth);
   };
 
@@ -2707,6 +2953,8 @@ function App() {
     setExpenses([]);
     setCustomCategories([]);
     setBudgetsByMonth({});
+    setBudgetOriginalByMonth({});
+    setAutoTransferByMonth({});
     setSubBudgetsByMonth({});
     setBudgetInput('');
     setSearch('');
@@ -2762,6 +3010,8 @@ function App() {
         setGuestLangActive(false);
         pendingAuthLangRef.current = null;
         setSettingsPersistence('local');
+        void listActiveCurrencyCommissions();
+        void listActiveManualExchangeOverrides();
         clearCloudManualExchangeOverrides();
         clearCloudCurrencyCommissions();
         setDataReady(true);
@@ -2775,6 +3025,8 @@ function App() {
       if (user.isAnonymous) {
         setGuestLangActive(true);
         setSettingsPersistence('local');
+        void listActiveCurrencyCommissions();
+        void listActiveManualExchangeOverrides();
         clearCloudManualExchangeOverrides();
         clearCloudCurrencyCommissions();
         const guestLang = readGuestLang();
@@ -2792,6 +3044,8 @@ function App() {
       const uid = user.uid;
 
       try {
+        await pruneExpiredCloudExchangeFees(uid);
+        if (cancelled) return;
         await ensureCloudDataMigrated(uid);
         if (cancelled) return;
 
@@ -2834,6 +3088,16 @@ function App() {
                 ? prev
                 : data.budgetsByMonth,
             );
+            setBudgetOriginalByMonth((prev) =>
+              JSON.stringify(prev) === JSON.stringify(data.budgetOriginalByMonth)
+                ? prev
+                : (data.budgetOriginalByMonth as Record<string, { amount: number; currency: ExpenseCurrency }>),
+            );
+            setAutoTransferByMonth((prev) =>
+              JSON.stringify(prev) === JSON.stringify(data.autoTransferByMonth)
+                ? prev
+                : data.autoTransferByMonth,
+            );
             setSubBudgetsByMonth((prev) => {
               const merged = mergeRemoteSubBudgetsByMonth(
                 prev,
@@ -2851,6 +3115,8 @@ function App() {
             if (!cancelled) {
               setCustomCategories([]);
               setBudgetsByMonth({});
+              setBudgetOriginalByMonth({});
+              setAutoTransferByMonth({});
               setSubBudgetsByMonth({});
               if (!initialCategories) {
                 initialCategories = true;
@@ -2877,14 +3143,12 @@ function App() {
                     displayCurrency: mergeBase.displayCurrency,
                     saved_colors: mergeBase.savedColors,
                     custom_currencies: mergeBase.customCurrencies,
-                    autoTransferBudget,
                   };
               applySettingsFromCloud(merged);
             } else if (meta.exists) {
               skipNextSettingsSaveRef.current = true;
               applySettingsFromCloud(settings);
             }
-            setAutoTransferBudget(settings.autoTransferBudget);
             if (!initialSettings) {
               initialSettings = true;
               setSettingsCloudReady(true);
@@ -2945,7 +3209,7 @@ function App() {
       unsubManualOverrides?.();
       unsubCurrencyCommissions?.();
     };
-  }, [user, authReady, applySettingsFromCloud, setSettingsPersistence, setLang, autoTransferBudget]);
+  }, [user, authReady, applySettingsFromCloud, setSettingsPersistence, setLang]);
 
   // Persist financial changes: localStorage for guests, debounced Firestore for accounts.
   useEffect(() => {
@@ -2955,6 +3219,8 @@ function App() {
       expenses,
       customCategories,
       budgetsByMonth,
+      budgetOriginalByMonth,
+      autoTransferByMonth,
       subBudgetsByMonth,
     };
 
@@ -2977,6 +3243,8 @@ function App() {
         saveCategoriesToCloud(uid, {
           customCategories,
           budgetsByMonth,
+          budgetOriginalByMonth,
+          autoTransferByMonth,
           subBudgetsByMonth,
         }),
       ]).catch(() => {
@@ -2985,7 +3253,16 @@ function App() {
     }, 400);
 
     return () => window.clearTimeout(timer);
-  }, [expenses, customCategories, budgetsByMonth, subBudgetsByMonth, dataReady, user]);
+  }, [
+    expenses,
+    customCategories,
+    budgetsByMonth,
+    budgetOriginalByMonth,
+    autoTransferByMonth,
+    subBudgetsByMonth,
+    dataReady,
+    user,
+  ]);
 
   // Persist settings to Firestore for signed-in accounts.
   useEffect(() => {
@@ -3006,7 +3283,6 @@ function App() {
         displayCurrency,
         saved_colors: savedColors,
         custom_currencies: customCurrencies,
-        autoTransferBudget,
       }).catch(() => {
         // Non-blocking; next change will retry.
       });
@@ -3019,7 +3295,6 @@ function App() {
     displayCurrency,
     savedColors,
     customCurrencies,
-    autoTransferBudget,
     dataReady,
     user,
     settingsCloudReady,
@@ -3029,23 +3304,48 @@ function App() {
   // allocations, we ask how to reconcile them via the confirmation modal;
   // otherwise the new budget is applied immediately.
   const handleSetBudget = () => {
-    const amount = parseFloat(budgetInput);
-    if (isNaN(amount) || amount < 0) return;
+    const inputAmount = parseFloat(budgetInput);
+    if (isNaN(inputAmount) || inputAmount < 0) return;
 
-    const hasAllocations = hasPositiveSubBudgets(subBudgets);
-    if (hasAllocations) {
-      setPendingBudget(amount);
-      setShowBudgetModal(true);
-    } else {
-      applyBudgetChange(amount, 'keep');
-    }
+    const resolveBudgetIlsAmount = async (): Promise<number | null> => {
+      if (displayCurrency === 'ILS') return roundMoneyAmount(inputAmount);
+      const rates = getCachedExchangeRates() ?? (await fetchExchangeRates().catch(() => null));
+      if (!rates) return null;
+      const converted = convertForeignToIls(inputAmount, displayCurrency, rates);
+      if (converted == null) return null;
+      return roundMoneyAmount(converted);
+    };
+
+    void resolveBudgetIlsAmount().then((amount) => {
+      if (amount == null || amount < 0) return;
+      const original = {
+        amount: roundMoneyAmount(inputAmount),
+        currency: displayCurrency,
+      } as const;
+      const hasAllocations = hasPositiveSubBudgets(subBudgets);
+      if (hasAllocations) {
+        setPendingBudget(amount);
+        setPendingBudgetOriginal(original);
+        setShowBudgetModal(true);
+      } else {
+        applyBudgetChange(amount, 'keep', original);
+      }
+    });
   };
 
   // Applies the new budget to the active month and reconciles its sub-budgets
   // per the chosen option. All writes are scoped to `selectedMonthKey`, so
   // other months are never touched.
-  const applyBudgetChange = (amount: number, mode: BudgetChangeMode) => {
-    setBudgetsByMonth((prev) => ({ ...prev, [selectedMonthKey]: amount }));
+  const applyBudgetChange = (
+    amount: number,
+    mode: BudgetChangeMode,
+    original: { amount: number; currency: ExpenseCurrency },
+  ) => {
+    setBudgetsByMonth((prev) => ({ ...prev, [selectedMonthKey]: roundMoneyAmount(amount) }));
+    setBudgetOriginalByMonth((prev) => ({
+      ...prev,
+      [selectedMonthKey]: { ...original, amount: roundMoneyAmount(original.amount) },
+    }));
 
     if (mode === 'reset') {
       // Wipe this month's allocations only.
@@ -3054,6 +3354,7 @@ function App() {
 
     setBudgetInput('');
     setPendingBudget(null);
+    setPendingBudgetOriginal(null);
     setShowBudgetModal(false);
     setShowBudgetSaved(true);
     setTimeout(() => setShowBudgetSaved(false), 2000);
@@ -3062,25 +3363,27 @@ function App() {
   const handleCloseBudgetModal = () => {
     setShowBudgetModal(false);
     setPendingBudget(null);
+    setPendingBudgetOriginal(null);
   };
 
   // Add new expense
   const handleAddExpense = (e: React.FormEvent) => {
     e.preventDefault();
-    const foreignAmount = parseFloat(newExpense.amount);
+    const enteredAmount = parseFloat(newExpense.amount);
+    const inputCurrency = newExpense.currency;
 
-    if (isNaN(foreignAmount) || !(foreignAmount > 0)) return;
+    if (isNaN(enteredAmount) || !(enteredAmount > 0)) return;
 
     const resolveIlsAmount = async (): Promise<number | null> => {
-      if (newExpense.currency === 'ILS') return foreignAmount;
+      if (inputCurrency === 'ILS') return roundMoneyAmount(enteredAmount);
 
       const rates = getCachedExchangeRates() ?? (await fetchExchangeRates().catch(() => null));
       if (!rates) return null;
 
-      const converted = convertExpenseAmountToIls(foreignAmount, newExpense.currency, rates);
+      const converted = convertExpenseAmountToIls(enteredAmount, inputCurrency, rates);
       if (converted == null) return null;
 
-      return Math.round(converted * 100) / 100;
+      return roundMoneyAmount(converted);
     };
 
     void resolveIlsAmount().then((ilsAmount) => {
@@ -3093,13 +3396,11 @@ function App() {
         amount: ilsAmount,
         category: newExpense.category,
         date: isoDate,
-        ...(newExpense.currency !== 'ILS' && {
-          originalAmount: foreignAmount,
-          originalCurrency: currencySymbol(newExpense.currency),
-        }),
+        originalAmount: roundMoneyAmount(enteredAmount),
+        originalCurrency: currencySymbol(inputCurrency),
       };
 
-      setExpenses([expense, ...expenses]);
+      setExpenses((prev) => [expense, ...prev]);
       setNewExpense((prev) => ({
         description: '',
         amount: '',
@@ -3117,11 +3418,96 @@ function App() {
   };
 
   const expenseSubmitBlocked =
-    newExpense.currency !== 'ILS' && !expenseRatesReady;
+    displayCurrency !== 'ILS' && !expenseRatesReady;
+  const editExpenseSubmitBlocked =
+    !!editExpenseDraft &&
+    (editExpenseDraft.currency !== 'ILS' && !editExpenseRatesReady);
 
   // Delete expense
   const handleDeleteExpense = (id: string) => {
     setExpenses(expenses.filter(expense => expense.id !== id));
+  };
+
+  const getExpenseEditCurrency = useCallback(
+    (expense: Expense): ExpenseCurrency => {
+      if (expense.originalCurrency) {
+        return (symbolToCurrency(expense.originalCurrency) ?? displayCurrency) as ExpenseCurrency;
+      }
+      return 'ILS';
+    },
+    [displayCurrency],
+  );
+
+  const handleEditExpenseStart = (expense: Expense) => {
+    const editCurrency = getExpenseEditCurrency(expense);
+    const editAmount =
+      expense.originalAmount != null && expense.originalAmount > 0
+        ? expense.originalAmount
+        : roundMoneyAmount(expense.amount);
+    setEditingExpenseId(expense.id);
+    setEditExpenseRatesReady(true);
+    setEditExpenseDraft({
+      description: expense.description,
+      amount: String(editAmount),
+      currency: editCurrency,
+      category: expense.category,
+      date: normalizeDate(expense.date),
+    });
+  };
+
+  const handleEditExpenseCancel = () => {
+    setEditingExpenseId(null);
+    setEditExpenseDraft(null);
+    setEditExpenseRatesReady(true);
+  };
+
+  const handleEditExpenseSave = () => {
+    if (!editingExpenseId || !editExpenseDraft) return;
+
+    const typedAmount = parseFloat(editExpenseDraft.amount);
+    if (isNaN(typedAmount) || !(typedAmount > 0)) return;
+
+    const resolveIlsAmount = async (): Promise<number | null> => {
+      if (editExpenseDraft.currency === 'ILS') return roundMoneyAmount(typedAmount);
+      const rates = getCachedExchangeRates() ?? (await fetchExchangeRates().catch(() => null));
+      if (!rates) return null;
+      const converted = convertExpenseAmountToIls(typedAmount, editExpenseDraft.currency, rates);
+      if (converted == null) return null;
+      return roundMoneyAmount(converted);
+    };
+
+    void resolveIlsAmount().then((ilsAmount) => {
+      if (ilsAmount == null || !(ilsAmount > 0)) return;
+
+      const normalizedDate = normalizeDate(editExpenseDraft.date);
+      const normalizedDescription = editExpenseDraft.description.trim();
+      const roundedTypedAmount = roundMoneyAmount(typedAmount);
+
+      setExpenses((prev) =>
+        prev.map((expense) =>
+          expense.id === editingExpenseId
+            ? {
+                ...expense,
+                description: normalizedDescription,
+                amount: ilsAmount,
+                category: editExpenseDraft.category,
+                date: normalizedDate,
+                originalAmount: roundedTypedAmount,
+                originalCurrency: currencySymbol(editExpenseDraft.currency),
+              }
+            : expense,
+        ),
+      );
+
+      setRecentlyUpdatedExpenseId(editingExpenseId);
+      window.setTimeout(() => {
+        setRecentlyUpdatedExpenseId((current) => (current === editingExpenseId ? null : current));
+      }, 1800);
+
+      setEditingExpenseId(null);
+      setEditExpenseDraft(null);
+      setEditExpenseRatesReady(true);
+    });
   };
 
   // Handle category dropdown change. Selecting the sentinel opens the "add" input
@@ -3205,7 +3591,7 @@ function App() {
     patchSubBudgetsByMonth(selectedMonthKey, (monthMap) =>
       markSubBudgetMonthInitialized({
         ...monthMap,
-        [key]: amount,
+        [key]: roundMoneyAmount(amount),
       }),
     );
   };
@@ -3215,7 +3601,7 @@ function App() {
     patchSubBudgetsByMonth(selectedMonthKey, (monthMap) => {
       const next =
         amount > 0
-          ? { ...monthMap, [value]: amount }
+          ? { ...monthMap, [value]: roundMoneyAmount(amount) }
           : withoutSubBudgetKey(monthMap, value);
       return markSubBudgetMonthInitialized(next);
     });
@@ -3255,9 +3641,60 @@ function App() {
   const monthExpenses = expenses.filter((e) => monthKeyOf(e.date) === selectedMonthKey);
 
   // Calculate total expenses (for the selected month)
-  const totalExpenses = monthExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+  const totalExpenses = sumMoney(monthExpenses.map((expense) => expense.amount));
   const isOverBudget = totalExpenses > budget && budget > 0;
-  const remaining = budget - totalExpenses;
+  const remaining = roundMoneyAmount(budget - totalExpenses);
+  const statusRates = getCachedExchangeRates();
+  const totalExpensesDisplayAmount = useMemo(() => {
+    if (displayCurrency === 'ILS') return roundMoneyAmount(totalExpenses);
+    const hasOriginalsForDisplayCurrency = monthExpenses.every((expense) => {
+      if (!(expense.originalAmount != null && expense.originalAmount > 0 && expense.originalCurrency)) {
+        return false;
+      }
+      const originalCode = symbolToCurrency(expense.originalCurrency);
+      return originalCode === displayCurrency;
+    });
+    if (hasOriginalsForDisplayCurrency) {
+      return sumMoney(monthExpenses.map((expense) => expense.originalAmount ?? 0));
+    }
+    if (!statusRates) return null;
+    const convertedTotal = monthExpenses.reduce((sum, expense) => {
+      const converted = convertIlsToForeign(expense.amount, displayCurrency, statusRates);
+      return roundMoneyAmount(sum + (converted ?? 0));
+    }, 0);
+    return roundMoneyAmount(convertedTotal);
+  }, [displayCurrency, monthExpenses, statusRates, totalExpenses]);
+  const budgetStatusDisplayAmount = useMemo(() => {
+    if (selectedBudgetSourceMonthKey) {
+      const original = budgetOriginalByMonth[selectedBudgetSourceMonthKey];
+      if (original && original.currency === displayCurrency) {
+        return roundMoneyAmount(original.amount);
+      }
+    }
+    if (displayCurrency === 'ILS') return roundMoneyAmount(budget);
+    if (!statusRates) return null;
+    const converted = convertIlsToForeign(budget, displayCurrency, statusRates);
+    if (converted == null) return null;
+    return roundMoneyAmount(converted);
+  }, [
+    selectedBudgetSourceMonthKey,
+    budgetOriginalByMonth,
+    displayCurrency,
+    budget,
+    statusRates,
+  ]);
+  const remainingDisplayAmount = useMemo(() => {
+    if (budgetStatusDisplayAmount == null || totalExpensesDisplayAmount == null) return null;
+    return roundMoneyAmount(budgetStatusDisplayAmount - totalExpensesDisplayAmount);
+  }, [budgetStatusDisplayAmount, totalExpensesDisplayAmount]);
+  const totalExpensesStatusDisplayLabel = useMemo(() => {
+    if (totalExpensesDisplayAmount == null) return formatMoney(totalExpenses);
+    return formatAmountWithSymbol(totalExpensesDisplayAmount, displayCurrency);
+  }, [displayCurrency, formatMoney, totalExpenses, totalExpensesDisplayAmount]);
+  const remainingStatusDisplayLabel = useMemo(() => {
+    if (remainingDisplayAmount == null) return formatMoney(remaining);
+    return formatAmountWithSymbol(remainingDisplayAmount, displayCurrency);
+  }, [displayCurrency, formatMoney, remaining, remainingDisplayAmount]);
 
   // Get category info
   const getCategoryInfo = (categoryValue: string): Category =>
@@ -3374,7 +3811,7 @@ function App() {
     >
       {/* Header + desktop nav */}
       <header
-        className="bg-neutral-900/80 backdrop-blur shadow-lg shadow-black/20 border-b border-neutral-800 sticky top-0 z-20"
+        className="bg-neutral-900/80 backdrop-blur shadow-lg shadow-black/20 border-b border-neutral-800 sticky top-0 z-50"
         style={{ paddingTop: 'env(safe-area-inset-top)' }}
       >
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
@@ -3395,12 +3832,32 @@ function App() {
             </button>
 
             <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={handleQuickLanguageToggle}
+                title={tr('authSwitchLanguage')}
+                aria-label={tr('authSwitchLanguage')}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-neutral-700 bg-neutral-900/80 text-neutral-300 transition-colors hover:bg-neutral-800 hover:text-neutral-100 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
+              >
+                <Globe className="h-4 w-4 sm:h-5 sm:w-5" />
+              </button>
               <UserProfileMenu
                 avatarUrl={currentAvatarUrl}
                 onOpenProfile={openProfile}
                 onOpenSettings={openSettings}
                 onLogout={handleLogout}
               />
+              {!settingsOpen && (
+                <CollapsibleNavMenu
+                  variant="mobile"
+                  activeTab={activeTab}
+                  open={navOpen}
+                  onOpenChange={setNavOpen}
+                  onTabSelect={handleTabSelect}
+                  userEmail={userDisplayLabel}
+                  onLogout={handleLogout}
+                />
+              )}
               <CollapsibleNavMenu
                 variant="desktop"
                 activeTab={activeTab}
@@ -3412,6 +3869,18 @@ function App() {
           </div>
         </div>
       </header>
+      {/* Mobile overlay — rendered OUTSIDE the header to escape its backdrop-filter stacking context */}
+      {!settingsOpen && (
+        <button
+          type="button"
+          aria-label={tr('closeMenu')}
+          onClick={() => setNavOpen(false)}
+          className={`fixed inset-x-0 bottom-0 z-40 bg-black/50 backdrop-blur-sm transition-opacity duration-300 md:hidden ${
+            navOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+          }`}
+          style={{ top: 'calc(64px + env(safe-area-inset-top, 0px))' }}
+        />
+      )}
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 pb-24 md:pb-10">
         {profileOpen ? (
@@ -3427,6 +3896,7 @@ function App() {
           <SettingsPage
             onBack={closeSettings}
             recentExpenseCurrencies={recentExpenseCurrencies}
+            initialCurrencySection={settingsInitialCurrencySection}
           />
         ) : (
           <>
@@ -3438,30 +3908,41 @@ function App() {
             {/* Financial summary */}
             <div className="mb-6 rounded-xl border border-neutral-800 bg-neutral-900 p-4 shadow-sm sm:mb-8 sm:p-6">
               <h2 className="mb-4 text-lg font-bold text-white md:text-xl">{tr('financialSummaryTitle')}</h2>
-              <div className="grid grid-cols-3 gap-2 divide-x divide-x-reverse divide-gray-700">
-                <div className="flex min-w-0 flex-col items-center justify-center px-2 text-center">
-                  <p className="text-xs text-gray-400 md:text-sm">{tr('monthlyBudget')}</p>
-                  <DisplayMoney amount={budget} className="truncate text-sm font-bold text-neutral-100 sm:text-base md:text-2xl" />
+              {/* Row 1: labels — shared grid so all three sit on the same baseline */}
+              <div className="grid grid-cols-3 divide-x divide-x-reverse divide-gray-700">
+                <p className="min-w-0 px-2 pb-1 text-center text-xs text-gray-400 md:text-sm">{tr('monthlyBudget')}</p>
+                <p className="min-w-0 px-2 pb-1 text-center text-xs text-gray-400 md:text-sm">{tr('totalExpenses')}</p>
+                <p className="min-w-0 px-2 pb-1 text-center text-xs text-gray-400 md:text-sm">{tr('budgetStatus')}</p>
+              </div>
+              {/* Row 2: values — identical h-12 cells so the baseline is always shared */}
+              <div className="grid grid-cols-3 divide-x divide-x-reverse divide-gray-700">
+                <div className="flex h-12 min-w-0 items-center justify-center px-2">
+                  <LtrNumeric className="truncate text-sm font-bold text-neutral-100 sm:text-base md:text-2xl">
+                    {selectedBudgetDisplayLabel}
+                  </LtrNumeric>
                 </div>
-
-                <div className="flex min-w-0 flex-col items-center justify-center px-2 text-center">
-                  <p className="text-xs text-gray-400 md:text-sm">{tr('totalExpenses')}</p>
-                  <DisplayMoney
-                    amount={totalExpenses}
+                <div className="flex h-12 min-w-0 items-center justify-center px-2">
+                  <LtrNumeric
                     className={`truncate text-sm font-bold sm:text-base md:text-2xl ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}
-                  />
+                  >
+                    {totalExpensesStatusDisplayLabel}
+                  </LtrNumeric>
                 </div>
-
-                <div className="flex min-w-0 flex-col items-center justify-center px-2 text-center">
-                  <p className="text-xs text-gray-400 md:text-sm">{tr('budgetStatus')}</p>
-                  <DisplayMoney
-                    amount={remaining}
+                <div className="flex h-12 min-w-0 items-center justify-center px-2">
+                  <LtrNumeric
                     className={`truncate text-sm font-bold sm:text-base md:text-2xl ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}
-                  />
-                  <p className="mt-1 text-[10px] text-gray-400 md:text-xs">
-                    {remaining >= 0 ? tr('remainingInBudget') : tr('overBudget')}
-                  </p>
+                  >
+                    {remainingStatusDisplayLabel}
+                  </LtrNumeric>
                 </div>
+              </div>
+              {/* Row 3: status note sits under column 3 only — cols 1 & 2 are untouched */}
+              <div className="grid grid-cols-3">
+                <div />
+                <div />
+                <p className="px-2 pt-0.5 text-center text-[10px] text-gray-400 md:text-xs">
+                  {remaining >= 0 ? tr('remainingInBudget') : tr('overBudget')}
+                </p>
               </div>
             </div>
 
@@ -3474,60 +3955,74 @@ function App() {
               <div className="w-full">
                 <div className="min-w-0 w-full">
                   <label className="mb-2 block text-sm font-medium text-neutral-300">
-                    {tr('budgetAmountLabel')}
+                    {tr('budgetAmountLabel')} ({currencySymbol(displayCurrency)})
                   </label>
-                  <div className="flex flex-row items-center gap-2">
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      value={budgetInput}
-                      onChange={(e) => setBudgetInput(e.target.value)}
-                      placeholder={
-                        budget > 0
-                          ? `${tr('currentAmountPrefix')}: ${formatMoney(budget)}`
-                          : tr('enterAmount')
-                      }
-                      className="min-w-0 flex-1 rounded-xl border border-neutral-700 bg-neutral-800 px-4 py-3 text-base text-neutral-100 placeholder-neutral-500 outline-none transition-all focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 sm:text-lg h-12"
-                      min="0"
-                      step="100"
-                    />
-                    <div className="flex shrink-0 flex-row flex-wrap gap-2 sm:flex-nowrap sm:gap-3">
-                      <button
-                        type="button"
-                        onClick={handleSetBudget}
-                        className={`${dashboardTealActionButtonClass} w-auto`}
-                      >
-                        {showBudgetSaved ? (
-                          <>
-                            <Check className="h-5 w-5" />
-                            {tr('budgetSaved')}
-                          </>
-                        ) : (
-                          tr('updateBudget')
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleTabSelect('subbudgets')}
-                        className={`${dashboardTealActionButtonClass} w-auto`}
-                      >
-                        {tr('tabSubbudgets')}
-                      </button>
+                  <div className="flex w-full items-center gap-1.5 overflow-hidden sm:gap-2">
+                    <div
+                      className="min-w-0 basis-0 transition-all duration-200 ease-in-out"
+                      style={{ flexGrow: budgetInputFlexGrow }}
+                    >
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        value={budgetInput}
+                        onChange={(e) => setBudgetInput(e.target.value)}
+                        placeholder={
+                          budget > 0
+                            ? `${tr('currentAmountPrefix')}: ${selectedBudgetDisplayLabel}`
+                            : tr('enterAmount')
+                        }
+                        className={`h-10 w-full min-w-0 rounded-xl border border-neutral-700 bg-neutral-800 px-2 py-1.5 ${budgetInputTextClass} text-neutral-100 placeholder-neutral-500 outline-none transition-all duration-200 ease-in-out focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 sm:h-12 sm:px-4 sm:py-3 sm:text-lg`}
+                        min="0"
+                        step="100"
+                      />
                     </div>
+                    <button
+                      type="button"
+                      onClick={handleSetBudget}
+                      className="flex h-10 min-w-[40px] basis-0 flex-1 shrink flex-col items-center justify-center gap-0.5 overflow-hidden rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 p-2 font-medium text-white text-center shadow-md transition-all duration-200 ease-in-out hover:from-emerald-600 hover:to-teal-700 hover:shadow-lg active:scale-[0.98] sm:h-12 sm:min-w-[88px]"
+                    >
+                      {showBudgetSaved ? (
+                        <>
+                          <Check className="h-4 w-4 shrink-0 sm:h-5 sm:w-5" />
+                          {renderBudgetButtonText(budgetSavedLabel)}
+                        </>
+                      ) : (
+                        renderBudgetButtonText(updateBudgetLabel)
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleTabSelect('subbudgets')}
+                      className="flex h-10 min-w-[40px] basis-0 flex-1 shrink flex-col items-center justify-center gap-0.5 overflow-hidden rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 p-2 font-medium text-white text-center shadow-md transition-all duration-200 ease-in-out hover:from-emerald-600 hover:to-teal-700 hover:shadow-lg active:scale-[0.98] sm:h-12 sm:min-w-[88px]"
+                    >
+                      {renderBudgetButtonText(subBudgetsButtonLabel)}
+                    </button>
                   </div>
-                  <label
-                    htmlFor="budget-auto-transfer"
-                    className="mt-2 flex w-full cursor-pointer flex-row items-center justify-between gap-3 text-xs text-gray-400"
-                  >
-                    <span className="text-start flex-1 pe-2">{tr('budgetAutoTransferNote')}</span>
-                    <input
-                      id="budget-auto-transfer"
-                      type="checkbox"
-                      checked={autoTransferBudget}
-                      onChange={(e) => handleAutoTransferBudgetChange(e.target.checked)}
-                      className="h-4 w-4 shrink-0 rounded border-gray-600 bg-neutral-800 text-emerald-500 focus:ring-emerald-500/30"
-                    />
-                  </label>
+                  <div className="mt-2 flex w-full flex-wrap items-center gap-2">
+                    <label
+                      htmlFor="budget-auto-transfer"
+                      className="flex min-w-0 cursor-pointer flex-row flex-wrap items-center justify-start gap-2 text-xs text-gray-400"
+                    >
+                      <span className="text-start">{tr('budgetAutoTransferNote')}</span>
+                      <input
+                        id="budget-auto-transfer"
+                        type="checkbox"
+                        checked={isAutoTransferEnabledForSelectedMonth}
+                        onChange={(e) => handleAutoTransferBudgetChange(e.target.checked)}
+                        className="ml-0 h-4 w-4 shrink-0 rounded border-gray-600 bg-neutral-800 text-emerald-500 focus:ring-emerald-500/30"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={openSettingsDisplayCurrency}
+                      className="inline-flex h-7 shrink-0 items-center justify-center rounded-lg bg-indigo-600 px-3 text-center text-xs font-medium text-white transition-all hover:bg-indigo-700 active:scale-[0.98]"
+                      title={tr('changeCurrencyShortcut')}
+                      aria-label={tr('changeCurrencyShortcut')}
+                    >
+                      {tr('changeCurrencyShortcut')}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -3561,6 +4056,7 @@ function App() {
                 onAmountChange={(amount) => setNewExpense({ ...newExpense, amount })}
                 onCurrencyChange={(currency) => setNewExpense({ ...newExpense, currency })}
                 onRatesReadyChange={setExpenseRatesReady}
+                onOpenExchangeRatesSettings={openSettingsExchangeRates}
               />
             </div>
 
@@ -3781,6 +4277,9 @@ function App() {
                             <span className="text-neutral-600">•</span>
                             <span className="shrink-0">{formatDisplayDate(expense.date, lang)}</span>
                           </div>
+                          {recentlyUpdatedExpenseId === expense.id && (
+                            <p className="mt-0.5 text-xs font-medium text-emerald-300">{tr('expenseUpdated')}</p>
+                          )}
                         </div>
                         <div className="shrink-0 text-left">
                           <ExpenseAmountDisplay
@@ -3790,14 +4289,24 @@ function App() {
                             variant="card"
                           />
                         </div>
-                        <button
-                          onClick={() => handleDeleteExpense(expense.id)}
-                          className="shrink-0 text-neutral-500 hover:text-rose-400 active:bg-rose-500/10 p-2.5 rounded-lg transition-all"
-                          title={tr('delete')}
-                          aria-label={tr('deleteExpense')}
-                        >
-                          <Trash2 className="w-5 h-5" />
-                        </button>
+                        <div className="shrink-0 flex items-center gap-1">
+                          <button
+                            onClick={() => handleEditExpenseStart(expense)}
+                            className="text-neutral-500 hover:text-emerald-300 active:bg-emerald-500/10 p-2.5 rounded-lg transition-all"
+                            title={tr('edit')}
+                            aria-label={tr('editExpense')}
+                          >
+                            <Pencil className="w-5 h-5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteExpense(expense.id)}
+                            className="text-neutral-500 hover:text-rose-400 active:bg-rose-500/10 p-2.5 rounded-lg transition-all"
+                            title={tr('delete')}
+                            aria-label={tr('deleteExpense')}
+                          >
+                            <Trash2 className="w-5 h-5" />
+                          </button>
+                        </div>
                       </div>
                     </li>
                   );
@@ -3849,13 +4358,27 @@ function App() {
                             {formatDisplayDate(expense.date, lang)}
                           </td>
                           <td className="px-6 py-4">
-                            <button
-                              onClick={() => handleDeleteExpense(expense.id)}
-                              className="text-neutral-500 hover:text-rose-400 hover:bg-rose-500/10 p-2 rounded-lg transition-all"
-                              title={tr('delete')}
-                            >
-                              <Trash2 className="w-5 h-5" />
-                            </button>
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                onClick={() => handleEditExpenseStart(expense)}
+                                className="text-neutral-500 hover:text-emerald-300 hover:bg-emerald-500/10 p-2 rounded-lg transition-all"
+                                title={tr('edit')}
+                                aria-label={tr('editExpense')}
+                              >
+                                <Pencil className="w-5 h-5" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteExpense(expense.id)}
+                                className="text-neutral-500 hover:text-rose-400 hover:bg-rose-500/10 p-2 rounded-lg transition-all"
+                                title={tr('delete')}
+                                aria-label={tr('deleteExpense')}
+                              >
+                                <Trash2 className="w-5 h-5" />
+                              </button>
+                              {recentlyUpdatedExpenseId === expense.id && (
+                                <span className="text-xs text-emerald-300 font-medium">{tr('expenseUpdated')}</span>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -3872,6 +4395,155 @@ function App() {
         )}
       </main>
 
+      {editingExpenseId && editExpenseDraft && (
+        <div
+          dir={dir}
+          className="fixed inset-0 z-50 flex items-center justify-center px-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit-expense-title"
+        >
+          <button
+            type="button"
+            onClick={handleEditExpenseCancel}
+            aria-label={tr('close')}
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+          />
+          <div className="relative z-10 w-full max-w-2xl rounded-2xl border border-neutral-700 bg-neutral-900 p-4 shadow-2xl shadow-black/60 sm:p-6">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h3 id="edit-expense-title" className="text-base font-semibold text-neutral-100 sm:text-lg">
+                  {tr('editExpense')}
+                </h3>
+                <p className="mt-1 text-xs text-neutral-500 sm:text-sm">{tr('expenseHistoryTitle')}</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleEditExpenseCancel}
+                className="rounded-lg p-2 text-neutral-500 transition-colors hover:bg-neutral-800 hover:text-neutral-300"
+                aria-label={tr('close')}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-neutral-300">{tr('description')}</label>
+                <input
+                  type="text"
+                  value={editExpenseDraft.description}
+                  onChange={(e) =>
+                    setEditExpenseDraft((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            description: e.target.value,
+                          }
+                        : prev,
+                    )
+                  }
+                  placeholder={tr('descriptionOptional')}
+                  className="h-12 w-full rounded-xl border border-neutral-700 bg-neutral-800 px-4 text-base text-neutral-100 placeholder-neutral-500 outline-none transition-all focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30"
+                />
+              </div>
+
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+                <ExpenseAmountField
+                  amount={editExpenseDraft.amount}
+                  currency={editExpenseDraft.currency}
+                  onAmountChange={(amount) =>
+                    setEditExpenseDraft((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            amount,
+                          }
+                        : prev,
+                    )
+                  }
+                  onCurrencyChange={(currency) =>
+                    setEditExpenseDraft((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            currency,
+                          }
+                        : prev,
+                    )
+                  }
+                  onRatesReadyChange={setEditExpenseRatesReady}
+                />
+                <div className="min-w-0 flex-1">
+                  <label className="mb-2 block text-sm font-medium text-neutral-300">{tr('category')}</label>
+                  <select
+                    value={editExpenseDraft.category}
+                    onChange={(e) =>
+                      setEditExpenseDraft((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              category: e.target.value,
+                            }
+                          : prev,
+                      )
+                    }
+                    className="h-12 w-full rounded-xl border border-neutral-700 bg-neutral-800 px-4 text-base text-neutral-100 outline-none transition-all focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30"
+                  >
+                    {allCategories.map((category) => (
+                      <option key={`edit-expense-${category.value}`} value={category.value}>
+                        {category.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="min-w-0 sm:w-[11rem]">
+                  <label className="mb-2 block text-sm font-medium text-neutral-300">{tr('date')}</label>
+                  <input
+                    type="date"
+                    value={editExpenseDraft.date}
+                    onChange={(e) =>
+                      setEditExpenseDraft((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              date: e.target.value,
+                            }
+                          : prev,
+                      )
+                    }
+                    className="h-12 w-full rounded-xl border border-neutral-700 bg-neutral-800 px-3 text-base text-neutral-100 outline-none transition-all focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleEditExpenseCancel}
+                  className="rounded-xl border border-neutral-700 bg-neutral-800 px-4 py-2.5 text-sm font-medium text-neutral-200 transition-colors hover:bg-neutral-700"
+                >
+                  {tr('cancel')}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleEditExpenseSave}
+                  disabled={
+                    editExpenseSubmitBlocked ||
+                    !editExpenseDraft.amount.trim() ||
+                    !editExpenseDraft.category.trim() ||
+                    !editExpenseDraft.date.trim()
+                  }
+                  className="rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:from-emerald-600 hover:to-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {tr('saveChanges')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Footer (desktop only; mobile uses the bottom nav) */}
       {!settingsOpen && (
       <footer className="hidden md:block border-t border-neutral-800 bg-neutral-900 mt-8 sm:mt-12">
@@ -3883,19 +4555,6 @@ function App() {
       </footer>
       )}
 
-      {/* Mobile floating action menu (collapsed FAB by default) */}
-      {!settingsOpen && (
-      <CollapsibleNavMenu
-        variant="mobile"
-        activeTab={activeTab}
-        open={navOpen}
-        onOpenChange={setNavOpen}
-        onTabSelect={handleTabSelect}
-        userEmail={userDisplayLabel}
-        onLogout={handleLogout}
-      />
-      )}
-
       {/* Budget change confirmation modal */}
       <BudgetChangeModal
         open={showBudgetModal && pendingBudget !== null}
@@ -3903,7 +4562,9 @@ function App() {
         currentBudget={budget}
         monthLabel={monthLabel}
         onSelect={(mode) => {
-          if (pendingBudget !== null) applyBudgetChange(pendingBudget, mode);
+          if (pendingBudget !== null && pendingBudgetOriginal) {
+            applyBudgetChange(pendingBudget, mode, pendingBudgetOriginal);
+          }
         }}
         onClose={handleCloseBudgetModal}
       />

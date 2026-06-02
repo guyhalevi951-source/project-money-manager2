@@ -321,6 +321,11 @@ export function clearCloudManualExchangeOverrides(): void {
   dispatchOverridesUpdated();
 }
 
+export function clearAllManualExchangeOverridesLocal(): void {
+  window.localStorage.removeItem(STORAGE_KEY);
+  dispatchOverridesUpdated();
+}
+
 export function saveManualExchangeOverride(
   fromCurrency: string,
   toCurrency: string,

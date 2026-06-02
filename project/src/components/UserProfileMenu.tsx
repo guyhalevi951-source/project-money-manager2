@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { LogOut, User } from 'lucide-react';
+import { LogOut, Settings2, User } from 'lucide-react';
 import { useLanguage } from '../LanguageContext';
 import { DEFAULT_GUEST_AVATAR_URL, sanitizeAvatarUrl } from '../services/avatarService';
 
@@ -96,7 +96,7 @@ export default function UserProfileMenu({
           }}
           className="flex w-full items-center gap-2.5 px-3 py-2 text-right text-sm text-neutral-200 transition-colors hover:bg-neutral-700"
         >
-          <User className="h-4 w-4 shrink-0 text-neutral-400" />
+          <Settings2 className="h-4 w-4 shrink-0 text-neutral-400" />
           <span className="flex-1">{tr('settings')}</span>
         </button>
         <button

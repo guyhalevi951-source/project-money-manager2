@@ -239,3 +239,8 @@ export function clearCloudCurrencyCommissions(): void {
   writeEntries(localOnly);
   dispatchCommissionsUpdated();
 }
+
+export function clearAllCurrencyCommissionsLocal(): void {
+  window.localStorage.removeItem(STORAGE_KEY);
+  dispatchCommissionsUpdated();
+}

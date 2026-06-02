@@ -23,8 +23,10 @@ import {
   normalizeDisplayCurrency,
   type ExpenseCurrency,
 } from './currencyRegistry';
+import { roundMoney } from './money';
 
 const DOC_ID = 'data';
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface UserSettings {
   lang: 'he' | 'en';
@@ -32,13 +34,14 @@ export interface UserSettings {
   displayCurrency: ExpenseCurrency;
   saved_colors: string[];
   custom_currencies: ExpenseCurrency[];
-  autoTransferBudget: boolean;
 }
 
 export interface UserCategoriesData {
   customCategories: StoredCustomCategory[];
   budgetsByMonth: Record<string, number>;
+  budgetOriginalByMonth: Record<string, { amount: number; currency: string }>;
   subBudgetsByMonth: Record<string, Record<string, number>>;
+  autoTransferByMonth: Record<string, boolean>;
 }
 
 export interface CloudManualExchangeOverride {
@@ -60,13 +63,14 @@ export const EMPTY_USER_SETTINGS: UserSettings = {
   displayCurrency: 'ILS',
   saved_colors: [],
   custom_currencies: [],
-  autoTransferBudget: true,
 };
 
 export const EMPTY_USER_CATEGORIES: UserCategoriesData = {
   customCategories: [],
   budgetsByMonth: {},
+  budgetOriginalByMonth: {},
   subBudgetsByMonth: {},
+  autoTransferByMonth: {},
 };
 
 const SETTINGS_LS_KEYS = {
@@ -75,7 +79,6 @@ const SETTINGS_LS_KEYS = {
   displayCurrency: 'money-manager-display-currency',
   savedColors: 'saved_colors',
   customCurrencies: 'money-manager-custom-currencies',
-  autoTransferBudget: 'auto_transfer_budget',
 } as const;
 
 export const shouldSyncToFirestore = (user: User | null): user is User =>
@@ -113,25 +116,47 @@ function parseSettings(raw: Record<string, unknown> | undefined): UserSettings {
     displayCurrency,
     saved_colors: normalizeSavedColors(raw.saved_colors),
     custom_currencies: normalizeCustomCurrencies(raw.custom_currencies),
-    autoTransferBudget:
-      typeof raw.autoTransferBudget === 'boolean'
-        ? raw.autoTransferBudget
-        : EMPTY_USER_SETTINGS.autoTransferBudget,
   };
 }
 
 function parseCategories(raw: Record<string, unknown> | undefined): UserCategoriesData {
   if (!raw) return { ...EMPTY_USER_CATEGORIES };
+  const budgetsByMonthRaw = (raw.budgetsByMonth as Record<string, number> | undefined) ?? {};
+  const budgetOriginalByMonthRaw =
+    (raw.budgetOriginalByMonth as Record<string, { amount: number; currency: string }> | undefined) ??
+    {};
+  const subBudgetsByMonthRaw =
+    (raw.subBudgetsByMonth as Record<string, Record<string, number>> | undefined) ?? {};
   return {
     customCategories: (raw.customCategories as StoredCustomCategory[] | undefined) ?? [],
-    budgetsByMonth: (raw.budgetsByMonth as Record<string, number> | undefined) ?? {},
-    subBudgetsByMonth:
-      (raw.subBudgetsByMonth as Record<string, Record<string, number>> | undefined) ?? {},
+    budgetsByMonth: Object.fromEntries(
+      Object.entries(budgetsByMonthRaw).map(([month, amount]) => [month, roundMoney(Number(amount ?? 0))]),
+    ),
+    budgetOriginalByMonth: Object.fromEntries(
+      Object.entries(budgetOriginalByMonthRaw).map(([month, value]) => [
+        month,
+        { ...value, amount: roundMoney(Number(value?.amount ?? 0)) },
+      ]),
+    ),
+    subBudgetsByMonth: Object.fromEntries(
+      Object.entries(subBudgetsByMonthRaw).map(([month, map]) => [
+        month,
+        Object.fromEntries(
+          Object.entries(map ?? {}).map(([key, amount]) => [key, roundMoney(Number(amount ?? 0))]),
+        ),
+      ]),
+    ),
+    autoTransferByMonth: (raw.autoTransferByMonth as Record<string, boolean> | undefined) ?? {},
   };
 }
 
 function parseExpenses(raw: Record<string, unknown> | undefined): StoredExpense[] {
-  return (raw?.expenses as StoredExpense[] | undefined) ?? [];
+  return ((raw?.expenses as StoredExpense[] | undefined) ?? []).map((expense) => ({
+    ...expense,
+    amount: roundMoney(Number(expense.amount ?? 0)),
+    originalAmount:
+      expense.originalAmount != null ? roundMoney(Number(expense.originalAmount)) : undefined,
+  }));
 }
 
 function parseCloudCurrencyCommissions(
@@ -187,7 +212,8 @@ function hasFinancialLocalData(data: UserAppData): boolean {
     data.expenses.length > 0 ||
     data.customCategories.length > 0 ||
     Object.keys(data.budgetsByMonth).length > 0 ||
-    Object.keys(data.subBudgetsByMonth).length > 0
+    Object.keys(data.subBudgetsByMonth).length > 0 ||
+    Object.keys(data.autoTransferByMonth).length > 0
   );
 }
 
@@ -197,8 +223,7 @@ function hasSettingsLocalData(settings: UserSettings): boolean {
     settings.keepOriginalValues !== EMPTY_USER_SETTINGS.keepOriginalValues ||
     settings.displayCurrency !== EMPTY_USER_SETTINGS.displayCurrency ||
     settings.saved_colors.length > 0 ||
-    settings.custom_currencies.length > 0 ||
-    settings.autoTransferBudget !== EMPTY_USER_SETTINGS.autoTransferBudget
+    settings.custom_currencies.length > 0
   );
 }
 
@@ -229,13 +254,13 @@ export function loadLegacySettingsFromLocalStorage(): UserSettings {
     custom_currencies = [];
   }
 
-  const autoTransferBudgetRaw = window.localStorage.getItem(SETTINGS_LS_KEYS.autoTransferBudget);
-  const autoTransferBudget =
-    autoTransferBudgetRaw == null
-      ? EMPTY_USER_SETTINGS.autoTransferBudget
-      : autoTransferBudgetRaw !== 'false';
-
-  return { lang, keepOriginalValues, displayCurrency, saved_colors, custom_currencies, autoTransferBudget };
+  return {
+    lang,
+    keepOriginalValues,
+    displayCurrency,
+    saved_colors,
+    custom_currencies,
+  };
 }
 
 export function clearLegacyLocalStorage(): void {
@@ -251,7 +276,8 @@ export function clearLegacyLocalStorage(): void {
   window.localStorage.removeItem(SETTINGS_LS_KEYS.displayCurrency);
   window.localStorage.removeItem(SETTINGS_LS_KEYS.savedColors);
   window.localStorage.removeItem(SETTINGS_LS_KEYS.customCurrencies);
-  window.localStorage.removeItem(SETTINGS_LS_KEYS.autoTransferBudget);
+  window.localStorage.removeItem('auto_transfer_start_month');
+  window.localStorage.removeItem('auto_transfer_budget');
 }
 
 async function readLegacyFirestoreApp(uid: string): Promise<UserAppData | null> {
@@ -262,8 +288,12 @@ async function readLegacyFirestoreApp(uid: string): Promise<UserAppData | null> 
     expenses: (raw.expenses as StoredExpense[] | undefined) ?? [],
     customCategories: (raw.customCategories as StoredCustomCategory[] | undefined) ?? [],
     budgetsByMonth: (raw.budgetsByMonth as Record<string, number> | undefined) ?? {},
+    budgetOriginalByMonth:
+      (raw.budgetOriginalByMonth as Record<string, { amount: number; currency: string }> | undefined) ??
+      {},
     subBudgetsByMonth:
       (raw.subBudgetsByMonth as Record<string, Record<string, number>> | undefined) ?? {},
+    autoTransferByMonth: {},
   };
 }
 
@@ -275,7 +305,9 @@ function isCategoriesEmpty(data: UserCategoriesData): boolean {
   return (
     data.customCategories.length === 0 &&
     Object.keys(data.budgetsByMonth).length === 0 &&
-    Object.keys(data.subBudgetsByMonth).length === 0
+    Object.keys(data.budgetOriginalByMonth).length === 0 &&
+    Object.keys(data.subBudgetsByMonth).length === 0 &&
+    Object.keys(data.autoTransferByMonth).length === 0
   );
 }
 
@@ -322,10 +354,12 @@ export async function migrateLegacyDataToCloud(uid: string): Promise<void> {
       Object.keys(localFinancial.budgetsByMonth).length > 0
         ? localFinancial.budgetsByMonth
         : (legacyRemote?.budgetsByMonth ?? {}),
+    budgetOriginalByMonth: localFinancial.budgetOriginalByMonth ?? {},
     subBudgetsByMonth:
       Object.keys(localFinancial.subBudgetsByMonth).length > 0
         ? localFinancial.subBudgetsByMonth
         : (legacyRemote?.subBudgetsByMonth ?? {}),
+    autoTransferByMonth: localFinancial.autoTransferByMonth ?? {},
   };
 
   const settings = hasSettingsLocalData(localSettings)
@@ -351,7 +385,9 @@ export async function migrateLegacyDataToCloud(uid: string): Promise<void> {
       {
         customCategories: categories.customCategories,
         budgetsByMonth: categories.budgetsByMonth,
+        budgetOriginalByMonth: categories.budgetOriginalByMonth,
         subBudgetsByMonth: categories.subBudgetsByMonth,
+        autoTransferByMonth: categories.autoTransferByMonth,
         updatedAt: serverTimestamp(),
       },
       { merge: true },
@@ -364,7 +400,6 @@ export async function migrateLegacyDataToCloud(uid: string): Promise<void> {
         displayCurrency: settings.displayCurrency,
         saved_colors: settings.saved_colors,
         custom_currencies: settings.custom_currencies,
-        autoTransferBudget: settings.autoTransferBudget,
         updatedAt: serverTimestamp(),
       },
       { merge: true },
@@ -460,7 +495,9 @@ export async function saveCategoriesToCloud(
     {
       customCategories: categories.customCategories,
       budgetsByMonth: categories.budgetsByMonth,
+      budgetOriginalByMonth: categories.budgetOriginalByMonth,
       subBudgetsByMonth: categories.subBudgetsByMonth,
+      autoTransferByMonth: categories.autoTransferByMonth,
       updatedAt: serverTimestamp(),
     },
     { merge: true },
@@ -476,7 +513,6 @@ export async function saveSettingsToCloud(uid: string, settings: UserSettings): 
       displayCurrency: settings.displayCurrency,
       saved_colors: settings.saved_colors,
       custom_currencies: settings.custom_currencies,
-      autoTransferBudget: settings.autoTransferBudget,
       updatedAt: serverTimestamp(),
     },
     { merge: true },
@@ -521,6 +557,7 @@ export async function saveManualExchangeOverrideToCloud(
           baseCurrency: normalized.baseCurrency,
           quoteCurrency: normalized.quoteCurrency,
           rate: normalized.normalizedRate,
+          createdAt: serverTimestamp(),
           updatedAt: Date.now(),
         },
       },
@@ -546,6 +583,7 @@ export async function saveCurrencyCommissionToCloud(
         [currency]: {
           currency,
           percent,
+          createdAt: serverTimestamp(),
           updatedAt: Date.now(),
         },
       },
@@ -593,6 +631,48 @@ export async function deleteManualExchangeOverrideFromCloud(
     },
     { merge: true },
   );
+}
+
+export async function pruneExpiredCloudExchangeFees(uid: string): Promise<void> {
+  const threshold = Date.now() - DAY_MS;
+
+  const commissionsSnap = await getDoc(currencyCommissionsRef(uid));
+  const commissionsRaw = (commissionsSnap.data()?.commissions ?? {}) as Record<string, unknown>;
+  const expiredCommissions = Object.entries(commissionsRaw)
+    .filter(([, value]) => {
+      const item = value as { updatedAt?: unknown } | undefined;
+      return typeof item?.updatedAt === 'number' && item.updatedAt < threshold;
+    })
+    .map(([currency]) => currency);
+  if (expiredCommissions.length > 0) {
+    await setDoc(
+      currencyCommissionsRef(uid),
+      {
+        commissions: Object.fromEntries(expiredCommissions.map((currency) => [currency, deleteField()])),
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  }
+
+  const overridesSnap = await getDoc(manualOverridesRef(uid));
+  const overridesRaw = (overridesSnap.data()?.overrides ?? {}) as Record<string, unknown>;
+  const expiredOverrides = Object.entries(overridesRaw)
+    .filter(([, value]) => {
+      const item = value as { updatedAt?: unknown } | undefined;
+      return typeof item?.updatedAt === 'number' && item.updatedAt < threshold;
+    })
+    .map(([pairKey]) => pairKey);
+  if (expiredOverrides.length > 0) {
+    await setDoc(
+      manualOverridesRef(uid),
+      {
+        overrides: Object.fromEntries(expiredOverrides.map((pairKey) => [pairKey, deleteField()])),
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  }
 }
 
 export function appendSavedColor(colors: string[], hex: string): string[] {

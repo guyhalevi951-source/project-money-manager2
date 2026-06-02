@@ -1,5 +1,6 @@
 import { currencySymbol, type ExpenseCurrency } from '../constants/currencies';
 import { getManualExchangeOverride } from './manualExchangeOverrideService';
+import { roundMoney } from './money';
 
 export type { ExpenseCurrency, CurrencyCode } from '../constants/currencies';
 export { CORE_DISPLAY_CURRENCIES as EXPENSE_CURRENCIES, currencySymbol } from '../constants/currencies';
@@ -285,7 +286,7 @@ export function hasExchangeRate(currency: string, rates: ExchangeRates): boolean
 }
 
 export function formatForeignAmount(amount: number, currency: ExpenseCurrency): string {
-  const formatted = Number.isInteger(amount) ? String(amount) : amount.toFixed(2);
+  const formatted = roundMoney(amount).toFixed(2);
   return `${currencySymbol(currency)}${formatted}`;
 }
 

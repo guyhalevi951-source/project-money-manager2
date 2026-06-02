@@ -54,6 +54,8 @@ interface ExpenseAmountFieldProps {
   onAmountChange: (value: string) => void;
   onCurrencyChange: (currency: CurrencyCode) => void;
   onRatesReadyChange?: (ready: boolean) => void;
+  lockToDisplayCurrency?: boolean;
+  onOpenExchangeRatesSettings?: () => void;
 }
 
 export default function ExpenseAmountField({
@@ -62,8 +64,11 @@ export default function ExpenseAmountField({
   onAmountChange,
   onCurrencyChange,
   onRatesReadyChange,
+  lockToDisplayCurrency = false,
+  onOpenExchangeRatesSettings,
 }: ExpenseAmountFieldProps) {
   const { tr, displayCurrency } = useLanguage();
+  const inputCurrency = lockToDisplayCurrency ? displayCurrency : currency;
   const pinnedCurrencies = usePinnedCurrencies();
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [isCurrencyMenuOpen, setIsCurrencyMenuOpen] = useState(false);
@@ -72,8 +77,8 @@ export default function ExpenseAmountField({
   const currencyMenuRef = useRef<HTMLDivElement>(null);
   const detectionRanRef = useRef(false);
 
-  const needsRatesForStorage = currency !== 'ILS';
-  const needsRatesForFetch = needsRatesForStorage || displayCurrency !== currency;
+  const needsRatesForStorage = inputCurrency !== 'ILS';
+  const needsRatesForFetch = needsRatesForStorage || (!lockToDisplayCurrency && displayCurrency !== inputCurrency);
   const initialCachedRates = getCachedExchangeRates();
 
   const [rates, setRates] = useState<ExchangeRates | null>(() =>
@@ -85,17 +90,17 @@ export default function ExpenseAmountField({
   const [error, setError] = useState(false);
   const [commissionVersion, setCommissionVersion] = useState(0);
 
-  const selectedMeta = useMemo(() => getCurrencyMeta(currency), [currency]);
+  const selectedMeta = useMemo(() => getCurrencyMeta(inputCurrency), [inputCurrency]);
 
   const isTemporaryCurrency = useMemo(
-    () => !pinnedCurrencies.includes(currency),
-    [pinnedCurrencies, currency],
+    () => !pinnedCurrencies.includes(inputCurrency),
+    [pinnedCurrencies, inputCurrency],
   );
 
   const selectableCurrencies = useMemo(() => {
     if (!isTemporaryCurrency) return pinnedCurrencies;
-    return [...pinnedCurrencies, currency];
-  }, [pinnedCurrencies, currency, isTemporaryCurrency]);
+    return [...pinnedCurrencies, inputCurrency];
+  }, [pinnedCurrencies, inputCurrency, isTemporaryCurrency]);
 
   const closeCurrencyMenu = useCallback(() => {
     setIsCurrencyMenuOpen(false);
@@ -191,7 +196,7 @@ export default function ExpenseAmountField({
       setError(false);
       if (needsRatesForStorage) onRatesReadyChange?.(true);
     }
-  }, [currency, displayCurrency, needsRatesForFetch, needsRatesForStorage, onRatesReadyChange]);
+  }, [inputCurrency, displayCurrency, needsRatesForFetch, needsRatesForStorage, onRatesReadyChange]);
 
   useEffect(
     () =>
@@ -217,20 +222,21 @@ export default function ExpenseAmountField({
     () =>
       !isMaxLengthReached &&
       parsedAmount > 0 &&
-      currency !== displayCurrency,
-    [isMaxLengthReached, parsedAmount, currency, displayCurrency],
+      !lockToDisplayCurrency &&
+      inputCurrency !== displayCurrency,
+    [isMaxLengthReached, parsedAmount, lockToDisplayCurrency, inputCurrency, displayCurrency],
   );
 
   const activeCommissionPercent = useMemo(
-    () => getActiveCurrencyCommissionPercent(currency) ?? 0,
-    [currency, commissionVersion],
+    () => getActiveCurrencyCommissionPercent(inputCurrency) ?? 0,
+    [inputCurrency, commissionVersion],
   );
 
   const convertedDisplayAmount = useMemo(() => {
     if (!showDisplayPreview || !rates) return null;
 
     if (
-      !hasExchangeRate(currency, rates) ||
+      !hasExchangeRate(inputCurrency, rates) ||
       !hasExchangeRate(displayCurrency, rates)
     ) {
       return null;
@@ -238,7 +244,7 @@ export default function ExpenseAmountField({
 
     const converted = convertAmountViaIls(
       parsedAmount,
-      currency,
+      inputCurrency,
       displayCurrency,
       rates,
     );
@@ -246,7 +252,7 @@ export default function ExpenseAmountField({
 
     const withCommission = applyCommissionToAmount(converted, activeCommissionPercent);
     return Math.round(withCommission * 100) / 100;
-  }, [showDisplayPreview, rates, parsedAmount, currency, displayCurrency, activeCommissionPercent]);
+  }, [showDisplayPreview, rates, parsedAmount, inputCurrency, displayCurrency, activeCommissionPercent]);
 
   const displayPreviewFormatted = useMemo(() => {
     if (convertedDisplayAmount == null) return null;
@@ -267,6 +273,7 @@ export default function ExpenseAmountField({
   );
 
   useEffect(() => {
+    if (lockToDisplayCurrency) return;
     if (detectionRanRef.current) return;
     detectionRanRef.current = true;
 
@@ -297,7 +304,7 @@ export default function ExpenseAmountField({
     return () => {
       cancelled = true;
     };
-  }, [displayCurrency, onCurrencyChange]);
+  }, [displayCurrency, onCurrencyChange, lockToDisplayCurrency]);
 
   const handleDetectionConfirm = useCallback(() => {
     if (detectedCurrency) onCurrencyChange(detectedCurrency);
@@ -322,6 +329,16 @@ export default function ExpenseAmountField({
       <div dir="ltr" className="relative z-10 w-full sm:w-auto">
         <div className="relative z-10 flex w-full items-center gap-2 sm:w-auto">
           <div ref={currencyMenuRef} className="relative z-20 shrink-0">
+            {lockToDisplayCurrency ? (
+              <div
+                aria-label={tr('currencyLabel')}
+                className={`${expenseFormControlClass} flex shrink-0 items-center gap-1.5 px-2.5 sm:gap-2 sm:px-3 text-sm font-medium tabular-nums whitespace-nowrap bg-neutral-800 border-neutral-700 text-neutral-100`}
+              >
+                <CurrencyFlag countryCode={selectedMeta.countryCode} size="sm" alt={selectedMeta.name} />
+                <span className="font-semibold">{selectedMeta.symbol}</span>
+                <span className="text-neutral-300">{inputCurrency}</span>
+              </div>
+            ) : (
             <button
               type="button"
               onClick={() => setIsCurrencyMenuOpen((prev) => !prev)}
@@ -336,7 +353,7 @@ export default function ExpenseAmountField({
             >
               <CurrencyFlag countryCode={selectedMeta.countryCode} size="sm" alt={selectedMeta.name} />
               <span className="font-semibold">{selectedMeta.symbol}</span>
-              <span className="text-neutral-300">{currency}</span>
+              <span className="text-neutral-300">{inputCurrency}</span>
               <ChevronDown
                 className={`w-3.5 h-3.5 shrink-0 text-neutral-400 transition-transform duration-200 ${
                   isCurrencyMenuOpen ? 'rotate-180' : ''
@@ -344,8 +361,9 @@ export default function ExpenseAmountField({
                 aria-hidden
               />
             </button>
+            )}
 
-            {isCurrencyMenuOpen && (
+            {!lockToDisplayCurrency && isCurrencyMenuOpen && (
               <div
                 role="listbox"
                 aria-label={tr('currencyLabel')}
@@ -354,8 +372,8 @@ export default function ExpenseAmountField({
               <div className="flex flex-wrap gap-1.5">
                 {selectableCurrencies.map((code) => {
                   const meta = getCurrencyMeta(code);
-                  const selected = currency === code;
-                  const isTemp = isTemporaryCurrency && code === currency;
+                  const selected = inputCurrency === code;
+                  const isTemp = isTemporaryCurrency && code === inputCurrency;
 
                   return (
                     <button
@@ -412,6 +430,17 @@ export default function ExpenseAmountField({
             step="0.01"
             required
           />
+          {onOpenExchangeRatesSettings && (
+            <button
+              type="button"
+              onClick={onOpenExchangeRatesSettings}
+              className="inline-flex h-12 shrink-0 items-center justify-center rounded-xl bg-indigo-600 px-3 text-center text-sm font-medium text-white transition-all hover:bg-indigo-700 active:scale-[0.98] sm:px-4"
+              title={tr('exchangeRateShortcut')}
+              aria-label={tr('exchangeRateShortcut')}
+            >
+              {tr('exchangeRateShortcut')}
+            </button>
+          )}
         </div>
 
         <AnimatePresence mode="wait">
@@ -429,7 +458,7 @@ export default function ExpenseAmountField({
             </motion.p>
           ) : showDisplayPreview ? (
             <motion.p
-              key={`${currency}-${displayCurrency}-${amount}`}
+              key={`${inputCurrency}-${displayCurrency}-${amount}`}
               initial={{ opacity: 0, y: -2 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
@@ -450,6 +479,8 @@ export default function ExpenseAmountField({
                   <LtrNumeric className="font-medium text-neutral-300/90 tabular-nums">
                     {displayPreviewFormatted}
                   </LtrNumeric>
+                  {' '}
+                  {tr('convertedToDisplayCurrency')}
                 </span>
               ) : (
                 <span className="text-amber-400/80">{tr('exchangeRatesUnavailable')}</span>
@@ -460,7 +491,7 @@ export default function ExpenseAmountField({
       </div>
 
       <AnimatePresence>
-        {showDetectionPrompt && detectedCurrency && (
+        {!lockToDisplayCurrency && showDetectionPrompt && detectedCurrency && (
           <CurrencyDetectionBanner
             detectedCurrency={detectedCurrency}
             onConfirmSwitch={handleDetectionConfirm}

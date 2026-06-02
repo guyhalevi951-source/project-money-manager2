@@ -10,9 +10,14 @@ import type { ExpenseCurrency } from '../services/exchangeRateService';
 interface SettingsPageProps {
   onBack: () => void;
   recentExpenseCurrencies: ExpenseCurrency[];
+  initialCurrencySection?: 'display' | 'exchange' | null;
 }
 
-export default function SettingsPage({ onBack, recentExpenseCurrencies }: SettingsPageProps) {
+export default function SettingsPage({
+  onBack,
+  recentExpenseCurrencies,
+  initialCurrencySection = null,
+}: SettingsPageProps) {
   const {
     dir,
     lang,
@@ -25,6 +30,12 @@ export default function SettingsPage({ onBack, recentExpenseCurrencies }: Settin
   const BackIcon = dir === 'rtl' ? ArrowRight : ArrowLeft;
   const [openMain, setOpenMain] = useState<null | 'general' | 'currencies'>(null);
   const [openCurrencySub, setOpenCurrencySub] = useState<null | 'display' | 'exchange'>(null);
+
+  useEffect(() => {
+    if (!initialCurrencySection) return;
+    setOpenMain('currencies');
+    setOpenCurrencySub(initialCurrencySection);
+  }, [initialCurrencySection]);
 
   const toggleMain = (key: 'general' | 'currencies') => {
     setOpenMain((prev) => (prev === key ? null : key));
