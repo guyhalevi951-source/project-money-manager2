@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback, type MutableRefObject } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, type MutableRefObject, type TouchEvent } from 'react';
 import { AnimatePresence, motion, type PanInfo } from 'framer-motion';
 import {
   Wallet,
@@ -39,10 +39,12 @@ import CategoryIconBadge from './components/CategoryIconBadge';
 import CategoryBreakdownLegend from './components/CategoryBreakdownLegend';
 import SubBudgetProgressBar from './components/SubBudgetProgressBar';
 import { onAuthStateChanged, type User } from 'firebase/auth';
+import { updateProfile } from 'firebase/auth';
 import { auth, signOutUser } from './firebase';
 import AuthPage from './components/AuthPage';
 import UserProfileMenu from './components/UserProfileMenu';
 import SettingsPage from './components/SettingsPage';
+import ProfilePage from './components/ProfilePage';
 import ExpenseAmountField from './components/ExpenseAmountField';
 import SelectedDaySummary from './components/SelectedDaySummary';
 import ExpenseAmountDisplay from './components/ExpenseAmountDisplay';
@@ -76,6 +78,12 @@ import {
   readGuestLang,
   setGuestLangActive,
 } from './services/authLanguagePreference';
+import {
+  DEFAULT_GUEST_AVATAR_URL,
+  GUEST_AVATAR_STORAGE_KEY,
+  getGuestAvatarFromStorage,
+  sanitizeAvatarUrl,
+} from './services/avatarService';
 import {
   ensureCloudDataMigrated,
   saveCategoriesToCloud,
@@ -785,16 +793,23 @@ const buildContinuousTrendSeries = (
   }
 
   const y = anchor.getFullYear();
+  const amountByMonth: Record<string, number> = {};
+  for (const [iso, amount] of Object.entries(amountByDate)) {
+    const monthKey = iso.slice(0, 7);
+    amountByMonth[monthKey] = (amountByMonth[monthKey] || 0) + amount;
+  }
   for (let m = 0; m < 12; m++) {
     const iso = `${y}-${pad2(m + 1)}-01`;
     const monthKey = `${y}-${pad2(m + 1)}`;
-    const amount = Object.entries(amountByDate).reduce((sum, [date, amt]) => {
-      return date.startsWith(monthKey) ? sum + amt : sum;
-    }, 0);
+    const amount = amountByMonth[monthKey] ?? 0;
+    const monthLongLabel = new Date(y, m, 1).toLocaleDateString(
+      lang === 'he' ? 'he-IL' : 'en-US',
+      { month: 'long' },
+    );
     points.push({
       iso,
       day: m + 1,
-      dayLabel: new Date(y, m, 1).toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US', { month: 'short' }),
+      dayLabel: monthLongLabel,
       dateLabel: new Date(y, m, 1).toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US', { month: 'long', year: 'numeric' }),
       amount,
       hex: DAILY_SLICE_COLORS[m % DAILY_SLICE_COLORS.length],
@@ -884,6 +899,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
   const [chartSlide, setChartSlide] = useState(0);
   const [selectedTrendIso, setSelectedTrendIso] = useState<string | null>(null);
   const isCoarsePointer = useCoarsePointer();
+  const touchStartXRef = useRef<number | null>(null);
 
   const shift = (dir: number) => {
     setAnchor((a) => {
@@ -951,21 +967,28 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
       ? dailyBreakdown.map((d) => ({ name: d.label, value: d.amount, hex: d.hex }))
       : [{ name: '', value: 1, hex: '#27272a' }];
 
-  const { dailySeries, periodDayCount } = useMemo(() => {
-    const amountByDate = periodExpenses.reduce<Record<string, number>>((acc, e) => {
-      const iso = normalizeDate(e.date);
-      acc[iso] = (acc[iso] || 0) + e.amount;
-      return acc;
-    }, {});
-    return buildContinuousTrendSeries(view, anchor, amountByDate, lang);
-  }, [periodExpenses, view, anchor, lang]);
+  const amountByDate = useMemo(
+    () =>
+      periodExpenses.reduce<Record<string, number>>((acc, e) => {
+        const iso = normalizeDate(e.date);
+        acc[iso] = (acc[iso] || 0) + e.amount;
+        return acc;
+      }, {}),
+    [periodExpenses],
+  );
+
+  const { dailySeries, periodDayCount } = useMemo(
+    () => buildContinuousTrendSeries(view, anchor, amountByDate, lang),
+    [view, anchor, amountByDate, lang],
+  );
 
   const average = periodDayCount > 0 ? total / periodDayCount : 0;
   const trendMax = Math.max(250, ...dailySeries.map((d) => d.amount), 1);
 
   useEffect(() => {
-    setSelectedTrendIso(defaultTrendSelectionIso(dailySeries, view, anchor));
-  }, [dailySeries, view, anchor, chartPeriodKey]);
+    const nextIso = defaultTrendSelectionIso(dailySeries, view, anchor);
+    setSelectedTrendIso((prev) => (prev === nextIso ? prev : nextIso));
+  }, [dailySeries, view, anchor]);
 
   const selectedTrendPoint = useMemo(
     () => dailySeries.find((p) => p.iso === selectedTrendIso) ?? null,
@@ -987,10 +1010,14 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
     const root = trendChartHostRef.current;
     if (!root) return;
 
+    let rafId: number | null = null;
     const neutralizeRechartsFocus = () => {
       root.querySelectorAll('.recharts-wrapper, .recharts-surface, svg').forEach((node) => {
         if (node instanceof HTMLElement) {
-          node.setAttribute('tabindex', '-1');
+          // Avoid re-writing unchanged attributes; this prevents observer loops.
+          if (node.getAttribute('tabindex') !== '-1') {
+            node.setAttribute('tabindex', '-1');
+          }
           node.style.outline = 'none';
           node.style.boxShadow = 'none';
         }
@@ -1002,9 +1029,20 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
     };
 
     neutralizeRechartsFocus();
-    const observer = new MutationObserver(neutralizeRechartsFocus);
-    observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['tabindex'] });
-    return () => observer.disconnect();
+    const observer = new MutationObserver(() => {
+      if (rafId != null) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        neutralizeRechartsFocus();
+      });
+    });
+    observer.observe(root, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      if (rafId != null) {
+        window.cancelAnimationFrame(rafId);
+      }
+    };
   }, [chartSlide, chartPeriodKey, dailySeries.length]);
 
   let periodLabel = '';
@@ -1042,11 +1080,35 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
   const handleCarouselDragEnd = (_: unknown, info: PanInfo) => {
     const offset = info.offset.x;
     const velocity = info.velocity.x;
+    // RTL-friendly flow:
+    // finger left->right => move to the graph on the right (dot index -1)
+    // finger right->left => move to the graph on the left (dot index +1)
     if (offset < -50 || velocity < -400) {
-      setChartSlide((s) => Math.min(ANALYTICS_SLIDE_COUNT - 1, s + 1));
-    } else if (offset > 50 || velocity > 400) {
       setChartSlide((s) => Math.max(0, s - 1));
+    } else if (offset > 50 || velocity > 400) {
+      setChartSlide((s) => Math.min(ANALYTICS_SLIDE_COUNT - 1, s + 1));
     }
+  };
+
+  const handleTrendTouchStartCapture = (event: TouchEvent<HTMLDivElement>) => {
+    touchStartXRef.current = event.touches[0]?.clientX ?? null;
+  };
+
+  const handleTrendTouchEndCapture = (event: TouchEvent<HTMLDivElement>) => {
+    const startX = touchStartXRef.current;
+    touchStartXRef.current = null;
+    if (startX == null) return;
+
+    const endX = event.changedTouches[0]?.clientX ?? startX;
+    const deltaX = endX - startX;
+    const threshold = 35;
+    if (Math.abs(deltaX) < threshold) return;
+
+    if (deltaX > 0) {
+      setChartSlide((s) => Math.min(ANALYTICS_SLIDE_COUNT - 1, s + 1));
+      return;
+    }
+    setChartSlide((s) => Math.max(0, s - 1));
   };
 
   const categoryLegend: DonutLegendItem[] = breakdown.map((b) => ({
@@ -1079,8 +1141,12 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
         <div className="flex p-1 bg-neutral-900 border border-neutral-800 rounded-2xl">
           {views.map((v) => (
             <button
+              type="button"
               key={v.id}
-              onClick={() => setView(v.id)}
+              onClick={() => {
+                if (view === v.id) return;
+                setView(v.id);
+              }}
               className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 ease-in-out ${
                 view === v.id
                   ? 'bg-white text-neutral-900 shadow'
@@ -1249,13 +1315,15 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                 ) : (
                   <div
                     ref={trendChartHostRef}
-                    className="insights-trend-chart relative z-20 min-h-0 w-full flex-1 overflow-visible outline-none [-webkit-tap-highlight-color:transparent] focus:outline-none focus-visible:outline-none active:outline-none [&_*:active]:shadow-none [&_*:active]:outline-none [&_*:focus-visible]:shadow-none [&_*:focus-visible]:outline-none [&_*:focus]:shadow-none [&_*:focus]:outline-none [&_.recharts-surface:active]:outline-none [&_.recharts-surface:focus-visible]:outline-none [&_.recharts-surface:focus]:outline-none [&_.recharts-wrapper:active]:outline-none [&_.recharts-wrapper:focus-visible]:outline-none [&_.recharts-wrapper:focus]:outline-none [&_canvas:active]:outline-none [&_canvas:focus]:outline-none [&_svg:active]:outline-none [&_svg:focus]:outline-none"
+                    className="insights-trend-chart relative z-20 min-h-0 w-full flex-1 overflow-visible outline-none [-webkit-tap-highlight-color:transparent] focus:outline-none focus-visible:outline-none active:outline-none [&_*:active]:shadow-none [&_*:active]:outline-none [&_*:focus-visible]:shadow-none [&_*:focus-visible]:outline-none [&_*:focus]:shadow-none [&_*:focus]:outline-none [&_.recharts-cartesian-axis]:pointer-events-none [&_.recharts-cartesian-grid]:pointer-events-none [&_.recharts-reference-line]:pointer-events-none [&_.recharts-surface:active]:outline-none [&_.recharts-surface:focus-visible]:outline-none [&_.recharts-surface:focus]:outline-none [&_.recharts-tooltip-cursor]:pointer-events-none [&_.recharts-wrapper:active]:outline-none [&_.recharts-wrapper:focus-visible]:outline-none [&_.recharts-wrapper:focus]:outline-none [&_canvas:active]:outline-none [&_canvas:focus]:outline-none [&_svg:active]:outline-none [&_svg:focus]:outline-none"
                     style={{
                       height: ANALYTICS_LINE_HEIGHT,
                       minHeight: ANALYTICS_LINE_HEIGHT,
                       outline: 'none',
                     }}
                     tabIndex={-1}
+                    onTouchStartCapture={handleTrendTouchStartCapture}
+                    onTouchEndCapture={handleTrendTouchEndCapture}
                     onPointerDownCapture={() => {
                       queueMicrotask(() => {
                         trendChartHostRef.current
@@ -1293,21 +1361,23 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                       >
                         <Tooltip
                           trigger={isCoarsePointer ? 'click' : 'hover'}
-                          cursor={{
-                            stroke: '#525252',
-                            strokeWidth: 1,
-                            strokeDasharray: '4 4',
-                          }}
+                          cursor={false}
                           content={() => null}
                           isAnimationActive={false}
                         />
-                        <CartesianGrid stroke="#2a2a2a" strokeDasharray="3 6" vertical={false} />
+                        <CartesianGrid stroke="#2a2a2a" strokeDasharray="3 6" vertical={false} className="pointer-events-none" />
                         <XAxis
                           dataKey="dayLabel"
                           tick={{ fill: '#525252', fontSize: 11 }}
                           axisLine={false}
                           tickLine={false}
                           interval={view === 'month' ? 6 : view === 'year' ? 1 : 0}
+                          tickFormatter={(value) => {
+                            if (view !== 'year') return String(value);
+                            if (typeof value !== 'string') return '';
+                            return value.replace(/\d+/g, '').trim();
+                          }}
+                          className="pointer-events-none"
                         />
                         <YAxis
                           domain={[0, trendMax]}
@@ -1317,6 +1387,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                           tickLine={false}
                           width={40}
                           tickFormatter={(v) => String(v)}
+                          className="pointer-events-none"
                         />
                         <Line
                           type="monotone"
@@ -2350,6 +2421,7 @@ function App() {
     applySettingsFromCloud,
   } = useLanguage();
   const [user, setUser] = useState<User | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState('');
   const [authReady, setAuthReady] = useState(false);
   const [dataReady, setDataReady] = useState(false);
   const [settingsCloudReady, setSettingsCloudReady] = useState(false);
@@ -2375,6 +2447,13 @@ function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser);
+      if (!firebaseUser) {
+        setAvatarUrl('');
+      } else if (firebaseUser.isAnonymous) {
+        setAvatarUrl(getGuestAvatarFromStorage());
+      } else {
+        setAvatarUrl(sanitizeAvatarUrl(firebaseUser.photoURL, ''));
+      }
       setAuthReady(true);
     });
     return unsubscribe;
@@ -2402,6 +2481,7 @@ function App() {
   // Active top-level navigation tab.
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const settingsReturnTabRef = useRef<TabId>('dashboard');
   const [navOpen, setNavOpen] = useState(false);
   const chartDateSetterRef = useRef<((iso: string) => void) | null>(null);
@@ -2423,12 +2503,24 @@ function App() {
     setActiveTab(id);
     setNavOpen(false);
     setSettingsOpen(false);
+    setProfileOpen(false);
   };
 
   const openSettings = () => {
     settingsReturnTabRef.current = activeTab;
     setNavOpen(false);
+    setProfileOpen(false);
     setSettingsOpen(true);
+  };
+
+  const openProfile = () => {
+    setNavOpen(false);
+    setSettingsOpen(false);
+    setProfileOpen(true);
+  };
+
+  const closeProfile = () => {
+    setProfileOpen(false);
   };
 
   const closeSettings = () => {
@@ -2441,9 +2533,25 @@ function App() {
       await signOutUser();
       setNavOpen(false);
       setActiveTab('dashboard');
+      setProfileOpen(false);
     } catch {
       // sign-out errors are rare; user state will sync via onAuthStateChanged
     }
+  };
+
+  const handleSaveAvatar = async (selectedUrl: string) => {
+    if (!user) return;
+    const safeAvatarUrl = sanitizeAvatarUrl(selectedUrl, DEFAULT_GUEST_AVATAR_URL);
+    if (user.isAnonymous) {
+      window.localStorage.setItem(GUEST_AVATAR_STORAGE_KEY, safeAvatarUrl);
+      setAvatarUrl(safeAvatarUrl);
+      return;
+    }
+
+    const currentUser = auth.currentUser;
+    if (!currentUser) return;
+    await updateProfile(currentUser, { photoURL: safeAvatarUrl });
+    setAvatarUrl(safeAvatarUrl);
   };
 
   // Search query for the Expenses history page.
@@ -3126,7 +3234,6 @@ function App() {
 
   // Calculate total expenses (for the selected month)
   const totalExpenses = monthExpenses.reduce((sum, expense) => sum + expense.amount, 0);
-  const budgetPercentage = budget > 0 ? (totalExpenses / budget) * 100 : 0;
   const isOverBudget = totalExpenses > budget && budget > 0;
   const remaining = budget - totalExpenses;
 
@@ -3228,6 +3335,12 @@ function App() {
   const userName = user.isAnonymous
     ? tr('guest')
     : (user.displayName || user.email?.split('@')[0] || tr('user'));
+  const googleAvatarUrl =
+    user.providerData.find((provider) => provider.providerId === 'google.com')?.photoURL ?? null;
+  const defaultUserAvatarUrl = user.isAnonymous
+    ? DEFAULT_GUEST_AVATAR_URL
+    : `https://api.dicebear.com/8.x/fun-emoji/svg?seed=${encodeURIComponent(user.uid)}`;
+  const currentAvatarUrl = sanitizeAvatarUrl(avatarUrl || user.photoURL, defaultUserAvatarUrl);
 
   return (
     <motion.div
@@ -3261,10 +3374,10 @@ function App() {
 
             <div className="flex items-center gap-2 sm:gap-3 shrink-0">
               <UserProfileMenu
-                user={user}
-                userName={userName}
-                onLogout={handleLogout}
+                avatarUrl={currentAvatarUrl}
+                onOpenProfile={openProfile}
                 onOpenSettings={openSettings}
+                onLogout={handleLogout}
               />
               <CollapsibleNavMenu
                 variant="desktop"
@@ -3279,7 +3392,16 @@ function App() {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 pb-24 md:pb-10">
-        {settingsOpen ? (
+        {profileOpen ? (
+          <ProfilePage
+            user={user}
+            userName={userName}
+            currentAvatarUrl={currentAvatarUrl}
+            googleAvatarUrl={googleAvatarUrl}
+            onBack={closeProfile}
+            onSaveAvatar={handleSaveAvatar}
+          />
+        ) : settingsOpen ? (
           <SettingsPage
             onBack={closeSettings}
             recentExpenseCurrencies={recentExpenseCurrencies}
@@ -3291,89 +3413,35 @@ function App() {
           <>
             {monthSelector}
 
-            {/* Budget Status Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6 mb-6 sm:mb-8">
-          {/* Total Budget Card */}
-          <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 hover:border-neutral-700 transition-colors">
-            <div className="flex items-center justify-between mb-3 sm:mb-4">
-              <span className="text-sm font-medium text-neutral-400">{tr('monthlyBudget')}</span>
-              <div className="bg-emerald-500/15 p-2 rounded-lg">
-                <Wallet className="w-5 h-5 text-emerald-400" />
+            {/* Financial summary */}
+            <div className="mb-6 rounded-xl border border-neutral-800 bg-neutral-900 p-4 shadow-sm sm:mb-8 sm:p-6">
+              <h2 className="mb-4 text-lg font-bold text-white md:text-xl">תקציר פיננסי</h2>
+              <div className="grid grid-cols-3 gap-2 divide-x divide-x-reverse divide-gray-700">
+                <div className="flex min-w-0 flex-col items-center justify-center px-2 text-center">
+                  <p className="text-xs text-gray-400 md:text-sm">{tr('monthlyBudget')}</p>
+                  <DisplayMoney amount={budget} className="truncate text-sm font-bold text-neutral-100 sm:text-base md:text-2xl" />
+                </div>
+
+                <div className="flex min-w-0 flex-col items-center justify-center px-2 text-center">
+                  <p className="text-xs text-gray-400 md:text-sm">{tr('totalExpenses')}</p>
+                  <DisplayMoney
+                    amount={totalExpenses}
+                    className={`truncate text-sm font-bold sm:text-base md:text-2xl ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}
+                  />
+                </div>
+
+                <div className="flex min-w-0 flex-col items-center justify-center px-2 text-center">
+                  <p className="text-xs text-gray-400 md:text-sm">{tr('budgetStatus')}</p>
+                  <DisplayMoney
+                    amount={remaining}
+                    className={`truncate text-sm font-bold sm:text-base md:text-2xl ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}
+                  />
+                  <p className="mt-1 text-[10px] text-gray-400 md:text-xs">
+                    {remaining >= 0 ? tr('remainingInBudget') : tr('overBudget')}
+                  </p>
+                </div>
               </div>
             </div>
-            <DisplayMoney amount={budget} className="text-2xl sm:text-3xl font-bold text-neutral-100" />
-            <p className="text-sm text-neutral-500 mt-2">{tr('budgetAllocatedHint')}</p>
-          </div>
-
-          {/* Total Expenses Card */}
-          <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 hover:border-neutral-700 transition-colors">
-            <div className="flex items-center justify-between mb-3 sm:mb-4">
-              <span className="text-sm font-medium text-neutral-400">{tr('totalExpenses')}</span>
-              <div className="bg-rose-500/15 p-2 rounded-lg">
-                <TrendingDown className="w-5 h-5 text-rose-400" />
-              </div>
-            </div>
-            <DisplayMoney
-              amount={totalExpenses}
-              className={`text-2xl sm:text-3xl font-bold ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}
-            />
-            <p className="text-sm text-neutral-500 mt-2">
-              {monthExpenses.length} • {monthLabel}
-            </p>
-          </div>
-
-          {/* Budget Status Card */}
-          <div className={`rounded-2xl shadow-lg shadow-black/20 border p-4 sm:p-6 transition-colors sm:col-span-2 md:col-span-1 ${
-            isOverBudget
-              ? 'bg-rose-500/10 border-rose-500/40'
-              : 'bg-neutral-900 border-neutral-800 hover:border-neutral-700'
-          }`}>
-            <div className="flex items-center justify-between mb-3 sm:mb-4">
-              <span className="text-sm font-medium text-neutral-400">{tr('budgetStatus')}</span>
-              <div className={`p-2 rounded-lg ${isOverBudget ? 'bg-rose-500/20' : 'bg-indigo-500/15'}`}>
-                {isOverBudget ? (
-                  <AlertTriangle className="w-5 h-5 text-rose-400" />
-                ) : (
-                  <Wallet className="w-5 h-5 text-indigo-400" />
-                )}
-              </div>
-            </div>
-
-            {isOverBudget && (
-              <div className="bg-rose-500 text-white text-xs font-medium px-2 py-1 rounded-full inline-block mb-3">
-                {tr('overBudgetBadge')}
-              </div>
-            )}
-
-            <DisplayMoney
-              amount={remaining}
-              className={`text-2xl font-bold ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}
-            />
-            <p className="text-sm text-neutral-500 mt-2">
-              {remaining >= 0 ? tr('remainingInBudget') : tr('overBudget')}
-            </p>
-
-            {/* Progress Bar */}
-            <div className="mt-4">
-              <div className="flex justify-between text-xs text-neutral-400 mb-1">
-                <span>{tr('utilization')}</span>
-                <span>{Math.min(100, budgetPercentage).toFixed(0)}%</span>
-              </div>
-              <div className="h-3 bg-neutral-800 rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all duration-500 ${
-                    isOverBudget
-                      ? 'bg-gradient-to-r from-rose-500 to-rose-600'
-                      : budgetPercentage > 80
-                        ? 'bg-gradient-to-r from-amber-400 to-amber-500'
-                        : 'bg-gradient-to-r from-emerald-500 to-teal-500'
-                  }`}
-                  style={{ width: `${Math.min(100, budgetPercentage)}%` }}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
 
             {/* Monthly budget setter */}
             <div className="mb-4 w-full rounded-2xl border border-neutral-800 bg-neutral-900 p-4 shadow-lg shadow-black/20 sm:mb-6 sm:p-6">
