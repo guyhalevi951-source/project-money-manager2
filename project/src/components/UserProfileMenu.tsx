@@ -109,7 +109,7 @@ export default function UserProfileMenu({
           className="flex w-full items-center gap-2.5 px-3 py-2 text-right text-sm text-rose-300 transition-colors hover:bg-rose-500/15"
         >
           <LogOut className="h-4 w-4 shrink-0" />
-          <span className="flex-1">התנתקות</span>
+          <span className="flex-1">{tr('logout')}</span>
         </button>
       </div>
     </div>

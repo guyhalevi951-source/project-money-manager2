@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Pencil, X } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
+import { useLanguage } from '../LanguageContext';
+import { formatTranslation } from '../translations';
 import { DEFAULT_GUEST_AVATAR_URL, sanitizeAvatarUrl } from '../services/avatarService';
 
 interface ProfilePageProps {
@@ -31,6 +33,7 @@ export default function ProfilePage({
   onBack,
   onSaveAvatar,
 }: ProfilePageProps) {
+  const { tr, lang } = useLanguage();
   const [selectedAvatar, setSelectedAvatar] = useState(
     sanitizeAvatarUrl(currentAvatarUrl, DEFAULT_GUEST_AVATAR_URL),
   );
@@ -55,7 +58,9 @@ export default function ProfilePage({
     });
   }, [googleAvatarUrl, currentAvatarUrl]);
 
-  const welcome = user.isAnonymous ? 'ברוך הבא, אורח' : `ברוך הבא, ${userName}`;
+  const welcome = user.isAnonymous
+    ? tr('profileWelcomeGuest')
+    : formatTranslation(lang, 'profileWelcomeUser', { name: userName });
 
   const handleSave = async () => {
     if (!selectedAvatar || saving) return;
@@ -72,12 +77,12 @@ export default function ProfilePage({
     <div className="mx-auto flex w-full max-w-3xl flex-col items-center">
       <div className="w-full rounded-3xl border border-neutral-800 bg-neutral-900 p-5 shadow-2xl shadow-black/30 sm:p-8">
         <div className="mb-5 flex items-center justify-between">
-          <h2 className="text-xl font-bold text-neutral-100 sm:text-2xl">פרופיל</h2>
+          <h2 className="text-xl font-bold text-neutral-100 sm:text-2xl">{tr('profile')}</h2>
           <button
             type="button"
             onClick={onBack}
             className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-neutral-700 bg-neutral-800 text-neutral-200 transition-colors hover:bg-neutral-700"
-            aria-label="סגירה"
+            aria-label={tr('close')}
           >
             <X className="h-5 w-5" />
           </button>
@@ -89,7 +94,7 @@ export default function ProfilePage({
             type="button"
             onClick={() => setPickerOpen(true)}
             className="group relative mb-6 rounded-full"
-            aria-label="עריכת תמונת פרופיל"
+            aria-label={tr('profileEditAvatarAria')}
           >
             <img
               src={selectedAvatar}
@@ -111,7 +116,7 @@ export default function ProfilePage({
             disabled={saving}
             className="inline-flex min-h-[2.75rem] min-w-[10rem] items-center justify-center rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 px-6 py-2.5 text-base font-semibold text-white shadow-lg shadow-emerald-500/20 transition-all hover:from-emerald-600 hover:to-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {saving ? 'שומר...' : 'שמור'}
+            {saving ? tr('profileSaving') : tr('profileSave')}
           </button>
         </div>
       </div>
@@ -120,12 +125,12 @@ export default function ProfilePage({
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-4">
           <div className="w-full max-w-xl rounded-2xl border border-neutral-700 bg-neutral-900 p-5 shadow-2xl shadow-black/60 sm:p-6">
             <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-base font-semibold text-neutral-100 sm:text-lg">בחר תמונת פרופיל</h3>
+              <h3 className="text-base font-semibold text-neutral-100 sm:text-lg">{tr('profileChooseAvatar')}</h3>
               <button
                 type="button"
                 onClick={() => setPickerOpen(false)}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-neutral-700 bg-neutral-800 text-neutral-200 transition-colors hover:bg-neutral-700"
-                aria-label="סגור בחירת תמונה"
+                aria-label={tr('profileCloseAvatarPickerAria')}
               >
                 <X className="h-4 w-4" />
               </button>
@@ -141,7 +146,11 @@ export default function ProfilePage({
                       ? 'border-emerald-500 bg-emerald-500/10'
                       : 'border-neutral-700 bg-neutral-800 hover:border-neutral-500'
                   }`}
-                  title={index === 0 && googleAvatarUrl ? 'תמונת Gmail מקורית' : 'בחירת אווטאר'}
+                  title={
+                    index === 0 && googleAvatarUrl
+                      ? tr('profileGmailPhotoTitle')
+                      : tr('profilePresetAvatarTitle')
+                  }
                 >
                   <img
                     src={avatarUrl}

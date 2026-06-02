@@ -178,7 +178,7 @@ export default function AdvancedColorPickerPopover({
                 }}
                 className="advanced-hue-slider w-full h-3 appearance-none rounded-full cursor-pointer"
                 style={{ background: HUE_TRACK_GRADIENT }}
-                aria-label="Hue"
+                aria-label={tr('colorPickerHue')}
               />
             </div>
 

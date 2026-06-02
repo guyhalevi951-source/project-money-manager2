@@ -13,7 +13,6 @@ import {
 } from '../constants/currencies';
 import CurrencyLibraryModal from './CurrencyLibraryModal';
 import CurrencyFlag from './CurrencyFlag';
-import ExchangeRateSimulator from './ExchangeRateSimulator';
 
 const DEFAULT_DISPLAY_CURRENCY: CoreCurrencyCode = 'ILS';
 
@@ -87,10 +86,10 @@ const currencyCellClass =
   'absolute inset-0 flex flex-col items-center justify-center rounded-xl text-sm sm:text-base font-semibold tabular-nums transition-all min-h-0';
 
 interface DisplayCurrencySelectorProps {
-  recentExpenseCurrencies: ExpenseCurrency[];
+  recentExpenseCurrencies?: ExpenseCurrency[];
 }
 
-function DisplayCurrencySelector({ recentExpenseCurrencies }: DisplayCurrencySelectorProps) {
+function DisplayCurrencySelector({ recentExpenseCurrencies: _recentExpenseCurrencies }: DisplayCurrencySelectorProps) {
   const {
     tr,
     displayCurrency,
@@ -290,7 +289,6 @@ function DisplayCurrencySelector({ recentExpenseCurrencies }: DisplayCurrencySel
         onDiscard={handleDiscardChanges}
       />
 
-      <ExchangeRateSimulator recentExpenseCurrencies={recentExpenseCurrencies} />
     </>
   );
 }

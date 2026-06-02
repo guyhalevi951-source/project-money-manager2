@@ -15,8 +15,22 @@ const he: TranslationDict = {
   savedColorsTitle: 'צבעים שמורים',
   savedColorsEmpty: 'אין צבעים שמורים עדיין',
   profile: 'פרופיל',
+  profileWelcomeGuest: 'ברוך הבא, אורח',
+  profileWelcomeUser: 'ברוך הבא, {name}',
+  profileChooseAvatar: 'בחר תמונת פרופיל',
+  profileEditAvatarAria: 'עריכת תמונת פרופיל',
+  profileCloseAvatarPickerAria: 'סגור בחירת תמונה',
+  profileGmailPhotoTitle: 'תמונת Gmail מקורית',
+  profilePresetAvatarTitle: 'בחירת אווטאר',
+  profileSave: 'שמור',
+  profileSaving: 'שומר...',
   greetingPrefix: 'שלום',
   settings: 'הגדרות',
+  settingsSectionCurrencies: 'מטבעות',
+  settingsSectionCurrenciesDesc: 'הגדרות מטבע תצוגה, שער חליפין ועמלות',
+  settingsSectionExchangeRates: 'שער חליפין / עמלות',
+  settingsSectionGeneral: 'הגדרות כלליות',
+  settingsSectionGeneralDesc: 'שפה והתנהגות תרגום',
   settingsPageSubtitle: 'התאמה אישית של שפה, תרגום ומטבע תצוגה',
   backToApp: 'חזרה לאפליקציה',
   translationOptions: 'תרגום תוכן',
@@ -132,6 +146,7 @@ const he: TranslationDict = {
 
   // Dashboard / forms
   monthlyBudget: 'תקציב חודשי',
+  financialSummaryTitle: 'תקציר פיננסי',
   budgetAllocatedHint: 'הסכום שהוקצב להוצאות',
   totalExpenses: 'סה"כ הוצאות',
   budgetStatus: 'מצב התקציב',
@@ -166,6 +181,7 @@ const he: TranslationDict = {
   setMonthlyBudget: 'הגדר תקציב חודשי',
   addMonthlyBudget: 'הוספת תקציב חודשי',
   budgetAmountLabel: 'סכום התקציב (₪)',
+  budgetAutoTransferNote: '* התקציב יועבר באופן אוטומטי לחודשים הבאים',
   enterAmount: 'הזן סכום',
   currentAmountPrefix: 'נוכחי',
   backToCurrentMonth: 'חזרה לחודש הנוכחי',
@@ -256,6 +272,7 @@ const he: TranslationDict = {
   addCategory: 'הוסף קטגוריה',
   color: 'צבע',
   customColorAdvanced: 'בחירת צבע מתקדמת',
+  colorPickerHue: 'גוון',
   categoryNameRequired: 'יש להזין שם קטגוריה',
   invalidCategoryName: 'שם לא חוקי',
   categoryAlreadyExists: 'קטגוריה בשם זה כבר קיימת',
@@ -272,8 +289,22 @@ const en: TranslationDict = {
   savedColorsTitle: 'Saved colors',
   savedColorsEmpty: 'No saved colors yet',
   profile: 'Profile',
+  profileWelcomeGuest: 'Welcome, Guest',
+  profileWelcomeUser: 'Welcome, {name}',
+  profileChooseAvatar: 'Choose profile picture',
+  profileEditAvatarAria: 'Edit profile picture',
+  profileCloseAvatarPickerAria: 'Close avatar picker',
+  profileGmailPhotoTitle: 'Original Gmail photo',
+  profilePresetAvatarTitle: 'Choose avatar',
+  profileSave: 'Save',
+  profileSaving: 'Saving...',
   greetingPrefix: 'Hi',
   settings: 'Settings',
+  settingsSectionCurrencies: 'Currencies',
+  settingsSectionCurrenciesDesc: 'Display currency, exchange rate, and commission settings',
+  settingsSectionExchangeRates: 'Exchange rates / commissions',
+  settingsSectionGeneral: 'General settings',
+  settingsSectionGeneralDesc: 'Language and translation behavior',
   settingsPageSubtitle: 'Customize language, translation, and display currency',
   backToApp: 'Back to app',
   translationOptions: 'Content translation',
@@ -381,6 +412,7 @@ const en: TranslationDict = {
   viewMonth: 'Month',
   viewYear: 'Year',
   monthlyBudget: 'Monthly budget',
+  financialSummaryTitle: 'Financial summary',
   budgetAllocatedHint: 'Amount allocated for spending',
   totalExpenses: 'Total expenses',
   budgetStatus: 'Budget status',
@@ -415,6 +447,7 @@ const en: TranslationDict = {
   setMonthlyBudget: 'Set monthly budget',
   addMonthlyBudget: 'Add monthly budget',
   budgetAmountLabel: 'Budget amount (₪)',
+  budgetAutoTransferNote: '* Budget is automatically carried over to upcoming months',
   enterAmount: 'Enter amount',
   currentAmountPrefix: 'Current',
   backToCurrentMonth: 'Back to current month',
@@ -493,6 +526,7 @@ const en: TranslationDict = {
   addCategory: 'Add category',
   color: 'Color',
   customColorAdvanced: 'Advanced custom color',
+  colorPickerHue: 'Hue',
   categoryNameRequired: 'Category name is required',
   invalidCategoryName: 'Invalid category name',
   categoryAlreadyExists: 'A category with this name already exists',
@@ -508,6 +542,18 @@ export const dirByLang: Record<Lang, Dir> = {
 
 export function t(lang: Lang, key: TranslationKey): string {
   return translations[lang][key] ?? key;
+}
+
+/** Replace `{param}` placeholders in a global UI translation string. */
+export function formatTranslation(
+  lang: Lang,
+  key: TranslationKey,
+  params: Record<string, string | number>,
+): string {
+  return Object.entries(params).reduce(
+    (text, [param, value]) => text.replace(new RegExp(`\\{${param}\\}`, 'g'), String(value)),
+    t(lang, key),
+  );
 }
 
 const BUILTIN_CATEGORY_LABELS: Record<

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useLanguage } from '../LanguageContext';
 import { writePreferredLanguage } from '../services/authLanguagePreference';
 import DisplayCurrencySelector from './DisplayCurrencySelector';
+import ExchangeRateSimulator from './ExchangeRateSimulator';
 import type { ExpenseCurrency } from '../services/exchangeRateService';
 
 interface SettingsPageProps {
@@ -87,8 +88,8 @@ export default function SettingsPage({ onBack, recentExpenseCurrencies }: Settin
                 <Coins className="h-5 w-5 text-violet-400" />
               </div>
               <div className="min-w-0 text-start">
-                <h3 className="truncate text-base font-semibold text-white sm:text-lg">מטבעות</h3>
-                <p className="mt-0.5 text-xs text-gray-400 sm:text-sm">הגדרות מטבע תצוגה, שער חליפין ועמלות</p>
+                <h3 className="truncate text-base font-semibold text-white sm:text-lg">{tr('settingsSectionCurrencies')}</h3>
+                <p className="mt-0.5 text-xs text-gray-400 sm:text-sm">{tr('settingsSectionCurrenciesDesc')}</p>
               </div>
             </div>
             {openMain === 'currencies' ? (
@@ -134,7 +135,7 @@ export default function SettingsPage({ onBack, recentExpenseCurrencies }: Settin
               <div className="flex items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2">
                   <SlidersHorizontal className="h-4 w-4 shrink-0 text-violet-300" />
-                  <h4 className="truncate text-sm font-semibold text-white sm:text-base">שער חליפין / עמלות</h4>
+                  <h4 className="truncate text-sm font-semibold text-white sm:text-base">{tr('settingsSectionExchangeRates')}</h4>
                 </div>
                 {openCurrencySub === 'exchange' ? (
                   <ChevronDown className="h-5 w-5 shrink-0 text-gray-300" />
@@ -145,12 +146,7 @@ export default function SettingsPage({ onBack, recentExpenseCurrencies }: Settin
             </button>
             {openCurrencySub === 'exchange' && (
               <div className="rounded-lg border border-gray-700/60 bg-gray-950/40 p-4 text-start">
-                <p className="text-sm text-gray-200">
-                  ניהול שערי חליפין ועמלות מתבצע במסך המרת המטבע שבדף הבית.
-                </p>
-                <p className="mt-1 text-xs leading-relaxed text-gray-400">
-                  שם ניתן להוסיף עמלה, לשמור שערים ידניים ולנהל ערכים שמורים.
-                </p>
+                <ExchangeRateSimulator recentExpenseCurrencies={recentExpenseCurrencies} />
               </div>
             )}
           </div>
@@ -168,8 +164,8 @@ export default function SettingsPage({ onBack, recentExpenseCurrencies }: Settin
                 <Languages className="h-5 w-5 text-emerald-400" />
               </div>
               <div className="min-w-0 text-start">
-                <h3 className="truncate text-base font-semibold text-white sm:text-lg">הגדרות כלליות</h3>
-                <p className="mt-0.5 text-xs text-gray-400 sm:text-sm">שפה והתנהגות תרגום</p>
+                <h3 className="truncate text-base font-semibold text-white sm:text-lg">{tr('settingsSectionGeneral')}</h3>
+                <p className="mt-0.5 text-xs text-gray-400 sm:text-sm">{tr('settingsSectionGeneralDesc')}</p>
               </div>
             </div>
             {openMain === 'general' ? (

@@ -32,6 +32,7 @@ export interface UserSettings {
   displayCurrency: ExpenseCurrency;
   saved_colors: string[];
   custom_currencies: ExpenseCurrency[];
+  autoTransferBudget: boolean;
 }
 
 export interface UserCategoriesData {
@@ -59,6 +60,7 @@ export const EMPTY_USER_SETTINGS: UserSettings = {
   displayCurrency: 'ILS',
   saved_colors: [],
   custom_currencies: [],
+  autoTransferBudget: true,
 };
 
 export const EMPTY_USER_CATEGORIES: UserCategoriesData = {
@@ -73,6 +75,7 @@ const SETTINGS_LS_KEYS = {
   displayCurrency: 'money-manager-display-currency',
   savedColors: 'saved_colors',
   customCurrencies: 'money-manager-custom-currencies',
+  autoTransferBudget: 'auto_transfer_budget',
 } as const;
 
 export const shouldSyncToFirestore = (user: User | null): user is User =>
@@ -110,6 +113,10 @@ function parseSettings(raw: Record<string, unknown> | undefined): UserSettings {
     displayCurrency,
     saved_colors: normalizeSavedColors(raw.saved_colors),
     custom_currencies: normalizeCustomCurrencies(raw.custom_currencies),
+    autoTransferBudget:
+      typeof raw.autoTransferBudget === 'boolean'
+        ? raw.autoTransferBudget
+        : EMPTY_USER_SETTINGS.autoTransferBudget,
   };
 }
 
@@ -190,7 +197,8 @@ function hasSettingsLocalData(settings: UserSettings): boolean {
     settings.keepOriginalValues !== EMPTY_USER_SETTINGS.keepOriginalValues ||
     settings.displayCurrency !== EMPTY_USER_SETTINGS.displayCurrency ||
     settings.saved_colors.length > 0 ||
-    settings.custom_currencies.length > 0
+    settings.custom_currencies.length > 0 ||
+    settings.autoTransferBudget !== EMPTY_USER_SETTINGS.autoTransferBudget
   );
 }
 
@@ -221,7 +229,13 @@ export function loadLegacySettingsFromLocalStorage(): UserSettings {
     custom_currencies = [];
   }
 
-  return { lang, keepOriginalValues, displayCurrency, saved_colors, custom_currencies };
+  const autoTransferBudgetRaw = window.localStorage.getItem(SETTINGS_LS_KEYS.autoTransferBudget);
+  const autoTransferBudget =
+    autoTransferBudgetRaw == null
+      ? EMPTY_USER_SETTINGS.autoTransferBudget
+      : autoTransferBudgetRaw !== 'false';
+
+  return { lang, keepOriginalValues, displayCurrency, saved_colors, custom_currencies, autoTransferBudget };
 }
 
 export function clearLegacyLocalStorage(): void {
@@ -237,6 +251,7 @@ export function clearLegacyLocalStorage(): void {
   window.localStorage.removeItem(SETTINGS_LS_KEYS.displayCurrency);
   window.localStorage.removeItem(SETTINGS_LS_KEYS.savedColors);
   window.localStorage.removeItem(SETTINGS_LS_KEYS.customCurrencies);
+  window.localStorage.removeItem(SETTINGS_LS_KEYS.autoTransferBudget);
 }
 
 async function readLegacyFirestoreApp(uid: string): Promise<UserAppData | null> {
@@ -349,6 +364,7 @@ export async function migrateLegacyDataToCloud(uid: string): Promise<void> {
         displayCurrency: settings.displayCurrency,
         saved_colors: settings.saved_colors,
         custom_currencies: settings.custom_currencies,
+        autoTransferBudget: settings.autoTransferBudget,
         updatedAt: serverTimestamp(),
       },
       { merge: true },
@@ -460,6 +476,7 @@ export async function saveSettingsToCloud(uid: string, settings: UserSettings): 
       displayCurrency: settings.displayCurrency,
       saved_colors: settings.saved_colors,
       custom_currencies: settings.custom_currencies,
+      autoTransferBudget: settings.autoTransferBudget,
       updatedAt: serverTimestamp(),
     },
     { merge: true },

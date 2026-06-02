@@ -264,6 +264,7 @@ const ANALYTICS_CHART_HEIGHT = 320;
 const ANALYTICS_DONUT_SIZE = 192;
 const ANALYTICS_LINE_HEIGHT = 240;
 const GENERAL_KEY = '__general__';
+const AUTO_TRANSFER_BUDGET_STORAGE_KEY = 'auto_transfer_budget';
 /** Persisted on a month with no allocations so deletes are not re-filled by inheritance. */
 const SUB_BUDGET_MONTH_MARKER = '__sb_init__';
 
@@ -2477,6 +2478,10 @@ function App() {
   });
   const [expenseRatesReady, setExpenseRatesReady] = useState(true);
   const [showBudgetSaved, setShowBudgetSaved] = useState(false);
+  const [autoTransferBudget, setAutoTransferBudget] = useState<boolean>(() => {
+    const raw = window.localStorage.getItem(AUTO_TRANSFER_BUDGET_STORAGE_KEY);
+    return raw == null ? true : raw !== 'false';
+  });
 
   // Active top-level navigation tab.
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
@@ -2554,6 +2559,21 @@ function App() {
     setAvatarUrl(safeAvatarUrl);
   };
 
+  const handleAutoTransferBudgetChange = (nextValue: boolean) => {
+    setAutoTransferBudget(nextValue);
+    window.localStorage.setItem(AUTO_TRANSFER_BUDGET_STORAGE_KEY, String(nextValue));
+
+    if (!user || user.isAnonymous || !settingsCloudReady) return;
+    void saveSettingsToCloud(user.uid, {
+      lang,
+      keepOriginalValues,
+      displayCurrency,
+      saved_colors: savedColors,
+      custom_currencies: customCurrencies,
+      autoTransferBudget: nextValue,
+    });
+  };
+
   // Search query for the Expenses history page.
   const [search, setSearch] = useState('');
   const [timeFilter, setTimeFilter] = useState<HistoryTimeFilter>('daily');
@@ -2595,7 +2615,18 @@ function App() {
   // The month currently in focus ('YYYY-MM') and its budget + sub-budgets.
   // Deriving these keeps the rest of the component working with simple values.
   const selectedMonthKey = monthKeyOfDate(selectedDate);
-  const budget = budgetsByMonth[selectedMonthKey] ?? 0;
+  const explicitBudget = budgetsByMonth[selectedMonthKey];
+  const inheritedBudget = useMemo(() => {
+    if (!autoTransferBudget || explicitBudget !== undefined) return 0;
+    const sourceMonthKey = findNearestPriorMonthWithData(
+      selectedMonthKey,
+      budgetsByMonth,
+      subBudgetsByMonth,
+    );
+    if (!sourceMonthKey) return 0;
+    return budgetsByMonth[sourceMonthKey] ?? 0;
+  }, [autoTransferBudget, explicitBudget, selectedMonthKey, budgetsByMonth, subBudgetsByMonth]);
+  const budget = explicitBudget ?? inheritedBudget;
   const subBudgets = subBudgetsByMonth[selectedMonthKey] ?? {};
 
   const patchSubBudgetsByMonth = useCallback(
@@ -2642,24 +2673,11 @@ function App() {
   // When user navigates to a month with no explicit values yet, copy budget +
   // sub-budgets from the nearest prior month that has data.
   useEffect(() => {
-    const hasBudget = budgetsByMonth[selectedMonthKey] !== undefined;
     const hasExplicitSubBudgetMonth = monthHasSubBudgetRecord(
       subBudgetsByMonth,
       selectedMonthKey,
     );
-    if (hasBudget && hasExplicitSubBudgetMonth) return;
-
-    const sourceMonthKey = findNearestPriorMonthWithData(
-      selectedMonthKey,
-      budgetsByMonth,
-      subBudgetsByMonth
-    );
-    if (!sourceMonthKey) return;
-
-    if (!hasBudget && budgetsByMonth[sourceMonthKey] !== undefined) {
-      const inheritedBudget = budgetsByMonth[sourceMonthKey];
-      setBudgetsByMonth((prev) => ({ ...prev, [selectedMonthKey]: inheritedBudget }));
-    }
+    if (hasExplicitSubBudgetMonth) return;
 
     if (!hasExplicitSubBudgetMonth) {
       const subSourceMonthKey = findNearestPriorMonthWithSubBudgets(
@@ -2675,7 +2693,7 @@ function App() {
         }));
       }
     }
-  }, [selectedMonthKey, budgetsByMonth, subBudgetsByMonth]);
+  }, [selectedMonthKey, subBudgetsByMonth]);
 
   const applyAppData = (data: typeof EMPTY_USER_APP_DATA) => {
     setExpenses(data.expenses.map((e) => ({ ...e, date: normalizeDate(e.date) })));
@@ -2859,12 +2877,14 @@ function App() {
                     displayCurrency: mergeBase.displayCurrency,
                     saved_colors: mergeBase.savedColors,
                     custom_currencies: mergeBase.customCurrencies,
+                    autoTransferBudget,
                   };
               applySettingsFromCloud(merged);
             } else if (meta.exists) {
               skipNextSettingsSaveRef.current = true;
               applySettingsFromCloud(settings);
             }
+            setAutoTransferBudget(settings.autoTransferBudget);
             if (!initialSettings) {
               initialSettings = true;
               setSettingsCloudReady(true);
@@ -2925,7 +2945,7 @@ function App() {
       unsubManualOverrides?.();
       unsubCurrencyCommissions?.();
     };
-  }, [user, authReady, applySettingsFromCloud, setSettingsPersistence, setLang]);
+  }, [user, authReady, applySettingsFromCloud, setSettingsPersistence, setLang, autoTransferBudget]);
 
   // Persist financial changes: localStorage for guests, debounced Firestore for accounts.
   useEffect(() => {
@@ -2986,6 +3006,7 @@ function App() {
         displayCurrency,
         saved_colors: savedColors,
         custom_currencies: customCurrencies,
+        autoTransferBudget,
       }).catch(() => {
         // Non-blocking; next change will retry.
       });
@@ -2998,6 +3019,7 @@ function App() {
     displayCurrency,
     savedColors,
     customCurrencies,
+    autoTransferBudget,
     dataReady,
     user,
     settingsCloudReady,
@@ -3415,7 +3437,7 @@ function App() {
 
             {/* Financial summary */}
             <div className="mb-6 rounded-xl border border-neutral-800 bg-neutral-900 p-4 shadow-sm sm:mb-8 sm:p-6">
-              <h2 className="mb-4 text-lg font-bold text-white md:text-xl">תקציר פיננסי</h2>
+              <h2 className="mb-4 text-lg font-bold text-white md:text-xl">{tr('financialSummaryTitle')}</h2>
               <div className="grid grid-cols-3 gap-2 divide-x divide-x-reverse divide-gray-700">
                 <div className="flex min-w-0 flex-col items-center justify-center px-2 text-center">
                   <p className="text-xs text-gray-400 md:text-sm">{tr('monthlyBudget')}</p>
@@ -3449,48 +3471,63 @@ function App() {
                 <Wallet className="h-5 w-5 shrink-0 text-emerald-400" />
                 {tr('addMonthlyBudget')}
               </h2>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-4">
-                <div className="min-w-0 flex-1 sm:max-w-xs">
+              <div className="w-full">
+                <div className="min-w-0 w-full">
                   <label className="mb-2 block text-sm font-medium text-neutral-300">
                     {tr('budgetAmountLabel')}
                   </label>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    value={budgetInput}
-                    onChange={(e) => setBudgetInput(e.target.value)}
-                    placeholder={
-                      budget > 0
-                        ? `${tr('currentAmountPrefix')}: ${formatMoney(budget)}`
-                        : tr('enterAmount')
-                    }
-                    className="w-full rounded-xl border border-neutral-700 bg-neutral-800 px-4 py-3 text-base text-neutral-100 placeholder-neutral-500 outline-none transition-all focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 sm:text-lg"
-                    min="0"
-                    step="100"
-                  />
-                </div>
-                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:gap-3">
-                  <button
-                    type="button"
-                    onClick={handleSetBudget}
-                    className={dashboardTealActionButtonClass}
+                  <div className="flex flex-row items-center gap-2">
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      value={budgetInput}
+                      onChange={(e) => setBudgetInput(e.target.value)}
+                      placeholder={
+                        budget > 0
+                          ? `${tr('currentAmountPrefix')}: ${formatMoney(budget)}`
+                          : tr('enterAmount')
+                      }
+                      className="min-w-0 flex-1 rounded-xl border border-neutral-700 bg-neutral-800 px-4 py-3 text-base text-neutral-100 placeholder-neutral-500 outline-none transition-all focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 sm:text-lg h-12"
+                      min="0"
+                      step="100"
+                    />
+                    <div className="flex shrink-0 flex-row flex-wrap gap-2 sm:flex-nowrap sm:gap-3">
+                      <button
+                        type="button"
+                        onClick={handleSetBudget}
+                        className={`${dashboardTealActionButtonClass} w-auto`}
+                      >
+                        {showBudgetSaved ? (
+                          <>
+                            <Check className="h-5 w-5" />
+                            {tr('budgetSaved')}
+                          </>
+                        ) : (
+                          tr('updateBudget')
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleTabSelect('subbudgets')}
+                        className={`${dashboardTealActionButtonClass} w-auto`}
+                      >
+                        {tr('tabSubbudgets')}
+                      </button>
+                    </div>
+                  </div>
+                  <label
+                    htmlFor="budget-auto-transfer"
+                    className="mt-2 flex w-full cursor-pointer flex-row items-center justify-between gap-3 text-xs text-gray-400"
                   >
-                    {showBudgetSaved ? (
-                      <>
-                        <Check className="h-5 w-5" />
-                        {tr('budgetSaved')}
-                      </>
-                    ) : (
-                      tr('updateBudget')
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleTabSelect('subbudgets')}
-                    className={dashboardTealActionButtonClass}
-                  >
-                    {tr('tabSubbudgets')}
-                  </button>
+                    <span className="text-start flex-1 pe-2">{tr('budgetAutoTransferNote')}</span>
+                    <input
+                      id="budget-auto-transfer"
+                      type="checkbox"
+                      checked={autoTransferBudget}
+                      onChange={(e) => handleAutoTransferBudgetChange(e.target.checked)}
+                      className="h-4 w-4 shrink-0 rounded border-gray-600 bg-neutral-800 text-emerald-500 focus:ring-emerald-500/30"
+                    />
+                  </label>
                 </div>
               </div>
             </div>

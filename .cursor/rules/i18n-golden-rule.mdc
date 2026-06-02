@@ -1,0 +1,29 @@
+---
+description: Global UI strings must use translations.ts and tr() — never hardcode copy in components.
+globs: project/src/**/*.{tsx,ts}
+alwaysApply: true
+---
+
+# i18n golden rule
+
+Every user-facing string in the UI is **system copy**, not user data. It belongs in the global dictionary only.
+
+## Required workflow
+
+1. Add keys to **both** `he` and `en` in `project/src/translations.ts` (never only one language).
+2. Use `tr('translationKey')` from `useLanguage()` in components (or `t(lang, key)` outside React).
+3. For placeholders like `{name}`, use `formatTranslation(lang, key, { name })` from `translations.ts`.
+4. **Never** store UI label translations in Firebase, localStorage user docs, or per-user settings.
+
+## Forbidden
+
+- Hardcoded Hebrew or English in JSX, `aria-label`, `title`, `placeholder`, or button text.
+- Inline strings that do not switch when the user changes interface language.
+
+## User-generated content (separate path)
+
+- Category names, expense descriptions, custom labels: use `getUserContent` / `LocalizedUserText` and the user-content translation API — not `translations.ts`.
+
+## Built-in defaults
+
+- Default category/color **values** may stay in `categories.ts`; display uses `localizeCategoryLabel` / `localizeColorName`.

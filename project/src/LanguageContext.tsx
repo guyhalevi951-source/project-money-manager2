@@ -282,6 +282,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     document.documentElement.lang = lang;
     document.documentElement.dir = dir;
+    document.title = t(lang, 'appName');
   }, [lang, dir]);
 
   const formatMoney = useCallback(
