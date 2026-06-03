@@ -35,6 +35,7 @@ import {
   lookupCategory,
   type Category,
 } from './categories';
+import appLogo from './assets/app-logo.png';
 import CategoryColorPicker from './components/CategoryColorPicker';
 import CreateCategoryForm from './components/CreateCategoryForm';
 import CategoryIconBadge from './components/CategoryIconBadge';
@@ -3933,9 +3934,11 @@ function App() {
               aria-label={tr('tabDashboard')}
               className="flex min-w-0 cursor-pointer items-center gap-3 rounded-xl text-start outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-emerald-500/50 active:opacity-80"
             >
-              <div className="shrink-0 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 p-2.5 shadow-lg shadow-emerald-500/20">
-                <Wallet className="h-6 w-6 text-white" />
-              </div>
+              <img
+                src={appLogo}
+                alt={tr('appName')}
+                className="h-11 w-11 shrink-0 object-contain"
+              />
               <div className="min-w-0">
                 <h1 className="truncate text-lg font-bold text-neutral-100 sm:text-2xl">{tr('appName')}</h1>
                 <p className="hidden truncate text-xs text-neutral-400 sm:block">{tr('appTagline')}</p>

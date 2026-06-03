@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Wallet, Mail, Lock, Loader2, UserRound, Globe } from 'lucide-react';
+import { Mail, Lock, Loader2, UserRound, Globe } from 'lucide-react';
+import appLogo from '../assets/app-logo.png';
 import {
   isFirebaseConfigured,
   signInWithEmail,
@@ -257,9 +258,11 @@ export default function AuthPage() {
           </button>
 
           <div className="flex flex-col items-center text-center mb-8">
-            <div className="bg-gradient-to-br from-emerald-500 to-teal-600 p-3 rounded-2xl shadow-lg shadow-emerald-500/25 mb-4">
-              <Wallet className="w-8 h-8 text-white" />
-            </div>
+            <img
+              src={appLogo}
+              alt={tr('appName')}
+              className="w-14 h-14 object-contain mb-4"
+            />
             <h1 className="text-2xl font-bold text-slate-100">{tr('appName')}</h1>
             <p className="text-sm text-slate-400 mt-1">{tr('authSubtitle')}</p>
           </div>
