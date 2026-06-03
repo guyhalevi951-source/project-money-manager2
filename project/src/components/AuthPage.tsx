@@ -257,11 +257,14 @@ export default function AuthPage() {
             <span>{lang === 'he' ? 'HE' : 'EN'}</span>
           </button>
 
-          <div className="flex flex-col items-center text-center mb-8">
+          <div className="flex w-full max-w-full flex-col items-center text-center mb-8 pt-8 sm:pt-6 md:pt-0">
             <img
               src={appLogo}
               alt={tr('appName')}
-              className="w-14 h-14 object-contain mb-4"
+              className="mb-4 aspect-square w-full max-w-[13.5rem] object-contain [image-rendering:crisp-edges]"
+              style={{ imageRendering: '-webkit-optimize-contrast' } as import('react').CSSProperties}
+              decoding="async"
+              fetchPriority="high"
             />
             <h1 className="text-2xl font-bold text-slate-100">{tr('appName')}</h1>
             <p className="text-sm text-slate-400 mt-1">{tr('authSubtitle')}</p>

@@ -5,8 +5,10 @@ type TranslationDict = Record<string, string>;
 
 const he: TranslationDict = {
   // Generic
-  appName: 'מנהל התקציב שלי',
-  appTagline: 'נהל את ההוצאות שלך בצורה חכמה',
+  appName: 'הארנק הגלובלי',
+  appTagline: 'מנווטים את התקציב בכל יעד – נחיתה רכה בכל מטבע.',
+  documentTitle: 'הארנק הגלובלי - ניהול כספים למטיילים',
+  documentDescription: 'הארנק הגלובלי — מנווטים את התקציב בכל יעד – נחיתה רכה בכל מטבע.',
   loading: 'טוען',
   close: 'סגור',
   cancel: 'ביטול',
@@ -113,7 +115,7 @@ const he: TranslationDict = {
 
   // Auth
   authFirebaseMissing: 'Firebase לא מוגדר. הוסף את משתני הסביבה בקובץ .env',
-  authSubtitle: 'נהל הוצאות בצורה חכמה ובטוחה',
+  authSubtitle: 'מנווטים את התקציב בכל יעד – נחיתה רכה בכל מטבע.',
   authLogin: 'כניסה',
   authSignup: 'הרשמה',
   authEmail: 'אימייל',
@@ -291,8 +293,11 @@ const he: TranslationDict = {
 };
 
 const en: TranslationDict = {
-  appName: 'My Budget Manager',
-  appTagline: 'Manage your expenses smartly',
+  appName: 'JetMoney',
+  appTagline: 'Navigate your budget  in every destination, land smoothly on every expense.',
+  documentTitle: 'JetMoney - Travel Money Manager',
+  documentDescription:
+    'JetMoney — Navigate your budget  in every destination, land smoothly on every expense.',
   loading: 'Loading',
   close: 'Close',
   cancel: 'Cancel',
@@ -397,7 +402,7 @@ const en: TranslationDict = {
   english: 'English',
   comingSoon: 'Coming soon',
   authFirebaseMissing: 'Firebase is not configured. Add env vars in .env',
-  authSubtitle: 'Track spending in a smart and secure way',
+  authSubtitle: 'Navigate your budget  in every destination, land smoothly on every expense.',
   authLogin: 'Log in',
   authSignup: 'Sign up',
   authEmail: 'Email',

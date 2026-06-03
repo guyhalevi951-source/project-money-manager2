@@ -3937,7 +3937,10 @@ function App() {
               <img
                 src={appLogo}
                 alt={tr('appName')}
-                className="h-11 w-11 shrink-0 object-contain"
+                className="h-11 w-11 shrink-0 object-contain [image-rendering:crisp-edges]"
+                style={{ imageRendering: '-webkit-optimize-contrast' } as React.CSSProperties}
+                decoding="async"
+                fetchPriority="high"
               />
               <div className="min-w-0">
                 <h1 className="truncate text-lg font-bold text-neutral-100 sm:text-2xl">{tr('appName')}</h1>

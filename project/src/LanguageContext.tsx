@@ -282,7 +282,20 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     document.documentElement.lang = lang;
     document.documentElement.dir = dir;
-    document.title = t(lang, 'appName');
+    const pageTitle = t(lang, 'documentTitle');
+    const pageDescription = t(lang, 'documentDescription');
+    document.title = pageTitle;
+
+    const setMetaContent = (selector: string, content: string) => {
+      const el = document.querySelector<HTMLMetaElement>(selector);
+      if (el) el.content = content;
+    };
+
+    setMetaContent('meta[name="description"]', pageDescription);
+    setMetaContent('meta[property="og:title"]', pageTitle);
+    setMetaContent('meta[property="og:description"]', pageDescription);
+    setMetaContent('meta[name="twitter:title"]', pageTitle);
+    setMetaContent('meta[name="twitter:description"]', pageDescription);
   }, [lang, dir]);
 
   const formatMoney = useCallback(
