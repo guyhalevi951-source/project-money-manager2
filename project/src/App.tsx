@@ -4040,26 +4040,26 @@ function App() {
                     </td>
                   </tr>
                   <tr>
-                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-gray-700/80 px-2 align-middle">
+                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-gray-700/80 px-2 text-center align-middle">
                       <div className="flex h-full min-h-0 items-center justify-center">
-                        <LtrNumeric className="block w-full truncate text-sm font-bold leading-tight text-neutral-100 sm:text-base md:text-2xl">
+                        <LtrNumeric className="block w-full truncate text-center text-sm font-bold leading-tight text-neutral-100 sm:text-base md:text-2xl">
                           {selectedBudgetDisplayLabel}
                         </LtrNumeric>
                       </div>
                     </td>
-                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-gray-700/80 px-2 align-middle">
+                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-gray-700/80 px-2 text-center align-middle">
                       <div className="flex h-full min-h-0 items-center justify-center">
                         <LtrNumeric
-                          className={`block w-full truncate text-sm font-bold leading-tight sm:text-base md:text-2xl ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}
+                          className={`block w-full truncate text-center text-sm font-bold leading-tight sm:text-base md:text-2xl ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}
                         >
                           {totalExpensesStatusDisplayLabel}
                         </LtrNumeric>
                       </div>
                     </td>
-                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-gray-700/80 px-2 align-middle">
+                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-gray-700/80 px-2 text-center align-middle">
                       <div className="flex h-full min-h-0 items-center justify-center">
                         <LtrNumeric
-                          className={`block w-full truncate text-sm font-bold leading-tight sm:text-base md:text-2xl ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}
+                          className={`block w-full truncate text-center text-sm font-bold leading-tight sm:text-base md:text-2xl ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}
                         >
                           {remainingStatusDisplayLabel}
                         </LtrNumeric>
