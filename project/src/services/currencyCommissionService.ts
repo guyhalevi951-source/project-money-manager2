@@ -4,6 +4,11 @@ const STORAGE_KEY = 'money_manager_currency_commissions_v1';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const COMMISSIONS_UPDATED_EVENT = 'currency-commissions-updated';
 
+/** Applies the saved fee to every non-ILS expense currency. */
+export const GLOBAL_COMMISSION_CURRENCY = 'ALL' as const;
+
+export type CommissionCurrency = ExpenseCurrency | typeof GLOBAL_COMMISSION_CURRENCY;
+
 /**
  * Safe localStorage helpers with an in-memory fallback.
  * On iOS Safari private mode and some mobile WebViews, localStorage.setItem
@@ -46,7 +51,7 @@ function resetInMemoryFallback(): void {
 export type CommissionSource = 'local_24h' | 'cloud';
 
 export interface CurrencyCommissionEntry {
-  currency: ExpenseCurrency;
+  currency: CommissionCurrency;
   percent: number;
   source: CommissionSource;
   expiresAt: number | null;
@@ -54,13 +59,18 @@ export interface CurrencyCommissionEntry {
 }
 
 export interface CloudCurrencyCommission {
-  currency: ExpenseCurrency;
+  currency: CommissionCurrency;
   percent: number;
   updatedAt?: number;
 }
 
 function isFinitePercent(value: number): boolean {
   return Number.isFinite(value) && value > 0 && value <= 100;
+}
+
+function isValidCommissionCurrency(currency: string): currency is CommissionCurrency {
+  if (currency === GLOBAL_COMMISSION_CURRENCY) return true;
+  return isSupportedCurrency(currency) && currency !== 'ILS';
 }
 
 function dispatchCommissionsUpdated(): void {
@@ -89,7 +99,7 @@ function safeParseEntries(raw: string | null): CurrencyCommissionEntry[] {
 
         return (
           typeof currency === 'string' &&
-          isSupportedCurrency(currency) &&
+          isValidCommissionCurrency(currency) &&
           typeof percent === 'number' &&
           isFinitePercent(percent) &&
           (source === 'local_24h' || source === 'cloud') &&
@@ -133,7 +143,7 @@ function readActiveEntries(): CurrencyCommissionEntry[] {
 
 function findEntryIndex(
   entries: CurrencyCommissionEntry[],
-  currency: ExpenseCurrency,
+  currency: CommissionCurrency,
   source?: CommissionSource,
 ): number {
   return entries.findIndex(
@@ -141,8 +151,9 @@ function findEntryIndex(
   );
 }
 
-export function normalizeCommissionCurrency(currency: string): ExpenseCurrency | null {
+export function normalizeCommissionCurrency(currency: string): CommissionCurrency | null {
   const code = currency.trim().toUpperCase();
+  if (code === GLOBAL_COMMISSION_CURRENCY) return GLOBAL_COMMISSION_CURRENCY;
   if (!isSupportedCurrency(code) || code === 'ILS') return null;
   return code;
 }
@@ -151,16 +162,28 @@ export function listActiveCurrencyCommissions(): CurrencyCommissionEntry[] {
   return readActiveEntries().slice().sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-export function getActiveCurrencyCommissionPercent(currency: string): number | null {
+/** Saved percent for an exact commission target (no global fallback). */
+export function getSavedCommissionPercentForCurrency(currency: CommissionCurrency): number | null {
   const normalized = normalizeCommissionCurrency(currency);
   if (!normalized) return null;
-
   const entry = readActiveEntries().find((item) => item.currency === normalized);
-  if (!entry) return null;
-  return entry.percent;
+  return entry?.percent ?? null;
 }
 
-export function removeLocalCurrencyCommission(currency: ExpenseCurrency): boolean {
+/** Active fee for an expense/conversion currency (specific entry, else global ALL). */
+export function getActiveCurrencyCommissionPercent(currency: string): number | null {
+  const code = currency.trim().toUpperCase();
+  if (!isSupportedCurrency(code) || code === 'ILS') return null;
+
+  const entries = readActiveEntries();
+  const specific = entries.find((item) => item.currency === code);
+  if (specific) return specific.percent;
+
+  const global = entries.find((item) => item.currency === GLOBAL_COMMISSION_CURRENCY);
+  return global?.percent ?? null;
+}
+
+export function removeLocalCurrencyCommission(currency: CommissionCurrency): boolean {
   const normalized = normalizeCommissionCurrency(currency);
   if (!normalized) return false;
 
@@ -174,7 +197,7 @@ export function removeLocalCurrencyCommission(currency: ExpenseCurrency): boolea
   return true;
 }
 
-export function removeCloudCurrencyCommissionLocal(currency: ExpenseCurrency): boolean {
+export function removeCloudCurrencyCommissionLocal(currency: CommissionCurrency): boolean {
   const normalized = normalizeCommissionCurrency(currency);
   if (!normalized) return false;
 
@@ -188,14 +211,13 @@ export function removeCloudCurrencyCommissionLocal(currency: ExpenseCurrency): b
   return true;
 }
 
-export function saveCurrencyCommission24h(currency: ExpenseCurrency, percent: number): boolean {
-  if (!isSupportedCurrency(currency) || currency === 'ILS' || !isFinitePercent(percent)) {
-    return false;
-  }
+export function saveCurrencyCommission24h(currency: CommissionCurrency, percent: number): boolean {
+  const normalized = normalizeCommissionCurrency(currency);
+  if (!normalized || !isFinitePercent(percent)) return false;
 
   const now = Date.now();
   const nextEntry: CurrencyCommissionEntry = {
-    currency,
+    currency: normalized,
     percent,
     source: 'local_24h',
     expiresAt: now + DAY_MS,
@@ -203,14 +225,14 @@ export function saveCurrencyCommission24h(currency: ExpenseCurrency, percent: nu
   };
 
   const entries = readActiveEntries();
-  const localIndex = findEntryIndex(entries, currency, 'local_24h');
+  const localIndex = findEntryIndex(entries, normalized, 'local_24h');
   if (localIndex >= 0) {
     entries[localIndex] = nextEntry;
   } else {
     entries.push(nextEntry);
   }
 
-  const cloudIndex = findEntryIndex(entries, currency, 'cloud');
+  const cloudIndex = findEntryIndex(entries, normalized, 'cloud');
   if (cloudIndex >= 0) {
     entries.splice(cloudIndex, 1);
   }
@@ -220,28 +242,27 @@ export function saveCurrencyCommission24h(currency: ExpenseCurrency, percent: nu
   return true;
 }
 
-export function upsertCloudCurrencyCommission(currency: ExpenseCurrency, percent: number): boolean {
-  if (!isSupportedCurrency(currency) || currency === 'ILS' || !isFinitePercent(percent)) {
-    return false;
-  }
+export function upsertCloudCurrencyCommission(currency: CommissionCurrency, percent: number): boolean {
+  const normalized = normalizeCommissionCurrency(currency);
+  if (!normalized || !isFinitePercent(percent)) return false;
 
   const entries = readActiveEntries();
   const cloudEntry: CurrencyCommissionEntry = {
-    currency,
+    currency: normalized,
     percent,
     source: 'cloud',
     expiresAt: null,
     updatedAt: Date.now(),
   };
 
-  const cloudIndex = findEntryIndex(entries, currency, 'cloud');
+  const cloudIndex = findEntryIndex(entries, normalized, 'cloud');
   if (cloudIndex >= 0) {
     entries[cloudIndex] = cloudEntry;
   } else {
     entries.push(cloudEntry);
   }
 
-  const localIndex = findEntryIndex(entries, currency, 'local_24h');
+  const localIndex = findEntryIndex(entries, normalized, 'local_24h');
   if (localIndex >= 0) {
     entries.splice(localIndex, 1);
   }
@@ -258,12 +279,12 @@ export function replaceCloudCurrencyCommissions(cloudEntries: CloudCurrencyCommi
   const normalizedCloud: CurrencyCommissionEntry[] = [];
 
   cloudEntries.forEach((entry) => {
-    if (!isSupportedCurrency(entry.currency) || entry.currency === 'ILS') return;
-    if (!isFinitePercent(entry.percent)) return;
+    const normalized = normalizeCommissionCurrency(entry.currency);
+    if (!normalized || !isFinitePercent(entry.percent)) return;
     const updatedAt = entry.updatedAt ?? now;
     if (updatedAt < threshold) return;
     normalizedCloud.push({
-      currency: entry.currency,
+      currency: normalized,
       percent: entry.percent,
       source: 'cloud',
       expiresAt: null,
@@ -287,4 +308,10 @@ export function clearAllCurrencyCommissionsLocal(): void {
   lsDelete(STORAGE_KEY);
   resetInMemoryFallback();
   dispatchCommissionsUpdated();
+}
+
+export function isGlobalCommissionCurrency(
+  currency: CommissionCurrency,
+): currency is typeof GLOBAL_COMMISSION_CURRENCY {
+  return currency === GLOBAL_COMMISSION_CURRENCY;
 }

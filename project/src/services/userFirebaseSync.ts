@@ -23,6 +23,11 @@ import {
   normalizeDisplayCurrency,
   type ExpenseCurrency,
 } from './currencyRegistry';
+import {
+  GLOBAL_COMMISSION_CURRENCY,
+  normalizeCommissionCurrency,
+  type CommissionCurrency,
+} from './currencyCommissionService';
 import { roundMoney } from './money';
 
 const DOC_ID = 'data';
@@ -52,7 +57,7 @@ export interface CloudManualExchangeOverride {
 }
 
 export interface CloudCurrencyCommission {
-  currency: ExpenseCurrency;
+  currency: CommissionCurrency;
   percent: number;
   updatedAt: number;
 }
@@ -169,14 +174,19 @@ function parseCloudCurrencyCommissions(
   return Object.values(commissionsRaw)
     .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
     .map((item) => {
-      const currency = normalizeDisplayCurrency(item.currency);
+      const rawCurrency =
+        typeof item.currency === 'string' ? item.currency.trim().toUpperCase() : '';
+      const currency =
+        normalizeCommissionCurrency(rawCurrency) ??
+        (rawCurrency === GLOBAL_COMMISSION_CURRENCY ? GLOBAL_COMMISSION_CURRENCY : null);
       const percent = typeof item.percent === 'number' ? item.percent : 0;
       const updatedAt = typeof item.updatedAt === 'number' ? item.updatedAt : Date.now();
+      if (!currency) return null;
       return { currency, percent, updatedAt };
     })
     .filter(
-      (item) =>
-        item.currency !== 'ILS' &&
+      (item): item is CloudCurrencyCommission =>
+        item != null &&
         Number.isFinite(item.percent) &&
         item.percent > 0 &&
         item.percent <= 100,
@@ -580,10 +590,13 @@ export async function saveManualExchangeOverrideToCloud(
 
 export async function saveCurrencyCommissionToCloud(
   uid: string,
-  currency: ExpenseCurrency,
+  currency: CommissionCurrency,
   percent: number,
 ): Promise<void> {
-  if (currency === 'ILS' || !(Number.isFinite(percent) && percent > 0 && percent <= 100)) {
+  if (
+    normalizeCommissionCurrency(currency) == null ||
+    !(Number.isFinite(percent) && percent > 0 && percent <= 100)
+  ) {
     return;
   }
 
@@ -606,9 +619,9 @@ export async function saveCurrencyCommissionToCloud(
 
 export async function deleteCurrencyCommissionFromCloud(
   uid: string,
-  currency: ExpenseCurrency,
+  currency: CommissionCurrency,
 ): Promise<void> {
-  if (currency === 'ILS') return;
+  if (normalizeCommissionCurrency(currency) == null) return;
 
   await setDoc(
     currencyCommissionsRef(uid),

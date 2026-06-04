@@ -1,16 +1,46 @@
 import { ArrowLeft, ArrowRight, ChevronDown, ChevronUp, Coins, Languages, SlidersHorizontal } from 'lucide-react';
-import { motion } from 'framer-motion';
-import { useEffect, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 import { useLanguage } from '../LanguageContext';
 import { writePreferredLanguage } from '../services/authLanguagePreference';
 import DisplayCurrencySelector from './DisplayCurrencySelector';
 import ExchangeRateSimulator from './ExchangeRateSimulator';
 import type { ExpenseCurrency } from '../services/exchangeRateService';
 
+type MainSection = 'general' | 'currencies';
+type CurrencySubSection = 'display' | 'exchange' | 'fees-manual';
+
 interface SettingsPageProps {
   onBack: () => void;
   recentExpenseCurrencies: ExpenseCurrency[];
-  initialCurrencySection?: 'display' | 'exchange' | null;
+  initialCurrencySection?: CurrencySubSection | null;
+}
+
+const panelMotion = {
+  initial: { opacity: 0, height: 0 },
+  animate: { opacity: 1, height: 'auto' },
+  exit: { opacity: 0, height: 0 },
+  transition: { duration: 0.22, ease: 'easeOut' as const },
+};
+
+/** Currency sub-panels: opacity only so height hugs content on mobile. */
+const currencySubPanelMotion = {
+  initial: { opacity: 0 },
+  animate: { opacity: 1 },
+  exit: { opacity: 0 },
+  transition: { duration: 0.2, ease: 'easeOut' as const },
+};
+
+function toggleSetMember<T>(key: T, setState: Dispatch<SetStateAction<Set<T>>>) {
+  setState((prev) => {
+    const next = new Set(prev);
+    if (next.has(key)) {
+      next.delete(key);
+    } else {
+      next.add(key);
+    }
+    return next;
+  });
 }
 
 export default function SettingsPage({
@@ -28,24 +58,35 @@ export default function SettingsPage({
   } = useLanguage();
 
   const BackIcon = dir === 'rtl' ? ArrowRight : ArrowLeft;
-  const [openMain, setOpenMain] = useState<null | 'general' | 'currencies'>(null);
-  const [openCurrencySub, setOpenCurrencySub] = useState<null | 'display' | 'exchange'>(null);
+  const [openMainSections, setOpenMainSections] = useState<Set<MainSection>>(() => new Set());
+  const [openCurrencySubs, setOpenCurrencySubs] = useState<Set<CurrencySubSection>>(() => new Set());
+
+  const isMainOpen = useCallback((key: MainSection) => openMainSections.has(key), [openMainSections]);
+  const isCurrencySubOpen = useCallback(
+    (key: CurrencySubSection) => openCurrencySubs.has(key),
+    [openCurrencySubs],
+  );
 
   useEffect(() => {
     if (!initialCurrencySection) return;
-    setOpenMain('currencies');
-    setOpenCurrencySub(initialCurrencySection);
+    setOpenMainSections((prev) => {
+      const next = new Set(prev);
+      next.add('currencies');
+      return next;
+    });
+    setOpenCurrencySubs((prev) => {
+      const next = new Set(prev);
+      next.add(initialCurrencySection);
+      return next;
+    });
   }, [initialCurrencySection]);
 
-  const toggleMain = (key: 'general' | 'currencies') => {
-    setOpenMain((prev) => (prev === key ? null : key));
-    if (key !== 'currencies') {
-      setOpenCurrencySub(null);
-    }
+  const toggleMain = (key: MainSection) => {
+    toggleSetMember(key, setOpenMainSections);
   };
 
-  const toggleCurrencySub = (key: 'display' | 'exchange') => {
-    setOpenCurrencySub((prev) => (prev === key ? null : key));
+  const toggleCurrencySub = (key: CurrencySubSection) => {
+    toggleSetMember(key, setOpenCurrencySubs);
   };
 
   const selectLanguage = (next: 'he' | 'en') => {
@@ -90,7 +131,7 @@ export default function SettingsPage({
         <button
           type="button"
           onClick={() => toggleMain('currencies')}
-          aria-expanded={openMain === 'currencies'}
+          aria-expanded={isMainOpen('currencies')}
           className="w-full cursor-pointer rounded-lg bg-gray-800 p-4 transition-colors hover:bg-gray-700"
         >
           <div className="flex items-center justify-between gap-3">
@@ -103,7 +144,7 @@ export default function SettingsPage({
                 <p className="mt-0.5 text-xs text-gray-400 sm:text-sm">{tr('settingsSectionCurrenciesDesc')}</p>
               </div>
             </div>
-            {openMain === 'currencies' ? (
+            {isMainOpen('currencies') ? (
               <ChevronDown className="h-5 w-5 shrink-0 text-gray-300" />
             ) : (
               <ChevronUp className="h-5 w-5 shrink-0 text-gray-300" />
@@ -111,12 +152,17 @@ export default function SettingsPage({
           </div>
         </button>
 
-        {openMain === 'currencies' && (
-          <div className="space-y-2 rounded-xl border border-gray-700/70 bg-gray-900/70 p-3 shadow-sm shadow-black/20 sm:p-4">
+        <AnimatePresence initial={false}>
+          {isMainOpen('currencies') && (
+            <motion.div
+              key="settings-main-currencies"
+              {...panelMotion}
+              className="overflow-visible space-y-2 rounded-xl border border-gray-700/70 bg-gray-900/70 p-3 shadow-sm shadow-black/20 sm:p-4"
+            >
             <button
               type="button"
               onClick={() => toggleCurrencySub('display')}
-              aria-expanded={openCurrencySub === 'display'}
+              aria-expanded={isCurrencySubOpen('display')}
               className="w-full cursor-pointer rounded-lg bg-gray-800 p-4 transition-colors hover:bg-gray-700"
             >
               <div className="flex items-center justify-between gap-3">
@@ -124,49 +170,102 @@ export default function SettingsPage({
                   <h4 className="truncate text-sm font-semibold text-white sm:text-base">{tr('displayCurrency')}</h4>
                   <p className="mt-0.5 text-xs text-gray-400">{tr('displayCurrencyDescription')}</p>
                 </div>
-                {openCurrencySub === 'display' ? (
+                {isCurrencySubOpen('display') ? (
                   <ChevronDown className="h-5 w-5 shrink-0 text-gray-300" />
                 ) : (
                   <ChevronUp className="h-5 w-5 shrink-0 text-gray-300" />
                 )}
               </div>
             </button>
-            {openCurrencySub === 'display' && (
-              <div className="rounded-lg border border-gray-700/60 bg-gray-950/40 p-4">
-                <DisplayCurrencySelector recentExpenseCurrencies={recentExpenseCurrencies} />
-              </div>
-            )}
+            <AnimatePresence initial={false}>
+              {isCurrencySubOpen('display') && (
+                <motion.div
+                  key="settings-currency-display"
+                  {...currencySubPanelMotion}
+                  className="h-fit overflow-visible rounded-lg border border-gray-700/60 bg-gray-950/40 p-4"
+                >
+                  <DisplayCurrencySelector recentExpenseCurrencies={recentExpenseCurrencies} />
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             <button
               type="button"
               onClick={() => toggleCurrencySub('exchange')}
-              aria-expanded={openCurrencySub === 'exchange'}
+              aria-expanded={isCurrencySubOpen('exchange')}
+              className="w-full cursor-pointer rounded-lg bg-gray-800 p-4 transition-colors hover:bg-gray-700"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <SlidersHorizontal className="h-4 w-4 shrink-0 text-blue-300" />
+                  <h4 className="truncate text-sm font-semibold text-white sm:text-base">
+                    {tr('settingsCurrencySubExchange')}
+                  </h4>
+                </div>
+                {isCurrencySubOpen('exchange') ? (
+                  <ChevronDown className="h-5 w-5 shrink-0 text-gray-300" />
+                ) : (
+                  <ChevronUp className="h-5 w-5 shrink-0 text-gray-300" />
+                )}
+              </div>
+            </button>
+            <AnimatePresence initial={false}>
+              {isCurrencySubOpen('exchange') && (
+                <motion.div
+                  key="settings-currency-exchange"
+                  {...currencySubPanelMotion}
+                  className="h-fit overflow-visible rounded-lg border border-gray-700/60 bg-gray-950/40 p-2 text-start sm:p-3"
+                >
+                  <ExchangeRateSimulator
+                    section="exchange"
+                    recentExpenseCurrencies={recentExpenseCurrencies}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <button
+              type="button"
+              onClick={() => toggleCurrencySub('fees-manual')}
+              aria-expanded={isCurrencySubOpen('fees-manual')}
               className="w-full cursor-pointer rounded-lg bg-gray-800 p-4 transition-colors hover:bg-gray-700"
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2">
                   <SlidersHorizontal className="h-4 w-4 shrink-0 text-violet-300" />
-                  <h4 className="truncate text-sm font-semibold text-white sm:text-base">{tr('settingsSectionExchangeRates')}</h4>
+                  <h4 className="truncate text-sm font-semibold text-white sm:text-base">
+                    {tr('settingsCurrencySubFeesManual')}
+                  </h4>
                 </div>
-                {openCurrencySub === 'exchange' ? (
+                {isCurrencySubOpen('fees-manual') ? (
                   <ChevronDown className="h-5 w-5 shrink-0 text-gray-300" />
                 ) : (
                   <ChevronUp className="h-5 w-5 shrink-0 text-gray-300" />
                 )}
               </div>
             </button>
-            {openCurrencySub === 'exchange' && (
-              <div className="rounded-lg border border-gray-700/60 bg-gray-950/40 p-4 text-start">
-                <ExchangeRateSimulator recentExpenseCurrencies={recentExpenseCurrencies} />
-              </div>
-            )}
-          </div>
-        )}
+            <AnimatePresence initial={false}>
+              {isCurrencySubOpen('fees-manual') && (
+                <motion.div
+                  key="settings-currency-fees-manual"
+                  {...currencySubPanelMotion}
+                  className="h-fit overflow-visible rounded-lg border border-gray-700/60 bg-gray-950/40 p-4 text-start sm:p-3"
+                >
+                  <ExchangeRateSimulator
+                    section="fees-manual"
+                    recentExpenseCurrencies={recentExpenseCurrencies}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <button
           type="button"
           onClick={() => toggleMain('general')}
-          aria-expanded={openMain === 'general'}
+          aria-expanded={isMainOpen('general')}
           className="w-full cursor-pointer rounded-lg bg-gray-800 p-4 transition-colors hover:bg-gray-700"
         >
           <div className="flex items-center justify-between gap-3">
@@ -179,7 +278,7 @@ export default function SettingsPage({
                 <p className="mt-0.5 text-xs text-gray-400 sm:text-sm">{tr('settingsSectionGeneralDesc')}</p>
               </div>
             </div>
-            {openMain === 'general' ? (
+            {isMainOpen('general') ? (
               <ChevronDown className="h-5 w-5 shrink-0 text-gray-300" />
             ) : (
               <ChevronUp className="h-5 w-5 shrink-0 text-gray-300" />
@@ -187,8 +286,13 @@ export default function SettingsPage({
           </div>
         </button>
 
-        {openMain === 'general' && (
-          <div className="space-y-2 rounded-xl border border-gray-700/70 bg-gray-900/70 p-3 shadow-sm shadow-black/20 sm:p-4">
+        <AnimatePresence initial={false}>
+          {isMainOpen('general') && (
+            <motion.div
+              key="settings-main-general"
+              {...panelMotion}
+              className="overflow-visible space-y-2 rounded-xl border border-gray-700/70 bg-gray-900/70 p-3 shadow-sm shadow-black/20 sm:p-4"
+            >
             <div
               aria-labelledby="settings-language-heading"
               className="rounded-lg border border-gray-700/60 bg-gray-950/40 p-4"
@@ -260,8 +364,9 @@ export default function SettingsPage({
                 </div>
               </div>
             </div>
-          </div>
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </section>
     </motion.div>
   );

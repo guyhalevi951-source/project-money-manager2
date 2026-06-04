@@ -227,10 +227,10 @@ export default function ExpenseAmountField({
     [isMaxLengthReached, parsedAmount, lockToDisplayCurrency, inputCurrency, displayCurrency],
   );
 
-  const activeCommissionPercent = useMemo(
-    () => getActiveCurrencyCommissionPercent(inputCurrency) ?? 0,
-    [inputCurrency, commissionVersion],
-  );
+  const activeCommissionPercent = useMemo(() => {
+    if (inputCurrency === displayCurrency) return 0;
+    return getActiveCurrencyCommissionPercent(inputCurrency) ?? 0;
+  }, [inputCurrency, displayCurrency, commissionVersion]);
 
   const convertedDisplayAmount = useMemo(() => {
     if (!showDisplayPreview || !rates) return null;
@@ -250,7 +250,13 @@ export default function ExpenseAmountField({
     );
     if (converted == null) return null;
 
-    const withCommission = applyCommissionToAmount(converted, activeCommissionPercent);
+    const withCommission = applyCommissionToAmount(
+      converted,
+      activeCommissionPercent,
+      inputCurrency,
+      displayCurrency,
+      { displayCurrency },
+    );
     return Math.round(withCommission * 100) / 100;
   }, [showDisplayPreview, rates, parsedAmount, inputCurrency, displayCurrency, activeCommissionPercent]);
 

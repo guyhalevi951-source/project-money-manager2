@@ -193,7 +193,7 @@ export function getActiveManualExchangeOverrideSnapshot(
   fromCurrency: string,
   toCurrency: string,
 ): { rate: number; updatedAt: number } | null {
-  if (fromCurrency === toCurrency) return { rate: 1, updatedAt: Date.now() };
+  if (fromCurrency === toCurrency) return null;
   if (!isSupportedCurrency(fromCurrency) || !isSupportedCurrency(toCurrency)) return null;
 
   const entries = readActiveEntries();

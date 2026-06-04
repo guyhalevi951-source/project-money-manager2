@@ -2667,7 +2667,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialCurrencySection, setSettingsInitialCurrencySection] = useState<
-    'display' | 'exchange' | null
+    'display' | 'exchange' | 'fees-manual' | null
   >(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const settingsReturnTabRef = useRef<TabId>('dashboard');
@@ -2716,6 +2716,14 @@ function App() {
     setNavOpen(false);
     setProfileOpen(false);
     setSettingsInitialCurrencySection('exchange');
+    setSettingsOpen(true);
+  }, [activeTab]);
+
+  const openSettingsFeesAndManualRates = useCallback(() => {
+    settingsReturnTabRef.current = activeTab;
+    setNavOpen(false);
+    setProfileOpen(false);
+    setSettingsInitialCurrencySection('fees-manual');
     setSettingsOpen(true);
   }, [activeTab]);
 
@@ -3492,7 +3500,9 @@ function App() {
       const rates = getCachedExchangeRates() ?? (await fetchExchangeRates().catch(() => null));
       if (!rates) return null;
 
-      const converted = convertExpenseAmountToIls(enteredAmount, inputCurrency, rates);
+      const converted = convertExpenseAmountToIls(enteredAmount, inputCurrency, rates, {
+        displayCurrency,
+      });
       if (converted == null) return null;
 
       return roundMoneyAmount(converted);
@@ -3583,7 +3593,9 @@ function App() {
       if (editExpenseDraft.currency === 'ILS') return roundMoneyAmount(typedAmount);
       const rates = getCachedExchangeRates() ?? (await fetchExchangeRates().catch(() => null));
       if (!rates) return null;
-      const converted = convertExpenseAmountToIls(typedAmount, editExpenseDraft.currency, rates);
+      const converted = convertExpenseAmountToIls(typedAmount, editExpenseDraft.currency, rates, {
+        displayCurrency,
+      });
       if (converted == null) return null;
       return roundMoneyAmount(converted);
     };
@@ -4133,7 +4145,7 @@ function App() {
                       {renderBudgetButtonText(subBudgetsButtonLabel)}
                     </button>
                   </div>
-                  <div className="mt-2 flex w-full flex-wrap items-center gap-2">
+                  <div className="mt-2 flex w-full flex-col gap-2">
                     <label
                       htmlFor="budget-auto-transfer"
                       className="flex min-w-0 cursor-pointer flex-row flex-wrap items-center justify-start gap-2 text-xs text-gray-400"
@@ -4147,15 +4159,26 @@ function App() {
                         className="ml-0 h-4 w-4 shrink-0 rounded border-gray-600 bg-neutral-800 text-emerald-500 focus:ring-emerald-500/30"
                       />
                     </label>
-                    <button
-                      type="button"
-                      onClick={openSettingsDisplayCurrency}
-                      className="inline-flex h-7 shrink-0 items-center justify-center rounded-lg bg-indigo-600 px-3 text-center text-xs font-medium text-white transition-all hover:bg-indigo-700 active:scale-[0.98]"
-                      title={tr('changeCurrencyShortcut')}
-                      aria-label={tr('changeCurrencyShortcut')}
-                    >
-                      {tr('changeCurrencyShortcut')}
-                    </button>
+                    <div className="flex w-full flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={openSettingsDisplayCurrency}
+                        className="inline-flex h-7 min-w-[7.5rem] flex-1 items-center justify-center rounded-lg bg-indigo-600 px-3 text-center text-xs font-medium text-white transition-all hover:bg-indigo-700 active:scale-[0.98] sm:flex-none sm:shrink-0"
+                        title={tr('changeCurrencyShortcut')}
+                        aria-label={tr('changeCurrencyShortcut')}
+                      >
+                        {tr('changeCurrencyShortcut')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={openSettingsFeesAndManualRates}
+                        className="inline-flex h-7 min-w-[7.5rem] flex-1 items-center justify-center rounded-lg bg-indigo-600 px-3 text-center text-xs font-medium text-white transition-all hover:bg-indigo-700 active:scale-[0.98] sm:flex-none sm:shrink-0"
+                        title={tr('setExchangeRateAndFeeShortcut')}
+                        aria-label={tr('setExchangeRateAndFeeShortcut')}
+                      >
+                        {tr('setExchangeRateAndFeeShortcut')}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
