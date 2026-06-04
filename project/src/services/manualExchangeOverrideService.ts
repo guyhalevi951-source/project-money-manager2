@@ -184,19 +184,32 @@ export function listActiveManualExchangeOverrides(): ManualExchangeOverrideEntry
 }
 
 export function getManualExchangeOverride(fromCurrency: string, toCurrency: string): number | null {
-  if (fromCurrency === toCurrency) return 1;
+  const snapshot = getActiveManualExchangeOverrideSnapshot(fromCurrency, toCurrency);
+  return snapshot?.rate ?? null;
+}
+
+/** Active saved manual override for a pair, including metadata for display. */
+export function getActiveManualExchangeOverrideSnapshot(
+  fromCurrency: string,
+  toCurrency: string,
+): { rate: number; updatedAt: number } | null {
+  if (fromCurrency === toCurrency) return { rate: 1, updatedAt: Date.now() };
   if (!isSupportedCurrency(fromCurrency) || !isSupportedCurrency(toCurrency)) return null;
 
   const entries = readActiveEntries();
   const direct = entries.find(
     (entry) => entry.baseCurrency === fromCurrency && entry.quoteCurrency === toCurrency,
   );
-  if (direct) return direct.rate;
+  if (direct && direct.rate > 0) {
+    return { rate: direct.rate, updatedAt: direct.updatedAt };
+  }
 
   const inverse = entries.find(
     (entry) => entry.baseCurrency === toCurrency && entry.quoteCurrency === fromCurrency,
   );
-  if (inverse) return 1 / inverse.rate;
+  if (inverse && inverse.rate > 0) {
+    return { rate: 1 / inverse.rate, updatedAt: inverse.updatedAt };
+  }
 
   return null;
 }

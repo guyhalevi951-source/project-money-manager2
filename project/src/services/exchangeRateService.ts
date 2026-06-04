@@ -1,5 +1,8 @@
 import { currencySymbol, type ExpenseCurrency } from '../constants/currencies';
-import { getManualExchangeOverride } from './manualExchangeOverrideService';
+import {
+  getActiveManualExchangeOverrideSnapshot,
+  getManualExchangeOverride,
+} from './manualExchangeOverrideService';
 import { roundMoney } from './money';
 
 export type { ExpenseCurrency, CurrencyCode } from '../constants/currencies';
@@ -535,6 +538,11 @@ export function peekHistoricalDirectRateSnapshot(
     return { rate: 1, fetchedAt: Date.now() };
   }
 
+  const manualSnapshot = getActiveManualExchangeOverrideSnapshot(fromCurrency, toCurrency);
+  if (manualSnapshot != null) {
+    return { rate: manualSnapshot.rate, fetchedAt: manualSnapshot.updatedAt };
+  }
+
   const safeDate = normalizeHistoricalDateIso(dateIso);
   const cached = getCachedCurrencyRate(safeDate, fromCurrency, toCurrency);
   if (!cached) {
@@ -765,6 +773,11 @@ export async function fetchHistoricalDirectRateSnapshot(
   if (fromCurrency === toCurrency) {
     const fetchedAt = Date.now();
     return { rate: 1, fetchedAt };
+  }
+
+  const manualSnapshot = getActiveManualExchangeOverrideSnapshot(fromCurrency, toCurrency);
+  if (manualSnapshot != null) {
+    return { rate: manualSnapshot.rate, fetchedAt: manualSnapshot.updatedAt };
   }
 
   const safeDate = normalizeHistoricalDateIso(dateIso);

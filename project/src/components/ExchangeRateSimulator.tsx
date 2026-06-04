@@ -35,6 +35,7 @@ import {
   peekHistoricalDirectRateSnapshot,
 } from '../services/exchangeRateService';
 import {
+  getActiveManualExchangeOverrideSnapshot,
   listActiveManualExchangeOverrides,
   removeCloudManualExchangeOverride,
   removeLocalManualExchangeOverride,
@@ -277,6 +278,15 @@ export default function ExchangeRateSimulator({
     return null;
   }, [dateIso, mainCurrency, secondaryCurrency, sessionOverride]);
 
+  const activeStoredManualOverride = useMemo(
+    () => getActiveManualExchangeOverrideSnapshot(mainCurrency, secondaryCurrency),
+    [mainCurrency, secondaryCurrency, storedOverrides],
+  );
+
+  const activeStoredManualRate = activeStoredManualOverride?.rate ?? null;
+
+  const isManualRateActive = activeSessionRate != null || activeStoredManualRate != null;
+
   useEffect(() => {
     const rateContextKey = `${dateIso}|${mainCurrency}|${secondaryCurrency}|${sessionOverride?.rate ?? resolvedRate ?? ''}|${commissionExpanded}|${commissionPercentInput}`;
     if (rateContextKeyRef.current !== rateContextKey) {
@@ -297,12 +307,11 @@ export default function ExchangeRateSimulator({
     if (mainCurrency === secondaryCurrency) return;
 
     const unitRate =
-      sessionOverride &&
-      sessionOverride.baseCurrency === mainCurrency &&
-      sessionOverride.quoteCurrency === secondaryCurrency &&
-      sessionOverride.dateIso === dateIso
-        ? sessionOverride.rate
-        : resolvedRate;
+      activeSessionRate != null
+        ? activeSessionRate
+        : activeStoredManualRate != null
+          ? activeStoredManualRate
+          : resolvedRate;
 
     if (unitRate == null || !(unitRate > 0)) return;
     if (!shouldSeedSecondaryRef.current) return;
@@ -319,7 +328,8 @@ export default function ExchangeRateSimulator({
     resolvedRate,
     mainCurrency,
     secondaryCurrency,
-    sessionOverride,
+    activeSessionRate,
+    activeStoredManualRate,
     mainAmountInput,
     dateIso,
     commissionExpanded,
@@ -350,6 +360,16 @@ export default function ExchangeRateSimulator({
 
     if (activeSessionRate != null) {
       applyResolvedRate(activeSessionRate, sessionOverride?.updatedAt ?? Date.now());
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (activeStoredManualRate != null) {
+      applyResolvedRate(
+        activeStoredManualRate,
+        activeStoredManualOverride?.updatedAt ?? Date.now(),
+      );
       return () => {
         cancelled = true;
       };
@@ -390,7 +410,15 @@ export default function ExchangeRateSimulator({
     return () => {
       cancelled = true;
     };
-  }, [dateIso, mainCurrency, secondaryCurrency, activeSessionRate, sessionOverride?.updatedAt]);
+  }, [
+    dateIso,
+    mainCurrency,
+    secondaryCurrency,
+    activeSessionRate,
+    activeStoredManualRate,
+    activeStoredManualOverride?.updatedAt,
+    sessionOverride?.updatedAt,
+  ]);
 
   useEffect(() => {
     const fetchId = ++todayMarketFetchIdRef.current;
@@ -446,6 +474,13 @@ export default function ExchangeRateSimulator({
     refreshStoredOverrides();
     const unsub = subscribeManualOverridesUpdated(() => refreshStoredOverrides());
     return unsub;
+  }, [refreshStoredOverrides]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      refreshStoredOverrides();
+    }, 60_000);
+    return () => window.clearInterval(timer);
   }, [refreshStoredOverrides]);
 
   const syncCommissionInputFromStorage = useCallback((currency: CurrencyCode) => {
@@ -571,12 +606,12 @@ export default function ExchangeRateSimulator({
         return;
       }
 
-      const hasActiveSession =
-        sessionOverride?.baseCurrency === mainCurrency &&
-        sessionOverride?.quoteCurrency === secondaryCurrency &&
-        sessionOverride?.dateIso === dateIso;
-
-      const unitRate = hasActiveSession ? sessionOverride.rate : resolvedRate;
+      const unitRate =
+        activeSessionRate != null
+          ? activeSessionRate
+          : activeStoredManualRate != null
+            ? activeStoredManualRate
+            : resolvedRate;
 
       if (unitRate != null && unitRate > 0) {
         const typed = parseCommissionPercentInput(commissionPercentInput);
@@ -600,11 +635,12 @@ export default function ExchangeRateSimulator({
       mainCurrency,
       secondaryCurrency,
       secondaryAmountInput,
-      sessionOverride,
+      activeSessionRate,
+      activeStoredManualRate,
       resolvedRate,
-      dateIso,
       commissionExpanded,
       commissionPercentInput,
+      secondaryCurrency,
     ],
   );
 
@@ -713,17 +749,10 @@ export default function ExchangeRateSimulator({
   );
 
   const effectiveUnitRate = useMemo(() => {
-    if (
-      sessionOverride &&
-      sessionOverride.baseCurrency === mainCurrency &&
-      sessionOverride.quoteCurrency === secondaryCurrency &&
-      sessionOverride.dateIso === dateIso &&
-      sessionOverride.rate > 0
-    ) {
-      return sessionOverride.rate;
-    }
+    if (activeSessionRate != null) return activeSessionRate;
+    if (activeStoredManualRate != null) return activeStoredManualRate;
     return resolvedRate;
-  }, [dateIso, mainCurrency, secondaryCurrency, sessionOverride, resolvedRate]);
+  }, [activeSessionRate, activeStoredManualRate, resolvedRate]);
 
   const currenciesToPin = useMemo(() => {
     const codes = new Set<CurrencyCode>();
@@ -866,6 +895,7 @@ export default function ExchangeRateSimulator({
   );
 
   const rateComparison = useMemo(() => {
+    if (isManualRateActive) return null;
     const todayIso = getLocalTodayIso();
     if (dateIso === todayIso) return null;
     if (loadingRate) return null;
@@ -886,9 +916,10 @@ export default function ExchangeRateSimulator({
       percentText: `${sign}${roundedDelta.toFixed(2)}%`,
       contextText: tr('exchangeRateVsToday'),
     };
-  }, [dateIso, effectiveUnitRate, loadingRate, todayMarketRate, tr]);
+  }, [dateIso, effectiveUnitRate, isManualRateActive, loadingRate, todayMarketRate, tr]);
 
   const showNoTrendData = useMemo(() => {
+    if (isManualRateActive) return false;
     const todayIso = getLocalTodayIso();
     if (dateIso === todayIso) return false;
     if (loadingRate) return false;
@@ -899,6 +930,7 @@ export default function ExchangeRateSimulator({
   }, [
     dateIso,
     effectiveUnitRate,
+    isManualRateActive,
     loadingRate,
     mainCurrency,
     rateComparison,
@@ -1174,6 +1206,13 @@ export default function ExchangeRateSimulator({
                     </p>
                   )}
                 </div>
+                {isManualRateActive && (
+                  <div className="flex w-full shrink-0 flex-row items-center justify-center self-stretch py-2 md:ms-auto md:w-auto md:justify-end">
+                    <span className="text-sm font-semibold leading-tight text-yellow-500 md:text-base">
+                      {tr('exchangeRateManualActive')}
+                    </span>
+                  </div>
+                )}
                 {rateComparison && (
                   <div className="flex w-full shrink-0 flex-row items-center justify-center gap-2 self-stretch whitespace-nowrap py-2 md:ms-auto md:w-auto md:justify-end md:gap-2.5">
                     <span className="text-sm font-semibold leading-tight text-neutral-100 md:text-xl">
