@@ -64,6 +64,9 @@ import {
 import { convertExpenseAmountToIls } from './services/expenseConversionService';
 import {
   currencyUtilityButtonClass,
+  filterBarContainerClass,
+  filterBarInactiveTabClass,
+  filterInsetPanelClass,
   primaryActionAccentIconClass,
   primaryActionActivePillClass,
   primaryActionButtonClass,
@@ -74,6 +77,20 @@ import {
   utilityNavMenuToggleClass,
   utilityNavShortcutClass,
 } from './styles/actionButtonStyles';
+import {
+  surfaceInputClass,
+  surfaceInputLgClass,
+  surfaceInputSmClass,
+  surfaceModalClass,
+  surfaceModalLgClass,
+  surfacePanelClass,
+  surfaceSearchInputClass,
+  themeCardClass,
+  themeFooterClass,
+  themeHeaderClass,
+  themePageLoadingClass,
+  themePageRootClass,
+} from './styles/themeSurfaceStyles';
 import {
   clearAllManualExchangeOverridesLocal,
   clearCloudManualExchangeOverrides,
@@ -130,7 +147,8 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from 'recharts';
-import { roundMoney, sumMoney } from './services/money';
+import { parseMoneyInput, roundMoney, sanitizeMoneyInputDraft, sumMoney } from './services/money';
+import MoneyAmountInput from './components/MoneyAmountInput';
 
 interface Expense {
   id: string;
@@ -1171,7 +1189,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
           <p className="mt-1 text-xs text-gray-400">{tr('tabAnalyticsDesc')}</p>
         </div>
 
-        <div className="flex p-1 bg-neutral-900 border border-neutral-800 rounded-2xl">
+        <div className={filterBarContainerClass}>
           {views.map((v) => (
             <button
               type="button"
@@ -1180,10 +1198,10 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                 if (view === v.id) return;
                 setView(v.id);
               }}
-              className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 ease-in-out ${
+              className={`flex-1 py-2.5 text-sm transition-all duration-300 ease-in-out ${
                 view === v.id
-                  ? 'bg-white text-neutral-900 shadow'
-                  : 'text-neutral-400 hover:text-neutral-200'
+                  ? 'rounded-xl bg-white text-neutral-900 shadow font-semibold'
+                  : filterBarInactiveTabClass
               }`}
             >
               {v.label}
@@ -1242,7 +1260,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
         {/* Swipeable chart carousel — order is fixed and language-independent. */}
         <div
           dir="ltr"
-          className="relative mt-6 w-full touch-pan-y overflow-hidden rounded-2xl bg-neutral-950 outline-none focus:outline-none focus-visible:outline-none"
+          className={`relative mt-6 w-full touch-pan-y overflow-hidden outline-none focus:outline-none focus-visible:outline-none ${filterInsetPanelClass}`}
           style={{ height: ANALYTICS_CHART_HEIGHT, minHeight: ANALYTICS_CHART_HEIGHT }}
         >
           {/* Swipe layer disabled on trend slide so hover/tap reaches the chart */}
@@ -1652,7 +1670,7 @@ function SpendingDonut({
   };
 
   return (
-    <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 mb-6 sm:mb-8">
+    <div className={`${themeCardClass} p-4 sm:p-6 mb-6 sm:mb-8`}>
       <h2 className="mb-3 flex items-center gap-2 text-base font-semibold text-neutral-100 sm:text-lg">
         <PieChartIcon className="h-5 w-5 shrink-0 text-emerald-400" />
         {tr('expenseByCategory')}
@@ -1855,7 +1873,7 @@ function BudgetStatsLegendPanel({
     <div
       className={[
         'relative w-full rounded-xl border p-3 shadow-inner',
-        isOver ? 'border-rose-500/60 bg-rose-950/80' : 'border-emerald-500/25 bg-neutral-900/80',
+        isOver ? 'border-rose-500/60 bg-rose-950/80' : `border-emerald-500/25 ${surfacePanelClass}`,
         isOver ? 'pb-9' : '',
       ].join(' ')}
     >
@@ -2037,8 +2055,8 @@ function SubBudgetTracker({
   );
 
   const handleAdd = () => {
-    const amt = parseFloat(amount);
-    if (name.trim() && !isNaN(amt) && amt > 0) {
+    const amt = parseMoneyInput(amount);
+    if (name.trim() && amt !== null && amt > 0) {
       onAddSubBudget(name, amt, newSubBudgetColor);
       setName('');
       setAmount('');
@@ -2047,7 +2065,7 @@ function SubBudgetTracker({
   };
 
   return (
-    <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 mb-6 sm:mb-8">
+    <div className={`${themeCardClass} p-4 sm:p-6 mb-6 sm:mb-8`}>
       <div className="mb-4">
         <h2 className="text-base sm:text-lg font-semibold text-neutral-100 flex items-center gap-2">
           <PieChartIcon className="w-5 h-5 text-violet-400" />
@@ -2330,14 +2348,14 @@ function SubBudgetTracker({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder={tr('addSubBudgetPlaceholder')}
-                className="flex-1 min-w-0 px-3 py-2.5 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/30 outline-none transition-all text-sm"
+                className={`flex-1 min-w-0 px-3 py-2.5 text-sm ${surfaceInputSmClass}`}
               />
               <div className="flex gap-2">
                 <input
-                  type="number"
+                  type="text"
                   inputMode="decimal"
                   value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
+                  onChange={(e) => setAmount(sanitizeMoneyInputDraft(e.target.value))}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
@@ -2345,9 +2363,7 @@ function SubBudgetTracker({
                     }
                   }}
                   placeholder={tr('amountPlaceholder')}
-                  min="0"
-                  step="10"
-                  className="w-28 sm:w-32 px-3 py-2.5 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/30 outline-none transition-all text-sm"
+                  className={`w-28 sm:w-32 px-3 py-2.5 text-sm ${surfaceInputSmClass}`}
                 />
                 <button
                   type="button"
@@ -2391,14 +2407,13 @@ function SubBudgetTracker({
                         )}
                       </span>
                       <LtrNumeric className="text-neutral-500 text-sm">₪</LtrNumeric>
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        value={subBudgets[v]}
-                        onChange={(e) => onSetSubBudget(v, parseFloat(e.target.value) || 0)}
-                        min="0"
-                        step="10"
-                        className="w-24 px-2 py-1.5 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-100 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/30 outline-none transition-all text-sm text-left"
+                      <MoneyAmountInput
+                        value={subBudgets[v] ?? 0}
+                        onCommit={(amount) => {
+                          if (amount === null || amount <= 0) onRemoveSubBudget(v);
+                          else onSetSubBudget(v, amount);
+                        }}
+                        className={`w-24 text-left ${surfaceInputSmClass}`}
                       />
                     </div>
                   );
@@ -2507,7 +2522,7 @@ function BudgetChangeModal({
 
       {/* Sheet / card */}
       <div
-        className="relative w-full sm:max-w-lg bg-neutral-900 border border-neutral-800 shadow-2xl shadow-black/60 rounded-t-3xl sm:rounded-3xl p-5 sm:p-7 max-h-[92vh] overflow-y-auto"
+        className={`relative w-full sm:max-w-lg p-5 sm:p-7 max-h-[92vh] overflow-y-auto ${surfaceModalLgClass}`}
         style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}
       >
         {/* Mobile grab handle */}
@@ -2537,7 +2552,7 @@ function BudgetChangeModal({
         </p>
 
         {/* Old -> new budget summary */}
-        <div className="flex items-center justify-between gap-3 bg-neutral-800/60 border border-neutral-700/60 rounded-2xl px-4 py-3 mb-5">
+        <div className={`flex items-center justify-between gap-3 rounded-2xl px-4 py-3 mb-5 ${surfacePanelClass}`}>
           <span className="text-xs text-neutral-500 capitalize truncate">{monthLabel}</span>
           <div className="flex items-center gap-2 shrink-0">
             <LtrNumeric className="text-sm text-neutral-500 line-through">{formatMoney(currentBudget)}</LtrNumeric>
@@ -2555,7 +2570,7 @@ function BudgetChangeModal({
                 key={opt.mode}
                 type="button"
                 onClick={() => onSelect(opt.mode)}
-                className={`w-full text-right flex items-center gap-3.5 p-4 rounded-2xl bg-neutral-800/40 border border-neutral-700/70 transition-all active:scale-[0.99] outline-none focus-visible:ring-2 ${opt.accent} ${opt.ring}`}
+                className={`w-full text-right flex items-center gap-3.5 p-4 rounded-2xl transition-all active:scale-[0.99] outline-none focus-visible:ring-2 ${surfacePanelClass} ${opt.accent} ${opt.ring}`}
               >
                 <div className={`shrink-0 w-11 h-11 rounded-xl flex items-center justify-center ${opt.iconBg}`}>
                   <Icon className="w-5 h-5" />
@@ -2596,7 +2611,7 @@ function App() {
     savedColors,
     customCurrencies,
     currencyLayout,
-    buttonTheme,
+    themePreferences,
     setSettingsPersistence,
     applySettingsFromCloud,
   } = useLanguage();
@@ -2616,7 +2631,7 @@ function App() {
     savedColors,
     customCurrencies,
     currencyLayout,
-    buttonTheme,
+    themePreferences,
   });
 
   settingsMergeRef.current = {
@@ -2625,7 +2640,7 @@ function App() {
     savedColors,
     customCurrencies,
     currencyLayout,
-    buttonTheme,
+    themePreferences,
   };
 
   useEffect(() => {
@@ -3265,7 +3280,7 @@ function App() {
                     saved_colors: mergeBase.savedColors,
                     custom_currencies: mergeBase.customCurrencies,
                     currency_layout: mergeBase.currencyLayout,
-                    button_theme: mergeBase.buttonTheme,
+                    themePreferences: mergeBase.themePreferences,
                   };
               applySettingsFromCloud(merged);
             } else if (meta.exists) {
@@ -3431,7 +3446,7 @@ function App() {
         saved_colors: savedColors,
         custom_currencies: customCurrencies,
         currency_layout: currencyLayout,
-        button_theme: buttonTheme,
+        themePreferences,
       }).catch(() => {
         // Non-blocking; next change will retry.
       });
@@ -3445,7 +3460,7 @@ function App() {
     savedColors,
     customCurrencies,
     currencyLayout,
-    buttonTheme,
+    themePreferences,
     dataReady,
     user,
     settingsCloudReady,
@@ -3455,8 +3470,8 @@ function App() {
   // allocations, we ask how to reconcile them via the confirmation modal;
   // otherwise the new budget is applied immediately.
   const handleSetBudget = () => {
-    const inputAmount = parseFloat(budgetInput);
-    if (isNaN(inputAmount) || inputAmount < 0) return;
+    const inputAmount = parseMoneyInput(budgetInput);
+    if (inputAmount === null || inputAmount < 0) return;
 
     const resolveBudgetIlsAmount = async (): Promise<number | null> => {
       if (displayCurrency === 'ILS') return roundMoneyAmount(inputAmount);
@@ -3890,7 +3905,7 @@ function App() {
 
   // Reusable month selector (used on Dashboard & Sub-Budgets pages).
   const monthSelector = (
-    <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-3 sm:p-4 mb-6 sm:mb-8">
+    <div className={`${themeCardClass} p-3 sm:p-4 mb-6 sm:mb-8`}>
       <div dir="ltr" className="flex items-center justify-between gap-2">
         <button
           onClick={() => goToMonth(-1)}
@@ -3934,7 +3949,7 @@ function App() {
     return (
       <div
         dir={dir}
-        className="min-h-screen bg-slate-950 flex items-center justify-center text-neutral-100"
+        className={themePageLoadingClass}
       >
         <Loader2 className="w-9 h-9 text-emerald-500 animate-spin" aria-label={tr('loading')} />
       </div>
@@ -3962,11 +3977,11 @@ function App() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.45, ease: 'easeOut' }}
-      className="flex min-h-screen flex-col bg-neutral-950 text-neutral-100"
+      className={themePageRootClass}
     >
       {/* Header + desktop nav */}
       <header
-        className="sticky top-0 z-50 shrink-0 bg-neutral-900/80 backdrop-blur shadow-lg shadow-black/20 border-b border-neutral-800"
+        className={themeHeaderClass}
         style={{ paddingTop: 'env(safe-area-inset-top)' }}
       >
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
@@ -4064,7 +4079,7 @@ function App() {
             {monthSelector}
 
             {/* Financial summary — row 2 uses a fixed height so all three amount cells share one baseline */}
-            <div className="mb-6 rounded-xl border border-neutral-800 bg-neutral-900 p-4 shadow-sm sm:mb-8 sm:p-6">
+            <div className={`mb-6 ${themeCardClass} p-4 shadow-sm sm:mb-8 sm:p-6`}>
               <h2 className="mb-4 text-lg font-bold text-white md:text-xl">{tr('financialSummaryTitle')}</h2>
               <table className="w-full table-fixed border-collapse">
                 <tbody>
@@ -4124,7 +4139,7 @@ function App() {
             </div>
 
             {/* Monthly budget setter */}
-            <div className="mb-4 w-full rounded-2xl border border-neutral-800 bg-neutral-900 p-4 shadow-lg shadow-black/20 sm:mb-6 sm:p-6">
+            <div className={`mb-4 w-full ${themeCardClass} p-4 sm:mb-6 sm:p-6`}>
               <h2 className="mb-4 flex items-center gap-2 text-base font-semibold text-neutral-100 sm:text-lg">
                 <Wallet className="h-5 w-5 shrink-0 text-emerald-400" />
                 {tr('addMonthlyBudget')}
@@ -4140,18 +4155,16 @@ function App() {
                       style={{ flexGrow: budgetInputFlexGrow }}
                     >
                       <input
-                        type="number"
+                        type="text"
                         inputMode="decimal"
                         value={budgetInput}
-                        onChange={(e) => setBudgetInput(e.target.value)}
+                        onChange={(e) => setBudgetInput(sanitizeMoneyInputDraft(e.target.value))}
                         placeholder={
                           budget > 0
                             ? `${tr('currentAmountPrefix')}: ${selectedBudgetDisplayLabel}`
                             : tr('enterAmount')
                         }
-                        className={`h-10 w-full min-w-0 rounded-xl border border-neutral-700 bg-neutral-800 px-2 py-1.5 ${budgetInputTextClass} text-neutral-100 placeholder-neutral-500 outline-none transition-all duration-200 ease-in-out focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 sm:h-12 sm:px-4 sm:py-3 sm:text-lg`}
-                        min="0"
-                        step="100"
+                        className={`h-10 w-full min-w-0 px-2 py-1.5 sm:h-12 sm:px-4 sm:py-3 sm:text-lg ${budgetInputTextClass} ${surfaceInputClass}`}
                       />
                     </div>
                     <button
@@ -4228,7 +4241,7 @@ function App() {
             </div>
 
         {/* Add Expense Form */}
-        <div className="relative isolate z-10 bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 mb-6 sm:mb-8">
+        <div className={`relative isolate z-10 ${themeCardClass} p-4 sm:p-6 mb-6 sm:mb-8`}>
           <h2 className="text-base sm:text-lg font-semibold text-neutral-100 mb-4 sm:mb-6 flex items-center gap-2">
             <Plus className={`w-5 h-5 ${primaryActionAccentIconClass}`} />
             {tr('addExpenseTitle')}
@@ -4246,7 +4259,7 @@ function App() {
                   value={newExpense.description}
                   onChange={(e) => setNewExpense({ ...newExpense, description: e.target.value })}
                   placeholder={tr('exampleExpensePlaceholder')}
-                  className="h-12 w-full min-w-0 px-4 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base"
+                  className={surfaceInputLgClass}
                 />
               </div>
 
@@ -4267,7 +4280,7 @@ function App() {
                 <select
                   value={isAddingCategory ? ADD_CUSTOM_VALUE : newExpense.category}
                   onChange={(e) => handleCategoryChange(e.target.value)}
-                  className="h-12 w-full min-w-0 px-4 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base"
+                  className={surfaceInputLgClass}
                 >
                   {allCategories.map((cat) => (
                     <option key={cat.value} value={cat.value}>
@@ -4284,7 +4297,7 @@ function App() {
                   type="date"
                   value={newExpense.date}
                   onChange={(e) => setNewExpense({ ...newExpense, date: e.target.value })}
-                  className="h-12 w-full min-w-0 px-4 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base [color-scheme:dark]"
+                  className={`${surfaceInputLgClass} [color-scheme:dark]`}
                   required
                 />
               </div>
@@ -4366,7 +4379,7 @@ function App() {
 
         {/* ============================ EXPENSES ============================ */}
         {activeTab === 'expenses' && (
-        <div className="bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 overflow-hidden">
+        <div className={`${themeCardClass} overflow-hidden`}>
           <div className="p-4 sm:p-6 border-b border-neutral-800">
             <h2 className="text-base sm:text-lg font-semibold text-neutral-100">{tr('expenseHistoryTitle')}</h2>
             <p className="text-sm text-neutral-500 mt-1">
@@ -4375,7 +4388,7 @@ function App() {
             </p>
 
             <div
-              className="flex p-1 rounded-2xl bg-neutral-950/80 border border-neutral-800 mt-4"
+              className={`${filterBarContainerClass} mt-4`}
               role="tablist"
               aria-label={tr('periodFilterLabel')}
             >
@@ -4388,10 +4401,10 @@ function App() {
                     role="tab"
                     aria-selected={isActive}
                     onClick={() => setTimeFilter(filter.id)}
-                    className={`relative flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 ${
+                    className={`relative flex-1 py-2.5 text-sm transition-all duration-200 focus-visible:ring-2 focus-visible:ring-emerald-500/50 ${
                       isActive
-                        ? 'text-neutral-950'
-                        : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/60'
+                        ? 'rounded-xl font-semibold text-neutral-950'
+                        : filterBarInactiveTabClass
                     }`}
                   >
                     {isActive && (
@@ -4418,7 +4431,7 @@ function App() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={tr('searchByDescriptionOrCategory')}
-                className="w-full pr-11 pl-9 py-3 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base"
+                className={surfaceSearchInputClass}
               />
               {search && (
                 <button
@@ -4610,7 +4623,7 @@ function App() {
             aria-label={tr('close')}
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"
           />
-          <div className="relative z-10 w-full max-w-2xl rounded-2xl border border-neutral-700 bg-neutral-900 p-4 shadow-2xl shadow-black/60 sm:p-6">
+          <div className={`relative z-10 w-full max-w-2xl p-4 sm:p-6 ${surfaceModalClass}`}>
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
                 <h3 id="edit-expense-title" className="text-base font-semibold text-neutral-100 sm:text-lg">
@@ -4645,7 +4658,7 @@ function App() {
                     )
                   }
                   placeholder={tr('descriptionOptional')}
-                  className="h-12 w-full rounded-xl border border-neutral-700 bg-neutral-800 px-4 text-base text-neutral-100 placeholder-neutral-500 outline-none transition-all focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30"
+                  className={surfaceInputLgClass}
                 />
               </div>
 
@@ -4689,7 +4702,7 @@ function App() {
                           : prev,
                       )
                     }
-                    className="h-12 w-full rounded-xl border border-neutral-700 bg-neutral-800 px-4 text-base text-neutral-100 outline-none transition-all focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30"
+                    className={surfaceInputLgClass}
                   >
                     {allCategories.map((category) => (
                       <option key={`edit-expense-${category.value}`} value={category.value}>
@@ -4713,7 +4726,7 @@ function App() {
                           : prev,
                       )
                     }
-                    className="h-12 w-full rounded-xl border border-neutral-700 bg-neutral-800 px-3 text-base text-neutral-100 outline-none transition-all focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30"
+                    className={`${surfaceInputLgClass} px-3`}
                   />
                 </div>
               </div>
@@ -4722,7 +4735,7 @@ function App() {
                 <button
                   type="button"
                   onClick={handleEditExpenseCancel}
-                  className="rounded-xl border border-neutral-700 bg-neutral-800 px-4 py-2.5 text-sm font-medium text-neutral-200 transition-colors hover:bg-neutral-700"
+                  className={`rounded-xl px-4 py-2.5 text-sm font-medium transition-colors hover:opacity-90 ${surfaceInputClass} text-[var(--surface-input-text)]`}
                 >
                   {tr('cancel')}
                 </button>
@@ -4747,7 +4760,7 @@ function App() {
 
       {/* Footer (desktop only; mobile uses the bottom nav) */}
       {!settingsOpen && (
-      <footer className="hidden md:block border-t border-neutral-800 bg-neutral-900 mt-8 sm:mt-12">
+      <footer className={themeFooterClass}>
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <p className="text-center text-sm text-neutral-500">
             {tr('appName')} - {tr('appTagline')}

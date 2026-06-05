@@ -6,7 +6,12 @@ import { writePreferredLanguage } from '../services/authLanguagePreference';
 import DisplayCurrencySelector from './DisplayCurrencySelector';
 import ExchangeRateSimulator from './ExchangeRateSimulator';
 import type { ExpenseCurrency } from '../services/exchangeRateService';
-import { primaryActionActivePillClass, utilityNavIconButtonClass } from '../styles/actionButtonStyles';
+import {
+  filterBarContainerClass,
+  filterBarInactiveTabClass,
+  primaryActionActivePillClass,
+  utilityNavIconButtonClass,
+} from '../styles/actionButtonStyles';
 
 type MainSection = 'general' | 'currencies';
 type CurrencySubSection = 'display' | 'exchange' | 'manual-rate' | 'commissions';
@@ -346,14 +351,14 @@ export default function SettingsPage({
                 {tr('language')}
               </h4>
               <p className="mt-1 text-xs text-gray-400 sm:text-sm">{tr('languageDescription')}</p>
-              <div className="mt-3 inline-flex w-full rounded-2xl border border-gray-700 bg-gray-950/80 p-1">
+              <div className={`mt-3 inline-flex w-full ${filterBarContainerClass}`}>
                 <button
                   type="button"
                   onClick={() => selectLanguage('he')}
                   className={`flex-1 py-2.5 text-sm transition-all sm:py-3 ${
                     lang === 'he'
                       ? primaryActionActivePillClass
-                      : 'rounded-xl text-gray-300 hover:bg-gray-800/80 hover:text-white'
+                      : filterBarInactiveTabClass
                   }`}
                 >
                   {tr('hebrew')}
@@ -364,7 +369,7 @@ export default function SettingsPage({
                   className={`flex-1 py-2.5 text-sm transition-all sm:py-3 ${
                     lang === 'en'
                       ? primaryActionActivePillClass
-                      : 'rounded-xl text-gray-300 hover:bg-gray-800/80 hover:text-white'
+                      : filterBarInactiveTabClass
                   }`}
                 >
                   {tr('english')}

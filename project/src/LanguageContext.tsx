@@ -31,10 +31,10 @@ import {
   appendSavedColor,
 } from './services/userFirebaseSync';
 import {
-  applyButtonThemeCSS,
-  loadButtonTheme,
-  saveButtonThemeToStorage,
-  type ButtonGroupTheme,
+  applyThemeCSS,
+  loadThemePreferences,
+  saveThemePreferencesToStorage,
+  type ThemePreferences,
 } from './services/buttonThemeService';
 import { getSavedColors as getLocalSavedColors } from './services/savedColorsService';
 import {
@@ -68,8 +68,8 @@ interface LanguageContextValue {
   savedColors: string[];
   saveSavedColor: (hex: string) => string[];
   setSavedColors: (colors: string[]) => void;
-  buttonTheme: ButtonGroupTheme;
-  setButtonTheme: (theme: ButtonGroupTheme) => void;
+  themePreferences: ThemePreferences;
+  setThemePreferences: (prefs: ThemePreferences) => void;
   settingsPersistence: 'local' | 'cloud';
   setSettingsPersistence: (mode: 'local' | 'cloud') => void;
   applySettingsFromCloud: (settings: {
@@ -79,7 +79,8 @@ interface LanguageContextValue {
     saved_colors: string[];
     custom_currencies: ExpenseCurrency[];
     currency_layout: CurrencyLayoutItem[];
-    button_theme?: ButtonGroupTheme;
+    themePreferences?: ThemePreferences;
+    button_theme?: ThemePreferences['buttons'];
   }) => void;
   formatMoney: (ilsAmount: number) => string;
   formatExpenseMoney: (
@@ -174,10 +175,10 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     getInitialCurrencyLayout(getInitialCustomCurrencies()),
   );
   const [savedColors, setSavedColors] = useState<string[]>(() => getLocalSavedColors());
-  const [buttonTheme, setButtonThemeState] = useState<ButtonGroupTheme>(() => {
-    const theme = loadButtonTheme();
-    applyButtonThemeCSS(theme);
-    return theme;
+  const [themePreferences, setThemePreferencesState] = useState<ThemePreferences>(() => {
+    const prefs = loadThemePreferences();
+    applyThemeCSS(prefs);
+    return prefs;
   });
   const [settingsPersistence, setSettingsPersistence] = useState<'local' | 'cloud'>('local');
   const [exchangeRates, setExchangeRates] = useState<ExchangeRates | null>(() =>
@@ -200,9 +201,9 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const setButtonTheme = useCallback((theme: ButtonGroupTheme) => {
-    setButtonThemeState(theme);
-    applyButtonThemeCSS(theme);
+  const setThemePreferences = useCallback((prefs: ThemePreferences) => {
+    setThemePreferencesState(prefs);
+    applyThemeCSS(prefs);
   }, []);
 
   const applySettingsFromCloud = useCallback(
@@ -213,7 +214,8 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       saved_colors: string[];
       custom_currencies: ExpenseCurrency[];
       currency_layout: CurrencyLayoutItem[];
-      button_theme?: ButtonGroupTheme;
+      themePreferences?: ThemePreferences;
+      button_theme?: ThemePreferences['buttons'];
     }) => {
       setLang(settings.lang);
       setKeepOriginalValues(settings.keepOriginalValues);
@@ -223,9 +225,15 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       setCurrencyLayout(
         reconcileCurrencyLayout(settings.currency_layout, settings.custom_currencies),
       );
-      if (settings.button_theme) {
-        setButtonThemeState(settings.button_theme);
-        applyButtonThemeCSS(settings.button_theme);
+      if (settings.themePreferences) {
+        setThemePreferencesState(settings.themePreferences);
+        applyThemeCSS(settings.themePreferences);
+      } else if (settings.button_theme) {
+        setThemePreferencesState((prev) => {
+          const next = { ...prev, buttons: settings.button_theme! };
+          applyThemeCSS(next);
+          return next;
+        });
       }
     },
     [setLang],
@@ -317,8 +325,8 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (settingsPersistence !== 'local') return;
-    saveButtonThemeToStorage(buttonTheme);
-  }, [buttonTheme, settingsPersistence]);
+    saveThemePreferencesToStorage(themePreferences);
+  }, [themePreferences, settingsPersistence]);
 
   useEffect(() => {
     const cached = getCachedExchangeRates();
@@ -453,8 +461,8 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       savedColors,
       saveSavedColor,
       setSavedColors,
-      buttonTheme,
-      setButtonTheme,
+      themePreferences,
+      setThemePreferences,
       settingsPersistence,
       setSettingsPersistence,
       applySettingsFromCloud,
@@ -478,8 +486,8 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       replaceCurrencyLayout,
       savedColors,
       saveSavedColor,
-      buttonTheme,
-      setButtonTheme,
+      themePreferences,
+      setThemePreferences,
       settingsPersistence,
       applySettingsFromCloud,
       formatMoney,

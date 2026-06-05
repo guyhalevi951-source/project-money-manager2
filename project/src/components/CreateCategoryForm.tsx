@@ -4,6 +4,7 @@ import CategoryColorPicker from './CategoryColorPicker';
 import CategoryColorChip from './CategoryColorChip';
 import { useLanguage } from '../LanguageContext';
 import { primaryActionButtonClass, primaryActionSelectedChipClass } from '../styles/actionButtonStyles';
+import { surfaceInputClass, surfacePanelClass } from '../styles/themeSurfaceStyles';
 
 interface CreateCategoryFormProps {
   name: string;
@@ -32,7 +33,7 @@ export default function CreateCategoryForm({
   const PreviewIcon = resolveIcon(iconName);
 
   return (
-    <div className="w-full sm:w-96 max-w-full rounded-2xl border border-emerald-500/30 bg-neutral-800/80 p-5 shadow-lg shadow-black/30 space-y-4">
+    <div className={`w-full sm:w-96 max-w-full rounded-2xl border border-emerald-500/30 p-5 shadow-lg shadow-black/30 space-y-4 ${surfacePanelClass}`}>
       <div>
         <label className="block text-xs font-medium text-neutral-300 mb-2">{tr('categoryName')}</label>
         <input
@@ -47,7 +48,7 @@ export default function CreateCategoryForm({
           }}
           placeholder={tr('categoryNamePlaceholder')}
           autoFocus
-          className="w-full px-4 py-3 rounded-xl bg-neutral-900 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition-all text-base"
+          className={`w-full px-4 py-3 text-base ${surfaceInputClass}`}
         />
       </div>
 
@@ -69,7 +70,7 @@ export default function CreateCategoryForm({
                 className={`relative w-11 h-11 rounded-xl flex items-center justify-center transition-all active:scale-95 ${
                   selected
                     ? `${primaryActionSelectedChipClass} ring-2 ring-indigo-400 ring-offset-2 ring-offset-neutral-900`
-                    : 'bg-neutral-900 text-neutral-400 border border-neutral-700 hover:border-indigo-700/50 hover:text-indigo-300'
+                    : `${surfaceInputClass} text-[var(--surface-input-placeholder)] hover:border-indigo-700/50 hover:text-indigo-300`
                 }`}
               >
                 <IconComp className="w-5 h-5" />

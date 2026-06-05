@@ -103,3 +103,40 @@ export function hexToHsv(hex: string): Hsv {
 export function hsvToHex(h: number, s: number, v: number): string {
   return rgbToHex(hsvToRgb(h, s, v));
 }
+
+/** WCAG relative luminance (0 = black, 1 = white). */
+export function relativeLuminance(hex: string): number {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return 0;
+  const channel = (c: number) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b);
+}
+
+export function isLightColor(hex: string): boolean {
+  return relativeLuminance(hex) > 0.45;
+}
+
+/** Mix hex toward white (amount 0–1). */
+export function lightenHex(hex: string, amount: number): string {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return hex;
+  const mix = (c: number) => c + (255 - c) * clamp01(amount);
+  return rgbToHex({ r: mix(rgb.r), g: mix(rgb.g), b: mix(rgb.b) });
+}
+
+/** Mix hex toward black (amount 0–1). */
+export function darkenHex(hex: string, amount: number): string {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return hex;
+  const mix = (c: number) => c * (1 - clamp01(amount));
+  return rgbToHex({ r: mix(rgb.r), g: mix(rgb.g), b: mix(rgb.b) });
+}
+
+export function hexToRgba(hex: string, alpha: number): string {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return `rgb(0 0 0 / ${clamp01(alpha)})`;
+  return `rgb(${Math.round(rgb.r)} ${Math.round(rgb.g)} ${Math.round(rgb.b)} / ${clamp01(alpha)})`;
+}

@@ -1,6 +1,7 @@
 import { X } from 'lucide-react';
 import { useLanguage } from '../LanguageContext';
 import { primaryActionButtonClass, utilityNavButtonClass } from '../styles/actionButtonStyles';
+import { surfaceModalLgClass } from '../styles/themeSurfaceStyles';
 
 interface CommissionSaveModalProps {
   open: boolean;
@@ -39,7 +40,7 @@ export default function CommissionSaveModal({
       />
 
       <div
-        className="relative w-full sm:max-w-md rounded-t-3xl border border-violet-500/25 bg-neutral-900 p-5 shadow-2xl shadow-black/60 sm:rounded-3xl sm:p-6"
+        className={`relative w-full sm:max-w-md border border-violet-500/25 p-5 sm:p-6 ${surfaceModalLgClass}`}
         style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}
       >
         <div className="mb-1 flex items-start gap-3">

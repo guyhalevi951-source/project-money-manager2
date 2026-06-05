@@ -24,7 +24,12 @@ import {
 import CurrencyLibraryModal from './CurrencyLibraryModal';
 import CurrencyFlag from './CurrencyFlag';
 import CurrencyDetectionBanner from './CurrencyDetectionBanner';
-import { currencyUtilityButtonLgClass, primaryActionSelectedChipClass } from '../styles/actionButtonStyles';
+import {
+  currencyUtilityButtonLgClass,
+  filterDropdownWrapperClass,
+  filterFormControlClass,
+  primaryActionSelectedChipClass,
+} from '../styles/actionButtonStyles';
 import {
   detectLocalCurrency,
   isDetectedCurrencyAccepted,
@@ -34,8 +39,7 @@ import {
   setCurrencyAutoDetectPref,
 } from '../services/currencyDetectionPreference';
 
-const expenseFormControlClass =
-  'h-12 rounded-xl border border-neutral-700 bg-neutral-800 text-neutral-100 text-base transition-all outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30';
+const expenseFormControlClass = `h-12 text-base focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 ${filterFormControlClass}`;
 
 const AMOUNT_INPUT_MAX_LENGTH = 14;
 
@@ -343,7 +347,7 @@ export default function ExpenseAmountField({
             {lockToDisplayCurrency ? (
               <div
                 aria-label={tr('currencyLabel')}
-                className={`${expenseFormControlClass} flex shrink-0 items-center gap-1.5 px-2.5 sm:gap-2 sm:px-3 text-sm font-medium tabular-nums whitespace-nowrap bg-neutral-800 border-neutral-700 text-neutral-100`}
+                className={`${expenseFormControlClass} flex shrink-0 items-center gap-1.5 px-2.5 sm:gap-2 sm:px-3 text-sm font-medium tabular-nums whitespace-nowrap`}
               >
                 <CurrencyFlag countryCode={selectedMeta.countryCode} size="sm" alt={selectedMeta.name} />
                 <span className="font-semibold">{selectedMeta.symbol}</span>
@@ -358,8 +362,8 @@ export default function ExpenseAmountField({
               aria-expanded={isCurrencyMenuOpen}
               className={`${expenseFormControlClass} flex shrink-0 items-center gap-1.5 px-2.5 sm:gap-2 sm:px-3 text-sm font-medium tabular-nums active:scale-[0.98] whitespace-nowrap ${
                 isTemporaryCurrency
-                  ? 'bg-neutral-800 border-violet-500/50 text-violet-100 ring-1 ring-violet-500/25'
-                  : 'bg-neutral-800 border-neutral-700 text-neutral-100 hover:border-neutral-600'
+                  ? 'border-violet-500/50 text-violet-100 ring-1 ring-violet-500/25'
+                  : 'hover:brightness-110'
               } ${isCurrencyMenuOpen ? 'border-emerald-500/60 ring-2 ring-emerald-500/25' : ''}`}
             >
               <CurrencyFlag countryCode={selectedMeta.countryCode} size="sm" alt={selectedMeta.name} />
@@ -378,7 +382,7 @@ export default function ExpenseAmountField({
               <div
                 role="listbox"
                 aria-label={tr('currencyLabel')}
-                className="absolute top-full start-0 z-30 mt-1.5 w-[min(100vw-2rem,15.5rem)] rounded-xl border border-neutral-700/90 bg-neutral-900 shadow-xl shadow-black/50 p-1.5"
+                className={`absolute top-full start-0 z-30 mt-1.5 w-[min(100vw-2rem,15.5rem)] p-1.5 ${filterDropdownWrapperClass}`}
               >
               <div className="flex flex-wrap gap-1.5">
                 {selectableCurrencies.map((code) => {

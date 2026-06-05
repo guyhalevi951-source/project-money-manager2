@@ -30,8 +30,9 @@ import {
   type CurrencyLayoutItem,
 } from './currencyLayoutService';
 import {
-  DEFAULT_BUTTON_THEME,
-  type ButtonGroupTheme,
+  DEFAULT_THEME_PREFERENCES,
+  parseThemePreferences,
+  type ThemePreferences,
 } from './buttonThemeService';
 import {
   GLOBAL_COMMISSION_CURRENCY,
@@ -50,7 +51,7 @@ export interface UserSettings {
   saved_colors: string[];
   custom_currencies: ExpenseCurrency[];
   currency_layout: CurrencyLayoutItem[];
-  button_theme: ButtonGroupTheme;
+  themePreferences: ThemePreferences;
 }
 
 export interface UserCategoriesData {
@@ -81,7 +82,7 @@ export const EMPTY_USER_SETTINGS: UserSettings = {
   saved_colors: [],
   custom_currencies: [],
   currency_layout: buildDefaultCurrencyLayout(),
-  button_theme: { ...DEFAULT_BUTTON_THEME },
+  themePreferences: { ...DEFAULT_THEME_PREFERENCES },
 };
 
 export const EMPTY_USER_CATEGORIES: UserCategoriesData = {
@@ -137,15 +138,9 @@ function parseSettings(raw: Record<string, unknown> | undefined): UserSettings {
       ? reconcileCurrencyLayout(parsedLayout, custom_currencies)
       : buildDefaultCurrencyLayout(custom_currencies);
 
-  const rawTheme = raw.button_theme;
-  const button_theme: ButtonGroupTheme =
-    rawTheme &&
-    typeof rawTheme === 'object' &&
-    typeof (rawTheme as Record<string, unknown>).primary === 'string' &&
-    typeof (rawTheme as Record<string, unknown>).currency === 'string' &&
-    typeof (rawTheme as Record<string, unknown>).nav === 'string'
-      ? (rawTheme as ButtonGroupTheme)
-      : { ...DEFAULT_BUTTON_THEME };
+  const themePreferences = parseThemePreferences(
+    raw.themePreferences ?? raw.button_theme,
+  );
 
   return {
     lang,
@@ -154,7 +149,7 @@ function parseSettings(raw: Record<string, unknown> | undefined): UserSettings {
     saved_colors: normalizeSavedColors(raw.saved_colors),
     custom_currencies,
     currency_layout,
-    button_theme,
+    themePreferences,
   };
 }
 
@@ -311,23 +306,16 @@ export function loadLegacySettingsFromLocalStorage(): UserSettings {
     currency_layout = reconcileCurrencyLayout(currency_layout, custom_currencies);
   }
 
-  let button_theme: ButtonGroupTheme = { ...DEFAULT_BUTTON_THEME };
+  let themePreferences: ThemePreferences = { ...DEFAULT_THEME_PREFERENCES };
   try {
-    const raw = window.localStorage.getItem('money_manager_button_theme_v1');
+    const raw =
+      window.localStorage.getItem('guest_theme_preferences') ||
+      window.localStorage.getItem('money_manager_button_theme_v1');
     if (raw) {
-      const parsed: unknown = JSON.parse(raw);
-      if (
-        parsed &&
-        typeof parsed === 'object' &&
-        typeof (parsed as Record<string, unknown>).primary === 'string' &&
-        typeof (parsed as Record<string, unknown>).currency === 'string' &&
-        typeof (parsed as Record<string, unknown>).nav === 'string'
-      ) {
-        button_theme = parsed as ButtonGroupTheme;
-      }
+      themePreferences = parseThemePreferences(JSON.parse(raw));
     }
   } catch {
-    button_theme = { ...DEFAULT_BUTTON_THEME };
+    themePreferences = { ...DEFAULT_THEME_PREFERENCES };
   }
 
   return {
@@ -337,7 +325,7 @@ export function loadLegacySettingsFromLocalStorage(): UserSettings {
     saved_colors,
     custom_currencies,
     currency_layout,
-    button_theme,
+    themePreferences,
   };
 }
 
@@ -491,7 +479,7 @@ export async function migrateLegacyDataToCloud(uid: string): Promise<void> {
         saved_colors: settings.saved_colors,
         custom_currencies: settings.custom_currencies,
         currency_layout: settings.currency_layout,
-        button_theme: settings.button_theme,
+        themePreferences: settings.themePreferences,
         updatedAt: serverTimestamp(),
       },
       { merge: true },
@@ -606,7 +594,7 @@ export async function saveSettingsToCloud(uid: string, settings: UserSettings): 
       saved_colors: settings.saved_colors,
       custom_currencies: settings.custom_currencies,
       currency_layout: settings.currency_layout,
-      button_theme: settings.button_theme,
+      themePreferences: settings.themePreferences,
       updatedAt: serverTimestamp(),
     },
     { merge: true },

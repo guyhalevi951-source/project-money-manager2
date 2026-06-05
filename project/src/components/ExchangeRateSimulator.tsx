@@ -63,6 +63,7 @@ import {
   saveCurrencyCommissionToCloud,
   saveManualExchangeOverrideToCloud,
 } from '../services/userFirebaseSync';
+import { surfaceInputClass, surfacePanelClass } from '../styles/themeSurfaceStyles';
 
 export type ExchangeRateSimulatorSection = 'exchange' | 'manual-rate' | 'commissions';
 
@@ -74,19 +75,15 @@ interface ExchangeRateSimulatorProps {
 type SelectorTarget = 'main' | 'secondary' | 'commission';
 type SavePromptState = 'hidden' | 'shown' | 'saved';
 
-const controlBaseClass =
-  'h-12 rounded-xl border border-neutral-700 bg-neutral-800 px-3 text-sm text-neutral-100 transition-all outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 active:scale-[0.98]';
+const controlBaseClass = `h-12 px-3 text-sm active:scale-[0.98] ${surfaceInputClass}`;
 
-const staticFormCardClass =
-  'rounded-xl border border-slate-700/60 bg-slate-950/50 p-3.5 sm:p-4 space-y-4';
+const staticFormCardClass = `rounded-xl p-3.5 sm:p-4 space-y-4 ${surfacePanelClass}`;
 
-const staticListCardClass =
-  'rounded-xl border border-slate-700/60 bg-slate-900/40 p-3 sm:p-4';
+const staticListCardClass = `rounded-xl p-3 sm:p-4 ${surfacePanelClass}`;
 
 /** Cap for in-panel selectors; commission portal uses viewport-aware maxHeight. */
 const COMMISSION_DROPDOWN_MAX_PX = 240;
-const currencySelectorDropdownClass =
-  'z-50 max-h-60 overflow-y-auto overscroll-contain touch-pan-y rounded-xl border border-neutral-700 bg-neutral-900 p-1.5 shadow-xl shadow-black/40 [-webkit-overflow-scrolling:touch]';
+const currencySelectorDropdownClass = `z-50 max-h-60 overflow-y-auto overscroll-contain touch-pan-y p-1.5 shadow-xl shadow-black/40 [-webkit-overflow-scrolling:touch] ${surfacePanelClass}`;
 
 const toIsoDateLocal = (d: Date): string =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

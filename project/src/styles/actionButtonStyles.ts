@@ -157,3 +157,72 @@ export const primaryActionCompactButtonClass = [
 /** Selected option inside a dropdown listbox. */
 export const utilityNavDropdownSelectedClass =
   'bg-[var(--btn-nav-hover)] text-[var(--btn-nav-text-hover)]';
+
+// ─── INPUT, FILTER & DARK SURFACES GROUP ────────────────────────────────────────
+// Text inputs, search bars, filter tabs, dropdown wrappers, modal cards, panels.
+// Colors driven by --btn-filter-* CSS variables.
+
+const filterBarColors = [
+  'bg-[var(--btn-filter-bg)]',
+  'border-[var(--btn-filter-border)]',
+].join(' ');
+
+const filterInactiveTabColors = [
+  'text-[var(--btn-filter-text)]',
+  'hover:text-[var(--btn-filter-text-hover)]',
+  'hover:bg-[var(--btn-filter-hover)]',
+].join(' ');
+
+/** Tab bar container (שבוע/חודש/שנה, יומי/שבועי/חודשי/שנתי). */
+export const filterBarContainerClass = [
+  'flex p-1 rounded-2xl border',
+  filterBarColors,
+].join(' ');
+
+/** Inactive tab inside a filter bar. */
+export const filterBarInactiveTabClass = [
+  'rounded-xl font-semibold transition-all duration-200 outline-none',
+  filterInactiveTabColors,
+].join(' ');
+
+/** Dropdown / popover wrapper (currency menu, filter panels). */
+export const filterDropdownWrapperClass = [
+  'rounded-xl border shadow-xl shadow-black/50',
+  filterBarColors,
+].join(' ');
+
+/** Nested panel surface inside settings / forms. */
+export const filterPanelSurfaceClass = [
+  'rounded-2xl border p-1',
+  filterBarColors,
+].join(' ');
+
+/** Form control using surface palette (amount field, search in filter context). */
+export const filterFormControlClass = [
+  'rounded-xl border bg-[var(--surface-input-bg)] border-[var(--surface-input-border)]',
+  'text-[var(--surface-input-text)] placeholder-[var(--surface-input-placeholder)]',
+  'transition-all outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30',
+].join(' ');
+
+// ─── AUTH SIGN-UP STATIC BUTTONS (NEVER THEMED) ───────────────────────────────
+// Hardcoded indigo — excluded from all dynamic theme groups per product requirement.
+
+export const authSignupStaticButtonClass = [
+  'rounded-xl',
+  'bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700',
+  'text-white font-semibold',
+  'shadow-md shadow-indigo-500/10',
+  'transition-all active:scale-[0.98]',
+].join(' ');
+
+export const authSignupStaticPillClass = [
+  'rounded-xl',
+  'bg-indigo-600 text-white font-semibold',
+  'shadow-md shadow-black/15',
+].join(' ');
+
+/** Chart / carousel inset panel. */
+export const filterInsetPanelClass = [
+  'rounded-2xl',
+  'bg-[var(--surface-panel-bg)] border border-[var(--surface-panel-border)]',
+].join(' ');

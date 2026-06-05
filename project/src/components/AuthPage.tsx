@@ -13,7 +13,14 @@ import {
 } from '../firebase';
 import { mapAuthError, validateAuthForm } from '../authErrors';
 import { useLanguage } from '../LanguageContext';
-import { primaryActionActivePillClass, primaryActionButtonClass } from '../styles/actionButtonStyles';
+import {
+  authSignupStaticButtonClass,
+  authSignupStaticPillClass,
+  filterBarContainerClass,
+  filterBarInactiveTabClass,
+  primaryActionActivePillClass,
+  primaryActionButtonClass,
+} from '../styles/actionButtonStyles';
 import type { Lang } from '../translations';
 import {
   clearAuthPageLang,
@@ -272,20 +279,26 @@ export default function AuthPage() {
           </div>
 
           {/* Login / Sign up toggle */}
-          <div className="flex p-1 rounded-2xl bg-slate-950/60 border border-slate-800 mb-6">
+          <div className={`mb-6 ${filterBarContainerClass}`}>
             {(['login', 'signup'] as const).map((m) => (
               <button
                 key={m}
                 type="button"
                 onClick={() => switchMode(m)}
-                className={`relative flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 ${
-                  mode === m ? 'text-slate-950' : 'text-slate-400 hover:text-slate-200'
+                className={`relative flex-1 py-2.5 text-sm transition-all duration-300 ${
+                  mode === m
+                    ? m === 'signup'
+                      ? 'rounded-xl font-semibold text-white'
+                      : 'rounded-xl font-semibold text-slate-950'
+                    : filterBarInactiveTabClass
                 }`}
               >
                 {mode === m && (
                   <motion.span
                     layoutId="auth-mode-pill"
-                    className={`absolute inset-0 ${primaryActionActivePillClass}`}
+                    className={`absolute inset-0 ${
+                      m === 'signup' ? authSignupStaticPillClass : primaryActionActivePillClass
+                    }`}
                     transition={{ type: 'spring', stiffness: 400, damping: 32 }}
                   />
                 )}
@@ -330,7 +343,9 @@ export default function AuthPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className={`w-full py-3.5 disabled:opacity-60 flex items-center justify-center gap-2 ${primaryActionButtonClass}`}
+                className={`w-full py-3.5 disabled:opacity-60 flex items-center justify-center gap-2 ${
+                  mode === 'signup' ? authSignupStaticButtonClass : primaryActionButtonClass
+                }`}
               >
                 {loadingAction === 'email' ? (
                   <>
