@@ -6,6 +6,7 @@ import { writePreferredLanguage } from '../services/authLanguagePreference';
 import DisplayCurrencySelector from './DisplayCurrencySelector';
 import ExchangeRateSimulator from './ExchangeRateSimulator';
 import type { ExpenseCurrency } from '../services/exchangeRateService';
+import { primaryActionActivePillClass, utilityNavIconButtonClass } from '../styles/actionButtonStyles';
 
 type MainSection = 'general' | 'currencies';
 type CurrencySubSection = 'display' | 'exchange' | 'manual-rate' | 'commissions';
@@ -114,7 +115,7 @@ export default function SettingsPage({
         <button
           type="button"
           onClick={onBack}
-          className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl border border-neutral-700/80 bg-neutral-900/80 text-neutral-300 hover:text-neutral-100 hover:bg-neutral-800 hover:border-neutral-600 transition-all active:scale-95"
+          className={`shrink-0 w-11 h-11 ${utilityNavIconButtonClass}`}
           aria-label={tr('backToApp')}
         >
           <BackIcon className="w-5 h-5" />
@@ -157,7 +158,7 @@ export default function SettingsPage({
             <motion.div
               key="settings-main-currencies"
               {...panelMotion}
-              className="overflow-visible space-y-2 rounded-xl border border-gray-700/70 bg-gray-900/70 p-3 shadow-sm shadow-black/20 sm:p-4"
+              className="overflow-visible space-y-4 rounded-xl border border-gray-700/70 bg-gray-900/70 p-3 shadow-sm shadow-black/20 sm:p-4"
             >
             <button
               type="button"
@@ -196,11 +197,14 @@ export default function SettingsPage({
               className="w-full cursor-pointer rounded-lg bg-gray-800 p-4 transition-colors hover:bg-gray-700"
             >
               <div className="flex items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-2">
-                  <SlidersHorizontal className="h-4 w-4 shrink-0 text-blue-300" />
-                  <h4 className="truncate text-sm font-semibold text-white sm:text-base">
-                    {tr('settingsCurrencySubExchange')}
-                  </h4>
+                <div className="min-w-0 flex-1 text-start">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <SlidersHorizontal className="h-4 w-4 shrink-0 text-blue-300" />
+                    <h4 className="truncate text-sm font-semibold text-white sm:text-base">
+                      {tr('settingsCurrencySubExchange')}
+                    </h4>
+                  </div>
+                  <p className="mt-0.5 text-xs text-gray-400">{tr('settingsCurrencySubExchangeDesc')}</p>
                 </div>
                 {isCurrencySubOpen('exchange') ? (
                   <ChevronDown className="h-5 w-5 shrink-0 text-gray-300" />
@@ -231,11 +235,14 @@ export default function SettingsPage({
               className="w-full cursor-pointer rounded-lg bg-gray-800 p-4 transition-colors hover:bg-gray-700"
             >
               <div className="flex items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-2">
-                  <SlidersHorizontal className="h-4 w-4 shrink-0 text-amber-300" />
-                  <h4 className="truncate text-sm font-semibold text-white sm:text-base">
-                    {tr('settingsCurrencySubManualRate')}
-                  </h4>
+                <div className="min-w-0 flex-1 text-start">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <SlidersHorizontal className="h-4 w-4 shrink-0 text-purple-400" />
+                    <h4 className="truncate text-sm font-semibold text-white sm:text-base">
+                      {tr('settingsCurrencySubManualRate')}
+                    </h4>
+                  </div>
+                  <p className="mt-0.5 text-xs text-gray-400">{tr('settingsCurrencySubManualRateDesc')}</p>
                 </div>
                 {isCurrencySubOpen('manual-rate') ? (
                   <ChevronDown className="h-5 w-5 shrink-0 text-gray-300" />
@@ -266,11 +273,14 @@ export default function SettingsPage({
               className="w-full cursor-pointer rounded-lg bg-gray-800 p-4 transition-colors hover:bg-gray-700"
             >
               <div className="flex items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-2">
-                  <SlidersHorizontal className="h-4 w-4 shrink-0 text-violet-300" />
-                  <h4 className="truncate text-sm font-semibold text-white sm:text-base">
-                    {tr('settingsCurrencySubCommissions')}
-                  </h4>
+                <div className="min-w-0 flex-1 text-start">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <SlidersHorizontal className="h-4 w-4 shrink-0 text-purple-400" />
+                    <h4 className="truncate text-sm font-semibold text-white sm:text-base">
+                      {tr('settingsCurrencySubCommissions')}
+                    </h4>
+                  </div>
+                  <p className="mt-0.5 text-xs text-gray-400">{tr('settingsCurrencySubCommissionsDesc')}</p>
                 </div>
                 {isCurrencySubOpen('commissions') ? (
                   <ChevronDown className="h-5 w-5 shrink-0 text-gray-300" />
@@ -340,10 +350,10 @@ export default function SettingsPage({
                 <button
                   type="button"
                   onClick={() => selectLanguage('he')}
-                  className={`flex-1 rounded-xl py-2.5 text-sm font-semibold transition-all sm:py-3 ${
+                  className={`flex-1 py-2.5 text-sm transition-all sm:py-3 ${
                     lang === 'he'
-                      ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/30'
-                      : 'text-gray-300 hover:bg-gray-800/80 hover:text-white'
+                      ? primaryActionActivePillClass
+                      : 'rounded-xl text-gray-300 hover:bg-gray-800/80 hover:text-white'
                   }`}
                 >
                   {tr('hebrew')}
@@ -351,10 +361,10 @@ export default function SettingsPage({
                 <button
                   type="button"
                   onClick={() => selectLanguage('en')}
-                  className={`flex-1 rounded-xl py-2.5 text-sm font-semibold transition-all sm:py-3 ${
+                  className={`flex-1 py-2.5 text-sm transition-all sm:py-3 ${
                     lang === 'en'
-                      ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/30'
-                      : 'text-gray-300 hover:bg-gray-800/80 hover:text-white'
+                      ? primaryActionActivePillClass
+                      : 'rounded-xl text-gray-300 hover:bg-gray-800/80 hover:text-white'
                   }`}
                 >
                   {tr('english')}
@@ -380,7 +390,7 @@ export default function SettingsPage({
                     aria-label={tr('keepOriginalValuesLabel')}
                     className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-all ${
                       keepOriginalValues
-                        ? 'border-emerald-400/70 bg-emerald-500/80'
+                        ? 'border-indigo-400/70 bg-indigo-500/80'
                         : 'border-gray-600 bg-gray-800'
                     }`}
                   >

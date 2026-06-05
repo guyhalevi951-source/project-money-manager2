@@ -32,8 +32,14 @@ const he: TranslationDict = {
   settingsSectionCurrenciesDesc: 'הגדרות מטבע תצוגה, שער חליפין ועמלות',
   settingsSectionExchangeRates: 'מטבעות ושערי חליפין',
   settingsCurrencySubExchange: 'שער חליפין',
+  settingsCurrencySubExchangeDesc:
+    'בדיקת שערים ומחשבון המרה מהיר, המציג את השערים העדכניים בשקלול העמלות והשערים הידניים שהגדרת.',
   settingsCurrencySubManualRate: 'קביעת שער חליפין ידני',
+  settingsCurrencySubManualRateDesc:
+    'קיבוע שערים מותאמים אישית שיעקפו את השער היציג וישפיעו אוטומטית על מחשבון ההמרה והתקציב.',
   settingsCurrencySubCommissions: 'ניהול עמלות',
+  settingsCurrencySubCommissionsDesc:
+    'הגדרת אחוזי עמלות האשראי או הבנק שלכם, המתווספים אוטומטית לחישובי המרת המטבע במערכת.',
   settingsSectionGeneral: 'הגדרות כלליות',
   settingsSectionGeneralDesc: 'שפה והתנהגות תרגום',
   settingsPageSubtitle: 'התאמה אישית של שפה, תרגום ומטבע תצוגה',
@@ -125,7 +131,8 @@ const he: TranslationDict = {
   exchangeRateCurrencyFeeNotice: 'שים לב: מוגדרת עמלה של {percent}% עבור מטבע זה',
   exchangeRateUnitRateLineInclFee: '1 {mainCurrency} = {rate} {secondaryCurrency} (כולל עמלה)',
   exchangeRateConversionCalculation: 'חישוב המרה',
-  displayCurrencyDescription: 'בחר באיזה מטבע להציג סכומים באפליקציה',
+  displayCurrencyDescription:
+    'קביעת המטבע הראשי שבו יוצגו כל נתוני האפליקציה, התקציבים וההוצאות שלך.',
   hebrew: 'עברית',
   english: 'אנגלית',
   comingSoon: 'בקרוב',
@@ -149,7 +156,9 @@ const he: TranslationDict = {
 
   // Nav / tabs
   tabDashboard: 'בית',
-  tabAnalytics: 'תובנות וסיכומים נוספים',
+  tabAnalytics: 'גרפים וניתוח נתונים',
+  tabAnalyticsDesc:
+    'הצגה ויזואלית של התפלגות ההוצאות, מגמות תקציב חודשיות וסטטיסטיקות מתקדמות.',
   tabSubbudgets: 'הוספת וניהול תתי תקציבים',
   tabExpenses: 'היסטוריית הוצאות',
   closeMenu: 'סגור תפריט',
@@ -210,7 +219,7 @@ const he: TranslationDict = {
   nextMonth: 'חודש הבא',
 
   // Charts / analytics
-  analyticsTitle: 'תובנות וסיכומים נוספים',
+  analyticsTitle: 'גרפים וניתוח נתונים',
   chartCategorySplit: 'פילוג הוצאות לפי קטגוריות',
   chartDailySplit: 'פילוג הוצאות לפי ימים',
   chartSpendingOverTime: 'הוצאות לאורך זמן',
@@ -335,8 +344,14 @@ const en: TranslationDict = {
   settingsSectionCurrenciesDesc: 'Display currency, exchange rate, and commission settings',
   settingsSectionExchangeRates: 'Currencies & exchange rates',
   settingsCurrencySubExchange: 'Exchange rate',
+  settingsCurrencySubExchangeDesc:
+    'Check rates and use a quick conversion calculator that reflects current rates, including your configured fees and manual rates.',
   settingsCurrencySubManualRate: 'Manual exchange rate',
+  settingsCurrencySubManualRateDesc:
+    'Set custom rates that override the official rate and automatically apply to the conversion calculator and budget.',
   settingsCurrencySubCommissions: 'Commission management',
+  settingsCurrencySubCommissionsDesc:
+    'Set your card or bank fee percentages, which are automatically added to currency conversion calculations across the app.',
   settingsSectionGeneral: 'General settings',
   settingsSectionGeneralDesc: 'Language and translation behavior',
   settingsPageSubtitle: 'Customize language, translation, and display currency',
@@ -350,7 +365,8 @@ const en: TranslationDict = {
   languageDescription: 'Choose your app language',
   keepOriginalValuesLabel: 'Keep values in their original form',
   displayCurrency: 'Display currency',
-  displayCurrencyDescription: 'Choose which currency amounts are shown in across the app',
+  displayCurrencyDescription:
+    'Set the primary currency used to display all app data, budgets, and expenses.',
   currencyLibraryTitle: 'Currency library',
   currencyLibrarySubtitle: 'Choose an additional display currency',
   currencyLibrarySubtitleExpense: 'Choose a currency for this expense',
@@ -448,7 +464,9 @@ const en: TranslationDict = {
   signInWith: 'Sign in with',
   authSwitchLanguage: 'Switch interface language',
   tabDashboard: 'Home',
-  tabAnalytics: 'Insights & additional summaries',
+  tabAnalytics: 'Charts & data analysis',
+  tabAnalyticsDesc:
+    'Visual breakdown of expenses, monthly budget trends, and advanced statistics.',
   tabSubbudgets: 'Add & manage sub-budgets',
   tabExpenses: 'Expense history',
   closeMenu: 'Close menu',
@@ -503,7 +521,7 @@ const en: TranslationDict = {
   backToCurrentMonth: 'Back to current month',
   prevMonth: 'Previous month',
   nextMonth: 'Next month',
-  analyticsTitle: 'Insights & additional summaries',
+  analyticsTitle: 'Charts & data analysis',
   chartCategorySplit: 'Expenses by category',
   chartDailySplit: 'Expenses by day',
   chartSpendingOverTime: 'Spending over time',

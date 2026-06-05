@@ -3,6 +3,7 @@ import { ICON_OPTIONS, resolveIcon, DEFAULT_CATEGORY_COLOR } from '../categories
 import CategoryColorPicker from './CategoryColorPicker';
 import CategoryColorChip from './CategoryColorChip';
 import { useLanguage } from '../LanguageContext';
+import { primaryActionButtonClass, primaryActionSelectedChipClass } from '../styles/actionButtonStyles';
 
 interface CreateCategoryFormProps {
   name: string;
@@ -67,14 +68,14 @@ export default function CreateCategoryForm({
                 aria-pressed={selected}
                 className={`relative w-11 h-11 rounded-xl flex items-center justify-center transition-all active:scale-95 ${
                   selected
-                    ? 'bg-emerald-500 text-white ring-2 ring-emerald-400 ring-offset-2 ring-offset-neutral-900'
-                    : 'bg-neutral-900 text-neutral-400 border border-neutral-700 hover:border-emerald-500/60 hover:text-emerald-400'
+                    ? `${primaryActionSelectedChipClass} ring-2 ring-indigo-400 ring-offset-2 ring-offset-neutral-900`
+                    : 'bg-neutral-900 text-neutral-400 border border-neutral-700 hover:border-indigo-700/50 hover:text-indigo-300'
                 }`}
               >
                 <IconComp className="w-5 h-5" />
                 {selected && (
                   <span className="absolute -top-1 -end-1 w-4 h-4 rounded-full bg-white flex items-center justify-center shadow">
-                    <Check className="w-2.5 h-2.5 text-emerald-600" strokeWidth={3} />
+                    <Check className="w-2.5 h-2.5 text-indigo-600" strokeWidth={3} />
                   </span>
                 )}
               </button>
@@ -96,7 +97,7 @@ export default function CreateCategoryForm({
         <button
           type="button"
           onClick={onSubmit}
-          className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-4 py-3 rounded-xl text-sm font-semibold hover:from-emerald-600 hover:to-teal-700 transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
+          className={`flex-1 px-4 py-3 text-sm flex items-center justify-center gap-2 ${primaryActionButtonClass}`}
         >
           <Plus className="w-4 h-4" />
           {tr('addCategory')}

@@ -1,5 +1,6 @@
 import { X } from 'lucide-react';
 import { useLanguage } from '../LanguageContext';
+import { primaryActionButtonClass, utilityNavButtonClass } from '../styles/actionButtonStyles';
 
 interface CommissionSaveModalProps {
   open: boolean;
@@ -68,14 +69,14 @@ export default function CommissionSaveModal({
           <button
             type="button"
             onClick={onClose}
-            className="min-h-[2.75rem] flex-1 rounded-xl border border-neutral-600 bg-neutral-900 px-3.5 text-sm font-medium text-neutral-200 transition-colors hover:bg-neutral-800"
+            className={`min-h-[2.75rem] flex-1 px-3.5 text-sm ${utilityNavButtonClass}`}
           >
             {tr('cancel')}
           </button>
           <button
             type="button"
             onClick={onSave24h}
-            className="min-h-[2.75rem] flex-1 rounded-xl border border-sky-500/40 bg-sky-500/15 px-3.5 text-sm font-medium text-sky-200 transition-colors hover:bg-sky-500/25"
+            className={`min-h-[2.75rem] flex-1 px-3.5 text-sm ${utilityNavButtonClass}`}
           >
             {tr('exchangeRateSave24h')}
           </button>
@@ -83,7 +84,7 @@ export default function CommissionSaveModal({
             type="button"
             disabled={savingForever}
             onClick={onSaveForever}
-            className="min-h-[2.75rem] flex-1 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-3.5 text-sm font-medium text-emerald-200 transition-colors hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-60"
+            className={`min-h-[2.75rem] flex-1 px-3.5 text-sm disabled:cursor-not-allowed disabled:opacity-60 ${primaryActionButtonClass}`}
           >
             {tr('exchangeRateSaveForever')}
           </button>

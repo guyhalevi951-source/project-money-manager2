@@ -24,6 +24,7 @@ import {
 import CurrencyLibraryModal from './CurrencyLibraryModal';
 import CurrencyFlag from './CurrencyFlag';
 import CurrencyDetectionBanner from './CurrencyDetectionBanner';
+import { currencyUtilityButtonLgClass, primaryActionSelectedChipClass } from '../styles/actionButtonStyles';
 import {
   detectLocalCurrency,
   isDetectedCurrencyAccepted,
@@ -383,7 +384,6 @@ export default function ExpenseAmountField({
                 {selectableCurrencies.map((code) => {
                   const meta = getCurrencyMeta(code);
                   const selected = inputCurrency === code;
-                  const isTemp = isTemporaryCurrency && code === inputCurrency;
 
                   return (
                     <button
@@ -394,9 +394,7 @@ export default function ExpenseAmountField({
                       onClick={() => handleSelectCurrency(code)}
                       className={`min-w-[3.25rem] flex-1 basis-[calc(25%-0.5rem)] py-2 rounded-lg text-xs font-semibold tabular-nums transition-all active:scale-[0.98] flex flex-col items-center justify-center ${
                         selected
-                          ? isTemp
-                            ? 'bg-violet-500 text-white shadow-md shadow-violet-500/30 ring-1 ring-violet-400/40'
-                            : 'bg-emerald-500 text-white shadow-md shadow-emerald-500/30'
+                          ? primaryActionSelectedChipClass
                           : 'text-neutral-300 hover:text-white hover:bg-neutral-800/80'
                       }`}
                     >
@@ -444,7 +442,7 @@ export default function ExpenseAmountField({
             <button
               type="button"
               onClick={onOpenExchangeRatesSettings}
-              className="inline-flex h-12 shrink-0 items-center justify-center rounded-xl bg-indigo-600 px-3 text-center text-sm font-medium text-white transition-all hover:bg-indigo-700 active:scale-[0.98] sm:px-4"
+              className={`h-12 ${currencyUtilityButtonLgClass}`}
               title={tr('settingsCurrencySubExchange')}
               aria-label={tr('settingsCurrencySubExchange')}
             >

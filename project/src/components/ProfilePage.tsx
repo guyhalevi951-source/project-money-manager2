@@ -4,6 +4,7 @@ import type { User as FirebaseUser } from 'firebase/auth';
 import { useLanguage } from '../LanguageContext';
 import { formatTranslation } from '../translations';
 import { DEFAULT_GUEST_AVATAR_URL, sanitizeAvatarUrl } from '../services/avatarService';
+import { primaryActionButtonClass, utilityNavIconButtonClass } from '../styles/actionButtonStyles';
 
 interface ProfilePageProps {
   user: FirebaseUser;
@@ -114,7 +115,7 @@ export default function ProfilePage({
             type="button"
             onClick={handleSave}
             disabled={saving}
-            className="inline-flex min-h-[2.75rem] min-w-[10rem] items-center justify-center rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 px-6 py-2.5 text-base font-semibold text-white shadow-lg shadow-emerald-500/20 transition-all hover:from-emerald-600 hover:to-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
+            className={`inline-flex min-h-[2.75rem] min-w-[10rem] items-center justify-center px-6 py-2.5 text-base disabled:cursor-not-allowed disabled:opacity-60 ${primaryActionButtonClass}`}
           >
             {saving ? tr('profileSaving') : tr('profileSave')}
           </button>
@@ -129,7 +130,7 @@ export default function ProfilePage({
               <button
                 type="button"
                 onClick={() => setPickerOpen(false)}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-neutral-700 bg-neutral-800 text-neutral-200 transition-colors hover:bg-neutral-700"
+                className={`h-9 w-9 ${utilityNavIconButtonClass}`}
                 aria-label={tr('profileCloseAvatarPickerAria')}
               >
                 <X className="h-4 w-4" />
@@ -143,8 +144,8 @@ export default function ProfilePage({
                   onClick={() => setSelectedAvatar(avatarUrl)}
                   className={`relative rounded-xl border p-1 transition-all ${
                     selectedAvatar === avatarUrl
-                      ? 'border-emerald-500 bg-emerald-500/10'
-                      : 'border-neutral-700 bg-neutral-800 hover:border-neutral-500'
+                      ? 'border-indigo-500 bg-indigo-500/10 ring-1 ring-indigo-400/40'
+                      : 'border-neutral-700 bg-neutral-800 hover:border-indigo-700/50'
                   }`}
                   title={
                     index === 0 && googleAvatarUrl

@@ -13,6 +13,7 @@ import {
 } from '../firebase';
 import { mapAuthError, validateAuthForm } from '../authErrors';
 import { useLanguage } from '../LanguageContext';
+import { primaryActionActivePillClass, primaryActionButtonClass } from '../styles/actionButtonStyles';
 import type { Lang } from '../translations';
 import {
   clearAuthPageLang,
@@ -284,7 +285,7 @@ export default function AuthPage() {
                 {mode === m && (
                   <motion.span
                     layoutId="auth-mode-pill"
-                    className="absolute inset-0 bg-gradient-to-r from-emerald-400 to-teal-500 rounded-xl shadow-md shadow-emerald-500/30"
+                    className={`absolute inset-0 ${primaryActionActivePillClass}`}
                     transition={{ type: 'spring', stiffness: 400, damping: 32 }}
                   />
                 )}
@@ -329,7 +330,7 @@ export default function AuthPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold shadow-lg shadow-emerald-500/25 hover:from-emerald-600 hover:to-teal-700 transition-all active:scale-[0.98] disabled:opacity-60 flex items-center justify-center gap-2"
+                className={`w-full py-3.5 disabled:opacity-60 flex items-center justify-center gap-2 ${primaryActionButtonClass}`}
               >
                 {loadingAction === 'email' ? (
                   <>

@@ -8,6 +8,7 @@ import {
   type CurrencyCode,
 } from '../constants/currencies';
 import CurrencyFlag from './CurrencyFlag';
+import { primaryActionButtonBorderedClass, utilityNavButtonLgClass } from '../styles/actionButtonStyles';
 
 export type CurrencyLibraryMode = 'display' | 'expense';
 
@@ -233,14 +234,14 @@ export default function CurrencyLibraryModal({
                   <button
                     type="button"
                     onClick={handleUseTemporarily}
-                    className="px-3 py-3 rounded-xl text-sm font-medium text-gray-200 border border-gray-600/80 bg-gray-950/50 hover:bg-gray-800/80 hover:text-white transition-all active:scale-[0.98]"
+                    className={`px-3 py-3 text-sm ${utilityNavButtonLgClass}`}
                   >
                     {mode === 'expense' ? tr('currencyUseForExpense') : tr('currencyUseTemporarily')}
                   </button>
                   <button
                     type="button"
                     onClick={handleAddToInterface}
-                    className="px-3 py-3 rounded-xl text-sm font-semibold text-white border border-emerald-400/50 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 shadow-md shadow-emerald-500/20 transition-all active:scale-[0.98]"
+                    className={`px-3 py-3 text-sm ${primaryActionButtonBorderedClass}`}
                   >
                     {tr('currencyAddToInterface')}
                   </button>

@@ -63,6 +63,18 @@ import {
 } from './services/currencyCommissionService';
 import { convertExpenseAmountToIls } from './services/expenseConversionService';
 import {
+  currencyUtilityButtonClass,
+  primaryActionAccentIconClass,
+  primaryActionActivePillClass,
+  primaryActionButtonClass,
+  primaryActionDisabled,
+  utilityNavActiveTabClass,
+  utilityNavButtonLgClass,
+  utilityNavIconBadgeClass,
+  utilityNavMenuToggleClass,
+  utilityNavShortcutClass,
+} from './styles/actionButtonStyles';
+import {
   clearAllManualExchangeOverridesLocal,
   clearCloudManualExchangeOverrides,
   listActiveManualExchangeOverrides,
@@ -478,7 +490,7 @@ function CollapsibleNavMenu({
           variant === 'mobile' ? 'w-full px-4 py-3.5' : 'w-full px-3 py-2.5'
         } ${
           isActive
-            ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white border-emerald-400/40 shadow-lg shadow-emerald-500/25'
+            ? utilityNavActiveTabClass
             : 'bg-slate-800/95 text-slate-200 border-slate-700/80 hover:border-slate-600 hover:bg-slate-700/90'
         } ${
           open
@@ -494,7 +506,7 @@ function CollapsibleNavMenu({
             variant === 'mobile' ? 'w-10 h-10' : 'w-9 h-9'
           } ${isActive ? 'bg-white/15' : 'bg-slate-900/80'}`}
         >
-          <Icon className={`${variant === 'mobile' ? 'w-5 h-5' : 'w-4 h-4'} ${isActive ? 'text-white' : 'text-emerald-400'}`} />
+          <Icon className={`${variant === 'mobile' ? 'w-5 h-5' : 'w-4 h-4'} ${isActive ? 'text-white' : 'text-indigo-400'}`} />
         </span>
         <span className={`flex-1 truncate ${dir === 'rtl' ? 'text-right' : 'text-left'}`}>{tabLabel(tab.id)}</span>
       </button>
@@ -511,8 +523,8 @@ function CollapsibleNavMenu({
           aria-label={open ? tr('closeMenu') : tr('tabDashboard')}
           aria-expanded={open}
           aria-haspopup="menu"
-          className={`inline-flex h-10 w-10 items-center justify-center rounded-full border bg-neutral-900/80 text-neutral-300 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 active:scale-95 ${
-            open ? 'border-emerald-500/50 text-neutral-100' : 'border-neutral-700 hover:bg-neutral-800 hover:text-neutral-100'
+          className={`h-10 w-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40 active:scale-95 ${utilityNavMenuToggleClass} ${
+            open ? 'text-white' : ''
           }`}
         >
           {open ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
@@ -560,14 +572,12 @@ function CollapsibleNavMenu({
           onClick={toggleOpen}
           aria-expanded={open}
           aria-haspopup="menu"
-          className={`flex items-center gap-2 px-3 py-2 rounded-2xl bg-slate-900 border text-sm font-medium transition-all duration-300 ease-in-out outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 ${
-            open
-              ? 'border-emerald-500/50 shadow-lg shadow-emerald-500/15'
-              : 'border-slate-700 hover:border-slate-600 hover:bg-slate-800/80'
+          className={`flex items-center gap-2 px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40 ${
+            open ? utilityNavActiveTabClass : utilityNavButtonLgClass
           }`}
         >
-          <span className="flex items-center justify-center w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600">
-            <ActiveIcon className="w-4 h-4 text-white" />
+          <span className={`w-8 h-8 ${utilityNavIconBadgeClass}`}>
+            <ActiveIcon className="w-4 h-4 text-indigo-200" />
           </span>
           <span className="text-slate-100">{tabLabel(active.id)}</span>
           <ChevronUp
@@ -1153,9 +1163,12 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
   return (
     <div className="max-w-2xl mx-auto">
       <div>
-        <div className="mb-4 flex items-center gap-2 text-neutral-100">
-          <PieChartIcon className="h-6 w-6 shrink-0 text-emerald-400" />
-          <h2 className="text-lg font-bold sm:text-xl">{tr('tabAnalytics')}</h2>
+        <div className="mb-4">
+          <div className="flex items-center gap-2 text-neutral-100">
+            <PieChartIcon className="h-6 w-6 shrink-0 text-emerald-400" />
+            <h2 className="text-lg font-bold sm:text-xl">{tr('tabAnalytics')}</h2>
+          </div>
+          <p className="mt-1 text-xs text-gray-400">{tr('tabAnalyticsDesc')}</p>
         </div>
 
         <div className="flex p-1 bg-neutral-900 border border-neutral-800 rounded-2xl">
@@ -1572,9 +1585,7 @@ interface Envelope {
   isGeneral: boolean;
 }
 
-const dashboardShortcutButtonClass =
-  'max-w-full rounded-xl border border-neutral-700 bg-neutral-800 px-2.5 py-2 text-xs font-medium leading-snug text-neutral-200 shadow-sm transition-all hover:border-neutral-600 hover:bg-neutral-700 active:scale-[0.98] md:px-3 md:text-sm';
-
+/** Currency settings shortcuts — unified purple branding. */
 interface SpendingDonutProps {
   dayExpenses: Expense[];
   categories: Category[];
@@ -1604,18 +1615,18 @@ function SpendingDonut({
   const { tr } = useLanguage();
   const dateInputRef = useRef<HTMLInputElement | null>(null);
   const shortcutButtons = (
-    <div className="ms-auto flex max-w-full flex-row flex-wrap items-center justify-end gap-2 md:gap-3">
+    <div className="ms-auto flex max-w-full flex-row flex-nowrap items-center justify-end gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch] no-scrollbar md:gap-3">
       <button
         type="button"
         onClick={onNavigateToAnalytics}
-        className={dashboardShortcutButtonClass}
+        className={utilityNavShortcutClass}
       >
         {tr('tabAnalytics')}
       </button>
       <button
         type="button"
         onClick={onNavigateToExpenses}
-        className={dashboardShortcutButtonClass}
+        className={utilityNavShortcutClass}
       >
         {tr('tabExpenses')}
       </button>
@@ -2341,7 +2352,7 @@ function SubBudgetTracker({
                 <button
                   type="button"
                   onClick={handleAdd}
-                  className="shrink-0 bg-gradient-to-r from-violet-500 to-indigo-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:from-violet-600 hover:to-indigo-700 transition-all flex items-center justify-center gap-1 active:scale-[0.98]"
+                  className={`shrink-0 px-4 py-2.5 rounded-lg text-sm flex items-center justify-center gap-1 ${primaryActionButtonClass}`}
                 >
                   <Plus className="w-4 h-4" />
                   {tr('add')}
@@ -2463,18 +2474,18 @@ function BudgetChangeModal({
       icon: Check,
       title: tr('budgetOptionKeepTitle'),
       desc: tr('budgetOptionKeepDesc'),
-      accent: 'hover:border-emerald-500/60 hover:bg-emerald-500/5',
-      ring: 'focus-visible:ring-emerald-500/40',
-      iconBg: 'bg-emerald-500/15 text-emerald-400',
+      accent: 'hover:border-indigo-500/60 hover:bg-indigo-950/30',
+      ring: 'focus-visible:ring-indigo-500/40',
+      iconBg: 'bg-indigo-950/60 text-indigo-300 border border-indigo-900/50',
     },
     {
       mode: 'reset',
       icon: RotateCcw,
       title: tr('budgetOptionResetTitle'),
       desc: tr('budgetOptionResetDesc'),
-      accent: 'hover:border-amber-500/60 hover:bg-amber-500/5',
-      ring: 'focus-visible:ring-amber-500/40',
-      iconBg: 'bg-amber-500/15 text-amber-400',
+      accent: 'hover:border-indigo-400/60 hover:bg-indigo-950/30',
+      ring: 'focus-visible:ring-indigo-500/40',
+      iconBg: 'bg-indigo-950/60 text-indigo-300 border border-indigo-900/50',
     },
   ];
 
@@ -2503,7 +2514,7 @@ function BudgetChangeModal({
         <div className="sm:hidden mx-auto mb-4 h-1.5 w-12 rounded-full bg-neutral-700" />
 
         <div className="flex items-start gap-3 mb-1">
-          <div className="bg-gradient-to-br from-emerald-500 to-teal-600 p-2.5 rounded-xl shadow-lg shadow-emerald-500/20 shrink-0">
+          <div className={`${utilityNavIconBadgeClass} p-2.5 shrink-0`}>
             <Layers className="w-5 h-5 text-white" />
           </div>
           <div className="min-w-0">
@@ -2562,7 +2573,7 @@ function BudgetChangeModal({
         <button
           type="button"
           onClick={onClose}
-          className="mt-4 w-full py-3 rounded-xl text-sm font-medium text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 transition-all"
+          className={`mt-4 w-full py-3 text-sm ${utilityNavButtonLgClass}`}
         >
           {tr('cancel')}
         </button>
@@ -4140,7 +4151,7 @@ function App() {
                     <button
                       type="button"
                       onClick={handleSetBudget}
-                      className="flex h-10 min-w-[40px] basis-0 flex-1 shrink flex-col items-center justify-center gap-0.5 overflow-hidden rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 p-2 font-medium text-white text-center shadow-md transition-all duration-200 ease-in-out hover:from-emerald-600 hover:to-teal-700 hover:shadow-lg active:scale-[0.98] sm:h-12 sm:min-w-[88px]"
+                      className={`flex h-10 min-w-[40px] basis-0 flex-1 shrink flex-col items-center justify-center gap-0.5 overflow-hidden p-2 text-center sm:h-12 sm:min-w-[88px] ${primaryActionButtonClass}`}
                     >
                       {showBudgetSaved ? (
                         <>
@@ -4154,7 +4165,7 @@ function App() {
                     <button
                       type="button"
                       onClick={() => handleTabSelect('subbudgets')}
-                      className="flex h-10 min-w-[40px] basis-0 flex-1 shrink flex-col items-center justify-center gap-0.5 overflow-hidden rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 p-2 font-medium text-white text-center shadow-md transition-all duration-200 ease-in-out hover:from-emerald-600 hover:to-teal-700 hover:shadow-lg active:scale-[0.98] sm:h-12 sm:min-w-[88px]"
+                      className={`flex h-10 min-w-[40px] basis-0 flex-1 shrink flex-col items-center justify-center gap-0.5 overflow-hidden p-2 text-center sm:h-12 sm:min-w-[88px] ${utilityNavButtonLgClass}`}
                     >
                       {renderBudgetButtonText(subBudgetsButtonLabel)}
                     </button>
@@ -4180,7 +4191,7 @@ function App() {
                       <button
                         type="button"
                         onClick={openSettingsDisplayCurrency}
-                        className="inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-lg bg-indigo-600 px-3 py-2 text-center text-xs font-medium text-white transition-all hover:bg-indigo-700 active:scale-[0.98] sm:text-sm"
+                        className={currencyUtilityButtonClass}
                         title={tr('displayCurrency')}
                         aria-label={tr('displayCurrency')}
                       >
@@ -4189,7 +4200,7 @@ function App() {
                       <button
                         type="button"
                         onClick={openSettingsManualRate}
-                        className="inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-lg bg-indigo-600 px-3 py-2 text-center text-xs font-medium text-white transition-all hover:bg-indigo-700 active:scale-[0.98] sm:text-sm"
+                        className={currencyUtilityButtonClass}
                         title={tr('settingsCurrencySubManualRate')}
                         aria-label={tr('settingsCurrencySubManualRate')}
                       >
@@ -4198,7 +4209,7 @@ function App() {
                       <button
                         type="button"
                         onClick={openSettingsCommissions}
-                        className="inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-lg bg-indigo-600 px-3 py-2 text-center text-xs font-medium text-white transition-all hover:bg-indigo-700 active:scale-[0.98] sm:text-sm"
+                        className={currencyUtilityButtonClass}
                         title={tr('settingsCurrencySubCommissions')}
                         aria-label={tr('settingsCurrencySubCommissions')}
                       >
@@ -4213,7 +4224,7 @@ function App() {
         {/* Add Expense Form */}
         <div className="relative isolate z-10 bg-neutral-900 rounded-2xl shadow-lg shadow-black/20 border border-neutral-800 p-4 sm:p-6 mb-6 sm:mb-8">
           <h2 className="text-base sm:text-lg font-semibold text-neutral-100 mb-4 sm:mb-6 flex items-center gap-2">
-            <Plus className="w-5 h-5 text-emerald-400" />
+            <Plus className={`w-5 h-5 ${primaryActionAccentIconClass}`} />
             {tr('addExpenseTitle')}
           </h2>
 
@@ -4282,7 +4293,7 @@ function App() {
                 <button
                   type="submit"
                   disabled={expenseSubmitBlocked}
-                  className="h-12 w-full min-w-[10.5rem] shrink-0 bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-6 rounded-xl font-medium hover:from-emerald-600 hover:to-teal-700 transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:from-emerald-500 disabled:hover:to-teal-600"
+                  className={`h-12 w-full min-w-[10.5rem] shrink-0 px-6 flex items-center justify-center gap-2 ${primaryActionButtonClass} ${primaryActionDisabled}`}
                 >
                   <Plus className="w-5 h-5" />
                   {tr('addExpense')}
@@ -4379,7 +4390,7 @@ function App() {
                   >
                     {isActive && (
                       <span
-                        className="absolute inset-0 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 shadow-md shadow-emerald-500/25"
+                        className={`absolute inset-0 rounded-xl ${primaryActionActivePillClass}`}
                         aria-hidden
                       />
                     )}
@@ -4475,7 +4486,7 @@ function App() {
                         <div className="shrink-0 flex items-center gap-1">
                           <button
                             onClick={() => handleEditExpenseStart(expense)}
-                            className="text-neutral-500 hover:text-emerald-300 active:bg-emerald-500/10 p-2.5 rounded-lg transition-all"
+                            className="text-neutral-500 hover:text-indigo-300 active:bg-indigo-500/10 p-2.5 rounded-lg transition-all"
                             title={tr('edit')}
                             aria-label={tr('editExpense')}
                           >
@@ -4544,7 +4555,7 @@ function App() {
                             <div className="flex items-center justify-center gap-1">
                               <button
                                 onClick={() => handleEditExpenseStart(expense)}
-                                className="text-neutral-500 hover:text-emerald-300 hover:bg-emerald-500/10 p-2 rounded-lg transition-all"
+                                className="text-neutral-500 hover:text-indigo-300 hover:bg-indigo-500/10 p-2 rounded-lg transition-all"
                                 title={tr('edit')}
                                 aria-label={tr('editExpense')}
                               >
@@ -4718,7 +4729,7 @@ function App() {
                     !editExpenseDraft.category.trim() ||
                     !editExpenseDraft.date.trim()
                   }
-                  className="rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:from-emerald-600 hover:to-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  className={`px-4 py-2.5 text-sm ${primaryActionButtonClass} ${primaryActionDisabled}`}
                 >
                   {tr('saveChanges')}
                 </button>

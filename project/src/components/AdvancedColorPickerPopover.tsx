@@ -4,6 +4,7 @@ import { Check } from 'lucide-react';
 import { clamp01, hexToHsv, hsvToHex } from '../utils/colorUtils';
 import { isCustomHexColor, normalizeCustomHex } from '../categories';
 import { useLanguage } from '../LanguageContext';
+import { primaryActionButtonBorderedClass, utilityNavButtonClass } from '../styles/actionButtonStyles';
 
 interface AdvancedColorPickerPopoverProps {
   open: boolean;
@@ -239,14 +240,14 @@ export default function AdvancedColorPickerPopover({
               <button
                 type="button"
                 onClick={handleUse}
-                className="px-2 py-2.5 rounded-xl text-xs sm:text-sm font-semibold text-white border border-emerald-500/40 bg-emerald-500/20 hover:bg-emerald-500/35 transition-all active:scale-[0.98]"
+                className={`px-2 py-2.5 text-xs sm:text-sm ${utilityNavButtonClass}`}
               >
                 {tr('colorUse')}
               </button>
               <button
                 type="button"
                 onClick={handleSave}
-                className="px-2 py-2.5 rounded-xl text-xs sm:text-sm font-semibold text-white border border-emerald-400/50 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 shadow-md shadow-emerald-500/20 transition-all active:scale-[0.98]"
+                className={`px-2 py-2.5 text-xs sm:text-sm ${primaryActionButtonBorderedClass}`}
               >
                 {tr('colorSave')}
               </button>

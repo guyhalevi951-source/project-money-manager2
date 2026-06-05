@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
 import { MapPin } from 'lucide-react';
 import { useLanguage } from '../LanguageContext';
+import { primaryActionButtonSemiboldClass } from '../styles/actionButtonStyles';
 import { getCurrencyMeta, type CurrencyCode } from '../constants/currencies';
 import CurrencyFlag from './CurrencyFlag';
 
@@ -46,7 +47,7 @@ export default function CurrencyDetectionBanner({
         <button
           type="button"
           onClick={onConfirmSwitch}
-          className="px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 shadow-md shadow-emerald-500/20 transition-all active:scale-[0.98]"
+          className={`px-3.5 py-2 rounded-lg text-xs sm:text-sm ${primaryActionButtonSemiboldClass}`}
         >
           {tr('currencyDetectionConfirm')}
         </button>
