@@ -373,6 +373,7 @@ export const THEME_CATEGORY_RULES: Record<ThemeCategoryId, ThemeCategoryRule> = 
       'h1–h6, p, span, labels, table cells — --dynamic-text-color in custom override mode.',
     preferenceKey: 'textColor',
     cssVariables: [
+      '--color-category-5', '--color-category-5-secondary', '--color-category-5-muted',
       '--dynamic-text-color', '--typography-primary', '--typography-secondary', '--typography-muted',
       '--page-text', '--page-text-muted', '--page-text-subtle',
     ],

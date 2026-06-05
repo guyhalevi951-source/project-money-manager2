@@ -105,6 +105,7 @@ import {
   typographyLabelClass,
   typographyMutedClass,
   typographyTitleClass,
+  themeTextMutedClass,
   APP_THEME_SCOPE,
   themeAntiClipVisibleClass,
   themeScrollRoutePageClass,
@@ -3977,15 +3978,17 @@ function App() {
             >
               <img
                 src={appLogo}
-                alt={tr('appName')}
-                className="h-11 w-11 shrink-0 object-contain [image-rendering:crisp-edges]"
+                alt=""
+                aria-hidden
+                data-brand-logo-static
+                className="brand-logo-static h-11 w-11 shrink-0 object-contain [image-rendering:crisp-edges]"
                 style={{ imageRendering: '-webkit-optimize-contrast' } as React.CSSProperties}
                 decoding="async"
                 fetchPriority="high"
               />
               <div className="min-w-0">
                 <h1 className={`truncate text-lg font-bold sm:text-2xl ${typographyTitleClass}`}>{tr('appName')}</h1>
-                <p className="hidden truncate text-xs text-neutral-400 sm:block">{tr('appTagline')}</p>
+                <p className={`hidden truncate text-xs sm:block ${themeTextMutedClass}`}>{tr('appTagline')}</p>
               </div>
             </button>
 

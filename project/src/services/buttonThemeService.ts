@@ -495,23 +495,10 @@ export const GUEST_TEXT_THEME_LS_KEY = 'guest_text_theme';
 
 export type TypographyMode = 'default' | 'preset' | 'custom';
 
-const TEXT_COLOR_CSS_VARS = [
-  '--dynamic-text-color',
-  '--typography-primary',
-  '--typography-secondary',
-  '--typography-muted',
-  '--page-text',
-  '--page-text-muted',
-  '--page-text-subtle',
-  '--surface-input-text',
-  '--surface-input-placeholder',
-  '--btn-primary-fg',
-  '--btn-currency-fg',
-  '--btn-nav-text',
-  '--btn-nav-text-hover',
-  '--btn-filter-text',
-  '--btn-filter-text-hover',
-] as const;
+/** Canonical Category 5 master variable — all platform text + logo read from this. */
+export const CATEGORY_5_COLOR_VAR = '--color-category-5' as const;
+export const CATEGORY_5_SECONDARY_VAR = '--color-category-5-secondary' as const;
+export const CATEGORY_5_MUTED_VAR = '--color-category-5-muted' as const;
 
 export function isTypographyCustomOverride(textColor: string): boolean {
   return isCustomColorChoice(textColor);
@@ -527,16 +514,30 @@ export function resolveTypographyMode(textColor: string): TypographyMode {
   return 'preset';
 }
 
-function setTextColorCssVars(root: HTMLElement, color: string): void {
-  for (const cssVar of TEXT_COLOR_CSS_VARS) {
-    root.style.setProperty(cssVar, color);
-  }
-}
-
-function clearTextColorCssVars(root: HTMLElement): void {
-  for (const cssVar of TEXT_COLOR_CSS_VARS) {
-    root.style.removeProperty(cssVar);
-  }
+/**
+ * Sync Category 5 foreground aliases — glyphs, placeholders, nav/filter/button labels.
+ * Never writes Cat 4 background vars (--surface-input-bg, --btn-*-bg, card surfaces).
+ */
+function syncCategory5TextVars(root: HTMLElement, palette: TextTypographyPalette): void {
+  const { primary, secondary, muted } = palette;
+  root.style.setProperty(CATEGORY_5_COLOR_VAR, primary);
+  root.style.setProperty(CATEGORY_5_SECONDARY_VAR, secondary);
+  root.style.setProperty(CATEGORY_5_MUTED_VAR, muted);
+  root.style.setProperty('--dynamic-text-color', primary);
+  root.style.setProperty('--typography-primary', primary);
+  root.style.setProperty('--typography-secondary', secondary);
+  root.style.setProperty('--typography-muted', muted);
+  root.style.setProperty('--page-text', primary);
+  root.style.setProperty('--page-text-muted', secondary);
+  root.style.setProperty('--page-text-subtle', muted);
+  root.style.setProperty('--surface-input-text', primary);
+  root.style.setProperty('--surface-input-placeholder', muted);
+  root.style.setProperty('--btn-primary-fg', primary);
+  root.style.setProperty('--btn-currency-fg', primary);
+  root.style.setProperty('--btn-nav-text', secondary);
+  root.style.setProperty('--btn-nav-text-hover', primary);
+  root.style.setProperty('--btn-filter-text', muted);
+  root.style.setProperty('--btn-filter-text-hover', secondary);
 }
 
 export const DEFAULT_BUTTON_THEME: ButtonGroupTheme = {
@@ -760,13 +761,9 @@ function deriveSubCardBorderColor(bg: string): string {
 
 export function resolveSubCardColors(prefs: ThemePreferences): { bg: string; border: string } {
   const choice = prefs.subCardColor;
-  const pagePalette = resolvePagePalette(prefs);
 
   if (!isCustomColorChoice(choice) && choice === DEFAULT_SUB_CARD_COLOR) {
-    if (prefs.pageMode === 'dark') {
-      return { bg: MONO_DEPTH_LEVEL_2, border: MONO_DEPTH_BORDER_DARK };
-    }
-    return { bg: pagePalette.surfaceMuted, border: pagePalette.border };
+    return { bg: MONO_DEPTH_LEVEL_2, border: MONO_DEPTH_BORDER_DARK };
   }
 
   const resolved = resolveButtonColors('subCard', choice);
@@ -781,13 +778,9 @@ export function resolveMainCardSurfaceColors(
   prefs: ThemePreferences,
 ): { bg: string; border: string } {
   const choice = prefs.mainCardSurfaceColor;
-  const pagePalette = resolvePagePalette(prefs);
 
   if (!isCustomColorChoice(choice) && choice === DEFAULT_MAIN_CARD_SURFACE_COLOR) {
-    if (prefs.pageMode === 'dark') {
-      return { bg: MONO_DEPTH_LEVEL_1, border: MONO_DEPTH_BORDER_DARK };
-    }
-    return { bg: pagePalette.surface, border: pagePalette.border };
+    return { bg: MONO_DEPTH_LEVEL_1, border: MONO_DEPTH_BORDER_DARK };
   }
 
   const resolved = resolveButtonColors('mainCard', choice);
@@ -885,6 +878,7 @@ export function getButtonChoiceLabel(
 
 // ─── CSS variable application ─────────────────────────────────────────────────
 
+/** Cat 0 only — page canvas / chrome vars. Does not touch Cat 4–7 structural tokens. */
 function applyPagePaletteCSS(palette: PagePalette): void {
   const root = document.documentElement;
   root.style.setProperty('--page-bg', palette.bg);
@@ -897,10 +891,30 @@ function applyPagePaletteCSS(palette: PagePalette): void {
   root.style.setProperty('--page-input-bg', palette.inputBg);
   root.style.setProperty('--page-input-border', palette.inputBorder);
   root.dataset.pageTheme = relativeLuminance(palette.bg) > 0.45 ? 'light' : 'dark';
-  root.style.setProperty('--theme-enclosure-border', resolveThinEnclosureBorder(palette.surface));
 
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute('content', palette.bg);
+}
+
+/** Safe isolated page-mode apply — updates Cat 0 CSS vars only. */
+export function applyPageCanvasCSS(prefs: ThemePreferences): void {
+  applyPagePaletteCSS(resolvePagePalette(prefs));
+}
+
+/**
+ * Patch Cat 0 keys only — preserves Category 4–7 and button group preferences in state.
+ * Use for light/dark/custom page mode toggles (Firebase + localStorage keep other keys intact).
+ */
+export function patchThemePreferencesPageMode(
+  prefs: ThemePreferences,
+  patch: { pageMode: PageThemeMode; pageCustomHex?: string },
+): ThemePreferences {
+  return {
+    ...prefs,
+    buttons: { ...prefs.buttons },
+    pageMode: patch.pageMode,
+    ...(patch.pageCustomHex !== undefined ? { pageCustomHex: patch.pageCustomHex } : {}),
+  };
 }
 
 function applyButtonGroupCSS(prefs: ThemePreferences): void {
@@ -952,7 +966,7 @@ function resolveCategory4InputSurface(
     !isCustomColorChoice(prefs.filterGroupColor) &&
     prefs.filterGroupColor === DEFAULT_FILTER_GROUP_COLOR;
 
-  if (isDefaultFilter && prefs.pageMode === 'dark') {
+  if (isDefaultFilter) {
     return { bg: MONO_DEPTH_CAT4_INPUT_BG, border: MONO_DEPTH_CAT4_INPUT_BORDER };
   }
 
@@ -987,6 +1001,7 @@ function applySubCardCSS(prefs: ThemePreferences): void {
   root.style.setProperty('--color-sub-cards-divider', overlays.divider);
   root.style.setProperty('--color-sub-cards-stripe', overlays.stripe);
   root.style.setProperty('--color-sub-cards-hover', overlays.hover);
+  root.style.setProperty('--theme-enclosure-border', border);
   root.dataset.subCardMode =
     !isCustomColorChoice(prefs.subCardColor) && prefs.subCardColor === DEFAULT_SUB_CARD_COLOR
       ? 'default'
@@ -1015,31 +1030,18 @@ function applyTypographyCSS(prefs: ThemePreferences): void {
 
   if (mode === 'custom') {
     const hex = normalizeCustomHex(prefs.textColor);
-    setTextColorCssVars(root, hex);
+    syncCategory5TextVars(root, { primary: hex, secondary: hex, muted: hex });
     return;
   }
-
-  clearTextColorCssVars(root);
 
   const typography = resolveTypographyColors(
     mode === 'default' ? DEFAULT_TEXT_COLOR : prefs.textColor,
   );
-  root.style.setProperty('--typography-primary', typography.primary);
-  root.style.setProperty('--typography-secondary', typography.secondary);
-  root.style.setProperty('--typography-muted', typography.muted);
-
-  if (mode === 'preset') {
-    root.style.setProperty('--surface-input-text', typography.primary);
-    root.style.setProperty('--surface-input-placeholder', typography.muted);
-    root.style.setProperty('--btn-nav-text', typography.secondary);
-    root.style.setProperty('--btn-nav-text-hover', typography.primary);
-    root.style.setProperty('--btn-filter-text', typography.muted);
-    root.style.setProperty('--btn-filter-text-hover', typography.secondary);
-  }
+  syncCategory5TextVars(root, typography);
 }
 
 export function applyThemeCSS(prefs: ThemePreferences): void {
-  applyPagePaletteCSS(resolvePagePalette(prefs));
+  applyPageCanvasCSS(prefs);
   applyButtonGroupCSS(prefs);
   applyMainCardSurfaceCSS(prefs);
   applySubCardCSS(prefs);

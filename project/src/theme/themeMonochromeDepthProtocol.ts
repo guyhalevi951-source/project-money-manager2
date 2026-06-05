@@ -81,10 +81,9 @@ export interface MonochromeDepthHierarchy {
   inputBg: string;
 }
 
-/** True when the built-in premium monochrome ladder should apply. */
+/** True when the built-in premium monochrome ladder should apply (independent of page mode). */
 export function isMonochromeDepthSystemDefault(prefs: ThemePreferences): boolean {
   return (
-    prefs.pageMode === 'dark' &&
     prefs.mainCardSurfaceColor === 'default' &&
     prefs.subCardColor === 'default' &&
     prefs.filterGroupColor === 'charcoal'

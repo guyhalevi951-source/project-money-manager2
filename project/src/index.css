@@ -42,10 +42,13 @@
   --surface-panel-bg: #27272a;
   --surface-panel-border: rgba(255, 255, 255, 0.1);
   --surface-modal-bg: #27272a;
-  --typography-primary: #ffffff;
-  --typography-secondary: #ffffff;
-  --typography-muted: #ffffff;
-  --dynamic-text-color: #ffffff;
+  --color-category-5: #ffffff;
+  --color-category-5-secondary: #ffffff;
+  --color-category-5-muted: #ffffff;
+  --typography-primary: var(--color-category-5);
+  --typography-secondary: var(--color-category-5-secondary);
+  --typography-muted: var(--color-category-5-muted);
+  --dynamic-text-color: var(--color-category-5);
   --main-card-surface-bg: #0a0a0a;
   --main-card-surface-border: rgba(255, 255, 255, 0.1);
   --color-main-cards: var(--main-card-surface-bg);
@@ -109,7 +112,7 @@
 
 /* Future-Proof Component Mapping — auto-classify Cat 5 text & Cat 4 inputs in Settings/Profile */
 [data-settings-profile-scope] :where(h1, h2, h3, h4, h5, h6, p, label, li, td, th) {
-  color: var(--typography-primary);
+  color: var(--color-category-5);
 }
 
 [data-settings-profile-scope] input:not([type='button']):not([type='submit']):not([type='reset']):not([role='switch']),
@@ -136,7 +139,67 @@ html[data-page-theme='light'] {
 
 body {
   background-color: var(--page-bg);
-  color: var(--page-text);
+  color: var(--color-category-5);
+}
+
+/* ── Category 5 universal typography engine ─────────────────────────────────── */
+[data-theme-scope='app'],
+html {
+  color: var(--color-category-5);
+}
+
+[data-theme-scope='app'] :where(
+  h1, h2, h3, h4, h5, h6,
+  p, span, label, li, td, th, a,
+  button, input, textarea, select
+):not(.auth-signup-static):not(:where(.auth-signup-static *)) {
+  color: inherit;
+}
+
+[data-theme-scope='app'] input::placeholder,
+[data-theme-scope='app'] textarea::placeholder {
+  color: var(--color-category-5-muted);
+}
+
+/* Brand logo — isolated from Category 5; original asset colors only */
+img[data-brand-logo-static],
+.brand-logo-static {
+  color: unset;
+  filter: none;
+  -webkit-filter: none;
+}
+
+/* Neutralize hardcoded Tailwind text utilities that block Cat 5 reactivity */
+html
+  :where(
+    [class*='text-neutral-'],
+    [class*='text-gray-'],
+    [class*='text-zinc-'],
+    [class*='text-slate-']
+  ):not(.auth-signup-static):not(:where(.auth-signup-static *)) {
+  color: var(--color-category-5-muted) !important;
+}
+
+html
+  :where(
+    [class*='text-neutral-1'],
+    [class*='text-neutral-2'],
+    [class*='text-neutral-3'],
+    [class*='text-gray-1'],
+    [class*='text-gray-2'],
+    [class*='text-gray-3'],
+    [class*='text-slate-1'],
+    [class*='text-slate-2'],
+    [class*='text-slate-3'],
+    [class*='text-zinc-1'],
+    [class*='text-zinc-2'],
+    [class*='text-zinc-3']
+  ):not(.auth-signup-static):not(:where(.auth-signup-static *)) {
+  color: var(--color-category-5) !important;
+}
+
+html :where(.text-white):not(.auth-signup-static):not(:where(.auth-signup-static *)) {
+  color: var(--color-category-5) !important;
 }
 
 @layer base {

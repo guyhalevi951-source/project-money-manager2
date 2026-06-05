@@ -63,10 +63,6 @@
     r.setProperty('--page-input-bg', p.inputBg);
     r.setProperty('--page-input-border', p.inputBorder);
     document.documentElement.dataset.pageTheme = p.text === '#0F172A' ? 'light' : 'dark';
-    r.setProperty(
-      '--theme-enclosure-border',
-      hexLum(p.surface) > 0.45 ? 'rgba(0, 0, 0, 0.10)' : 'rgba(255, 255, 255, 0.10)',
-    );
     var meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute('content', p.bg);
   }
@@ -98,9 +94,13 @@
     r.setProperty('--surface-panel-bg', BTN.filter.bg);
     r.setProperty('--surface-panel-border', BTN.filter.border);
     r.setProperty('--surface-modal-bg', BTN.filter.bg);
+    r.setProperty('--color-category-5', BTN.typography.primary);
+    r.setProperty('--color-category-5-secondary', BTN.typography.secondary);
+    r.setProperty('--color-category-5-muted', BTN.typography.muted);
     r.setProperty('--typography-primary', BTN.typography.primary);
     r.setProperty('--typography-secondary', BTN.typography.secondary);
     r.setProperty('--typography-muted', BTN.typography.muted);
+    r.setProperty('--dynamic-text-color', BTN.typography.primary);
     r.setProperty('--main-card-surface-bg', MONO_DEPTH.level1);
     r.setProperty('--main-card-surface-border', MONO_DEPTH.border);
     r.setProperty('--color-main-cards', MONO_DEPTH.level1);
@@ -280,6 +280,9 @@
 
     if (textColor && textColor.charAt(0) === '#') {
       document.documentElement.dataset.typographyMode = 'custom';
+      document.documentElement.style.setProperty('--color-category-5', textColor);
+      document.documentElement.style.setProperty('--color-category-5-secondary', textColor);
+      document.documentElement.style.setProperty('--color-category-5-muted', textColor);
       var textVars = [
         '--dynamic-text-color',
         '--typography-primary',

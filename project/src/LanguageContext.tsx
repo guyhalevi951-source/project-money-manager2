@@ -30,9 +30,12 @@ import {
   appendSavedColor,
 } from './services/userFirebaseSync';
 import {
+  applyPageCanvasCSS,
   applyThemeCSS,
   DEFAULT_THEME_PREFERENCES,
+  patchThemePreferencesPageMode,
   saveThemePreferencesToStorage,
+  type PageThemeMode,
   type ThemePreferences,
 } from './services/buttonThemeService';
 import { EMPTY_USER_SETTINGS } from './services/userFirebaseSync';
@@ -69,6 +72,8 @@ interface LanguageContextValue {
   setSavedColors: (colors: string[]) => void;
   themePreferences: ThemePreferences;
   setThemePreferences: (prefs: ThemePreferences) => void;
+  /** Cat 0 isolated patch — light/dark/custom toggle without resetting Cat 4–7 keys. */
+  patchThemePageMode: (patch: { pageMode: PageThemeMode; pageCustomHex?: string }) => void;
   settingsPersistence: 'local' | 'cloud';
   setSettingsPersistence: (mode: 'local' | 'cloud') => void;
   applySettingsFromCloud: (settings: {
@@ -103,7 +108,9 @@ interface LanguageContextValue {
  * Settings/Profile: SETTINGS_PROFILE_SCOPE_ATTR + MONOCHROME_DEPTH_COMPONENT_MAP
  *
  * Dual persistence: Firebase (registered) / localStorage (guest) via settingsPersistenceEngine.
- * New UI: classifyThemeCategory(hint) → approved token → themeCategoryProps(id)
+ * Page mode isolation: patchThemePageMode / patchThemePreferencesPageMode update only
+ * pageMode + pageCustomHex — Category 4/6/7 keys are never reset on light/dark toggle.
+ * Category 5 universal text: --color-category-5 (applyTypographyCSS / index.css).
  */
 const LanguageContext = createContext<LanguageContextValue | null>(null);
 
@@ -195,6 +202,17 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     setThemePreferencesState(prefs);
     applyThemeCSS(prefs);
   }, []);
+
+  const patchThemePageMode = useCallback(
+    (patch: { pageMode: PageThemeMode; pageCustomHex?: string }) => {
+      setThemePreferencesState((prev) => {
+        const next = patchThemePreferencesPageMode(prev, patch);
+        applyPageCanvasCSS(next);
+        return next;
+      });
+    },
+    [],
+  );
 
   const applySettingsFromCloud = useCallback(
     (settings: {
@@ -453,6 +471,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       setSavedColors,
       themePreferences,
       setThemePreferences,
+      patchThemePageMode,
       settingsPersistence,
       setSettingsPersistence,
       applySettingsFromCloud,
@@ -478,6 +497,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       saveSavedColor,
       themePreferences,
       setThemePreferences,
+      patchThemePageMode,
       settingsPersistence,
       applySettingsFromCloud,
       formatMoney,

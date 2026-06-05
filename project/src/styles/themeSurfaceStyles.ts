@@ -225,11 +225,11 @@ export const subCardSmClass = [
 export const monochromeDepthIconBadgeClass = [
   'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border',
   depthInnerSurfaceColors,
-  'text-[var(--typography-primary)]',
+  'text-[var(--color-category-5)]',
 ].join(' ');
 
-/** Cat 5 — inline vector icon beside section titles (no arbitrary accent hues). */
-export const monochromeInlineIconClass = 'h-4 w-4 shrink-0 text-[var(--typography-primary)]';
+/** Cat 5 — inline vector icon beside section titles. */
+export const monochromeInlineIconClass = 'h-4 w-4 shrink-0 text-[var(--color-category-5)]';
 
 /** Cat 4 — toggle track (off) — sinks into Level 2/3 containers. */
 export const monochromeToggleTrackOffClass = [
@@ -273,7 +273,7 @@ export const monochromeAvatarPickerSelectedClass = [
 /** Persisted-state confirmation copy (Cat 5). */
 export const monochromeStatusSavedClass = [
   'flex items-center gap-1.5 text-sm',
-  'text-[var(--typography-primary)]',
+  'text-[var(--color-category-5)]',
 ].join(' ');
 
 /** Toast panel after theme reset — Level 3 capsule. */
@@ -282,7 +282,7 @@ export const monochromeToastPanelClass = [
   '-translate-x-1/2 rounded-xl border px-4 py-3 text-center text-sm font-medium',
   'shadow-xl shadow-black/40 backdrop-blur-sm',
   depthInnerSurfaceColors,
-  'text-[var(--typography-primary)]',
+  'text-[var(--color-category-5)]',
 ].join(' ');
 
 /** Level 3 — grid / pill cell (currency cards, action tiles) inside a sub-panel. */
@@ -388,23 +388,28 @@ export const themeCardMutedClass = [
   subCardSurfaceColors,
 ].join(' ');
 
-/** Group 5 — locked white typography on dark monochrome surfaces. */
-export const themeTextClass = 'text-[var(--page-text)] text-white';
+/** Category 5 — canonical dynamic typography variables (buttonThemeService.applyTypographyCSS). */
+export const CATEGORY_5_COLOR_VAR = '--color-category-5' as const;
+export const CATEGORY_5_SECONDARY_VAR = '--color-category-5-secondary' as const;
+export const CATEGORY_5_MUTED_VAR = '--color-category-5-muted' as const;
 
-export const themeTextMutedClass = 'text-[var(--page-text-muted)] text-white';
+/** Group 5 — primary foreground copy. */
+export const themeTextClass = 'text-[var(--color-category-5)]';
 
-export const themeTextSubtleClass = 'text-[var(--page-text-subtle)] text-white';
+export const themeTextMutedClass = 'text-[var(--color-category-5-secondary)]';
+
+export const themeTextSubtleClass = 'text-[var(--color-category-5-muted)]';
 
 /** Group 5 — primary titles & section headings. */
-export const typographyTitleClass = 'text-[var(--typography-primary)] text-white';
+export const typographyTitleClass = 'text-[var(--color-category-5)]';
 
 /** Group 5 — form labels, table cells, and body copy. */
-export const typographyLabelClass = 'text-[var(--typography-secondary)] text-white';
+export const typographyLabelClass = 'text-[var(--color-category-5-secondary)]';
 
-export const typographyBodyClass = 'text-[var(--typography-secondary)] text-white';
+export const typographyBodyClass = 'text-[var(--color-category-5-secondary)]';
 
 /** Group 5 — legends, hints, and de-emphasized copy. */
-export const typographyMutedClass = 'text-[var(--typography-muted)] text-white';
+export const typographyMutedClass = 'text-[var(--color-category-5-muted)]';
 
 const surfaceInputColors = [
   'bg-[var(--surface-input-bg)]',

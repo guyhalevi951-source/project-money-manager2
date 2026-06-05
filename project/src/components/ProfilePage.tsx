@@ -21,7 +21,6 @@ import {
   monochromeAvatarRingClass,
   monochromeDepthIconBadgeClass,
   monochromeModalScrimClass,
-  monochromeStatusSavedClass,
   monochromeToastPanelClass,
   SETTINGS_PROFILE_CURSOR_ENFORCEMENT,
   SETTINGS_PROFILE_SCOPE_ATTR,
@@ -61,6 +60,7 @@ import {
   getButtonChoiceLabel,
   getGroupColorChoice,
   PAGE_THEME_META,
+  patchThemePreferencesPageMode,
   themePreferencesEqual,
   type ButtonGroupKey,
   type PageThemeMode,
@@ -75,7 +75,7 @@ function createFreshDefaultTheme(): ThemePreferences {
   };
 }
 
-type ThemeSaveFeedback = 'idle' | 'saving' | 'saved' | 'reset';
+type ThemeResetFeedback = 'idle' | 'reset';
 
 interface ProfilePageProps {
   user: FirebaseUser;
@@ -170,11 +170,10 @@ export default function ProfilePage({
     ...themePreferences,
     buttons: { ...themePreferences.buttons },
   }));
-  const [themeSaveState, setThemeSaveState] = useState<ThemeSaveFeedback>('idle');
+  const [themeResetState, setThemeResetState] = useState<ThemeResetFeedback>('idle');
   const [isThemeMasterOpen, setIsThemeMasterOpen] = useState(false);
   const [openThemeSections, setOpenThemeSections] = useState<Set<ThemeAccordionSection>>(() => new Set());
-  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const themeSaveStateRef = useRef<ThemeSaveFeedback>('idle');
+  const resetToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const toggleThemeMaster = useCallback(() => {
     setIsThemeMasterOpen((prev) => !prev);
@@ -275,48 +274,22 @@ export default function ProfilePage({
   }, []);
 
   const handlePageModeChange = useCallback((mode: PageThemeMode) => {
-    setDraftTheme((prev) => ({ ...prev, pageMode: mode }));
+    setDraftTheme((prev) => patchThemePreferencesPageMode(prev, { pageMode: mode }));
   }, []);
 
   const handlePageCustomHexChange = useCallback((hex: string) => {
-    setDraftTheme((prev) => ({ ...prev, pageMode: 'custom', pageCustomHex: hex }));
+    setDraftTheme((prev) => patchThemePreferencesPageMode(prev, { pageMode: 'custom', pageCustomHex: hex }));
   }, []);
 
-  useEffect(() => {
-    themeSaveStateRef.current = themeSaveState;
-  }, [themeSaveState]);
+  const handleResetTheme = useCallback(() => {
+    const defaults = createFreshDefaultTheme();
+    setDraftTheme(defaults);
+    setThemePreferences(defaults);
 
-  const persistThemePreferences = useCallback(
-    (prefs: ThemePreferences, feedback: Exclude<ThemeSaveFeedback, 'idle' | 'saving'>) => {
-      if (themeSaveStateRef.current === 'saving') return;
-
-      const nextPrefs: ThemePreferences = {
-        ...prefs,
-        buttons: { ...prefs.buttons },
-      };
-
-      setThemeSaveState('saving');
-      setDraftTheme(nextPrefs);
-      setThemePreferences(nextPrefs);
-
-      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
-      savedTimerRef.current = setTimeout(() => {
-        setThemeSaveState(feedback);
-        savedTimerRef.current = setTimeout(() => setThemeSaveState('idle'), 2400);
-      }, 200);
-    },
-    [setThemePreferences],
-  );
-
-  const handleSaveTheme = () => {
-    persistThemePreferences(draftTheme, 'saved');
-  };
-
-  const handleResetTheme = () => {
-    persistThemePreferences(createFreshDefaultTheme(), 'reset');
-  };
-
-  const isDirty = !themePreferencesEqual(draftTheme, themePreferences);
+    if (resetToastTimerRef.current) clearTimeout(resetToastTimerRef.current);
+    setThemeResetState('reset');
+    resetToastTimerRef.current = setTimeout(() => setThemeResetState('idle'), 2400);
+  }, [setThemePreferences]);
 
   const pageModeLabel =
     draftTheme.pageMode === 'custom'
@@ -392,14 +365,11 @@ export default function ProfilePage({
             <button
               type="button"
               onClick={handleResetTheme}
-              disabled={themeSaveState === 'saving'}
               title={tr('profileColorThemeReset')}
-              className={`h-8 w-8 shrink-0 disabled:cursor-not-allowed disabled:opacity-50 ${utilityNavIconButtonClass}`}
+              className={`h-8 w-8 shrink-0 ${utilityNavIconButtonClass}`}
               aria-label={tr('profileColorThemeReset')}
             >
-              <RefreshCw
-                className={`h-3.5 w-3.5 ${themeSaveState === 'saving' ? 'animate-spin' : ''}`}
-              />
+              <RefreshCw className="h-3.5 w-3.5" />
             </button>
           </div>
 
@@ -541,28 +511,8 @@ export default function ProfilePage({
                 </AnimatePresence>
                   </SubCardNestedStack>
 
-                  <div className="flex flex-wrap items-center justify-end gap-3 border-t border-[var(--main-card-surface-border)] pt-4 sm:pt-5">
-                    <SettingsSyncStatusBadge className="me-auto" />
-                    {themeSaveState === 'saved' && (
-                      <span className={monochromeStatusSavedClass}>
-                        <Check className="h-4 w-4" strokeWidth={2.5} />
-                        {tr('profileColorThemeSaved')}
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      onClick={handleSaveTheme}
-                      disabled={(!isDirty && themeSaveState === 'idle') || themeSaveState === 'saving'}
-                      className={[
-                        'inline-flex min-h-[2.75rem] min-w-[10rem] items-center justify-center gap-2 px-5 py-2.5 text-sm',
-                        primaryActionButtonClass,
-                        !isDirty && themeSaveState === 'idle' ? 'cursor-not-allowed opacity-50' : '',
-                      ].join(' ')}
-                    >
-                      {themeSaveState === 'saving'
-                        ? tr('profileColorThemeSaving')
-                        : tr('profileColorThemeSave')}
-                    </button>
+                  <div className="border-t border-[var(--main-card-surface-border)] pt-4 sm:pt-5">
+                    <SettingsSyncStatusBadge />
                   </div>
                 </MasterCategoryPanelBody>
               </motion.div>
@@ -573,7 +523,7 @@ export default function ProfilePage({
       </div>
 
       <AnimatePresence>
-        {themeSaveState === 'reset' && (
+        {themeResetState === 'reset' && (
           <motion.div
             key="profile-theme-reset-toast"
             role="status"

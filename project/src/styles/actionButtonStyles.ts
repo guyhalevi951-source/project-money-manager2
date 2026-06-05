@@ -15,7 +15,7 @@ const transition = 'transition-all active:scale-[0.98]';
 // Colors are driven by --btn-primary-* CSS variables.
 
 const primaryColors =
-  'bg-[var(--btn-primary-bg)] hover:bg-[var(--btn-primary-hover)] active:bg-[var(--btn-primary-active)] text-[var(--btn-primary-fg,#ffffff)] font-semibold';
+  'bg-[var(--btn-primary-bg)] hover:bg-[var(--btn-primary-hover)] active:bg-[var(--btn-primary-active)] text-[var(--btn-primary-fg,var(--color-category-5))] font-semibold';
 
 const primaryShadow = 'shadow-md shadow-black/15';
 
@@ -47,14 +47,14 @@ export const primaryActionAccentIconClass = 'text-[var(--btn-primary-bg)]';
 
 /** Selected chip / toggle state (currency picker, active filter). */
 export const primaryActionSelectedChipClass =
-  'bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg,#ffffff)] shadow-md shadow-black/20 ring-1 ring-white/20';
+  'bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg,var(--color-category-5))] shadow-md shadow-black/20 ring-1 ring-white/20';
 
 // ─── CURRENCY UTILITY GROUP ───────────────────────────────────────────────────
 // Vibrant solid-color buttons for currency configuration shortcuts only.
 // Colors driven by --btn-currency-* CSS variables.
 
 const currencyUtilityColors =
-  'bg-[var(--btn-currency-bg)] hover:bg-[var(--btn-currency-hover)] active:bg-[var(--btn-currency-active)] text-[var(--btn-currency-fg,#ffffff)] font-medium';
+  'bg-[var(--btn-currency-bg)] hover:bg-[var(--btn-currency-hover)] active:bg-[var(--btn-currency-active)] text-[var(--btn-currency-fg,var(--color-category-5))] font-medium';
 
 /** Budget-row currency shortcuts (display currency, manual rate, commissions). */
 export const currencyUtilityButtonClass = [
@@ -78,8 +78,8 @@ const utilityColors = [
   'bg-[var(--btn-nav-bg)]',
   'hover:bg-[var(--btn-nav-hover)]',
   'active:bg-[var(--btn-nav-active)]',
-  'text-[var(--btn-nav-text)]',
-  'hover:text-[var(--btn-nav-text-hover)]',
+  'text-[var(--btn-nav-text,var(--color-category-5-secondary))]',
+  'hover:text-[var(--btn-nav-text-hover,var(--color-category-5))]',
   'border border-[var(--btn-nav-border)]',
 ].join(' ');
 
@@ -168,8 +168,8 @@ const filterBarColors = [
 ].join(' ');
 
 const filterInactiveTabColors = [
-  'text-[var(--btn-filter-text)]',
-  'hover:text-[var(--btn-filter-text-hover)]',
+  'text-[var(--btn-filter-text,var(--color-category-5-muted))]',
+  'hover:text-[var(--btn-filter-text-hover,var(--color-category-5-secondary))]',
   'hover:bg-[var(--btn-filter-hover)]',
 ].join(' ');
 
