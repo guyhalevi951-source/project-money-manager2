@@ -8,7 +8,7 @@
     level1: '#0A0A0A',
     level2: '#171717',
     level3: '#27272A',
-    cat4Input: '#18181B',
+    cat4Input: '#0A0A0A',
     text: '#FFFFFF',
     border: 'rgba(255, 255, 255, 0.10)',
   };

@@ -950,8 +950,8 @@ function applyButtonGroupCSS(prefs: ThemePreferences): void {
   const inputSurface = resolveCategory4InputSurface(prefs, filter);
   root.style.setProperty('--surface-input-bg', inputSurface.bg);
   root.style.setProperty('--surface-input-border', inputSurface.border);
-  root.style.setProperty('--surface-input-text', filter.textColorHover ?? 'rgb(250 250 250)');
-  root.style.setProperty('--surface-input-placeholder', filter.textColor ?? 'rgb(161 161 170)');
+  root.style.setProperty('--surface-input-text', 'var(--color-category-5)');
+  root.style.setProperty('--surface-input-placeholder', 'var(--color-category-5-muted)');
   root.style.setProperty('--surface-panel-bg', filter.bg);
   root.style.setProperty('--surface-panel-border', filter.borderColor ?? filterEnclosure);
   root.style.setProperty('--surface-modal-bg', filter.bg);

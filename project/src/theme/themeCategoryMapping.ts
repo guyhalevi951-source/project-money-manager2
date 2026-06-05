@@ -60,6 +60,7 @@ export const MONOCHROME_DEPTH_COMPONENT_MAP = {
       'MasterCategoryPanel',
       'subCardMasterCategoryExpandedClass',
       'subCardMasterCategoryCollapsedClass',
+      'filterBarActiveTabClass',
     ],
   },
   level2: {
@@ -76,15 +77,15 @@ export const MONOCHROME_DEPTH_COMPONENT_MAP = {
     tailwindRef: 'bg-zinc-800',
     cssVar: '--color-depth-inner',
     radius: 'rounded-xl',
-    tokens: ['surfacePanelClass', 'subCardSmClass', 'subCardGridCellClass', 'filterInsetPanelClass'],
+    tokens: ['surfacePanelClass', 'subCardSmClass', 'subCardGridCellClass'],
   },
   cat4: {
     depth: 4,
     category: 'filter' as const,
-    tailwindRef: 'bg-zinc-900',
+    tailwindRef: 'bg-neutral-950',
     cssVar: '--surface-input-bg',
     radius: 'rounded-xl',
-    tokens: ['surfaceInputClass', 'surfaceSelectPillClass', 'filterFormControlClass'],
+    tokens: ['surfaceInputClass', 'surfaceSelectPillClass', 'filterFormControlClass', 'filterInsetPanelClass'],
   },
   cat5: {
     depth: 5,

@@ -23,6 +23,7 @@ import {
 } from '../styles/actionButtonStyles';
 import {
   APP_THEME_SCOPE,
+  surfaceInputClass,
   themeCardLgClass,
   themeTextMutedClass,
   typographyTitleClass,
@@ -111,7 +112,7 @@ function FloatingField({
         placeholder=" "
         autoComplete={autoComplete}
         disabled={disabled}
-        className="peer w-full rounded-xl bg-slate-950/80 border border-slate-700/80 text-slate-100 pr-12 pl-4 pt-6 pb-2.5 text-base outline-none transition-all duration-200 focus:border-emerald-500/70 focus:ring-2 focus:ring-emerald-500/25 focus:shadow-[0_0_20px_rgba(16,185,129,0.15)] disabled:opacity-60"
+        className={`peer w-full pr-12 pl-4 pt-6 pb-2.5 text-base disabled:opacity-60 ${surfaceInputClass}`}
       />
       <label
         htmlFor={id}

@@ -69,11 +69,11 @@ import {
 import { convertExpenseAmountToIls } from './services/expenseConversionService';
 import {
   currencyUtilityButtonClass,
+  filterBarActiveTabClass,
   filterBarContainerClass,
   filterBarInactiveTabClass,
   filterInsetPanelClass,
   primaryActionAccentIconClass,
-  primaryActionActivePillClass,
   primaryActionButtonClass,
   primaryActionDisabled,
   utilityNavActiveTabClass,
@@ -94,7 +94,6 @@ import {
   subCardNestedItemClass,
   subCardNestedListStackClass,
   subCardRowClass,
-  subCardSmClass,
   subCardTableHeadClass,
   themeCardClass,
   themeFooterClass,
@@ -747,13 +746,13 @@ function AnalyticsDonutPanel({
         </ResponsiveContainer>
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
           <DisplayMoney amount={total} className="text-xl sm:text-2xl font-bold leading-none" />
-          <span className="text-[11px] text-neutral-500 mt-1">{tr('totalShort')}</span>
+          <span className={`text-[11px] mt-1 ${typographyMutedClass}`}>{tr('totalShort')}</span>
         </div>
       </div>
 
       <div className="flex-1 min-w-0 space-y-3">
         {legend.length === 0 ? (
-          <p className="text-sm text-neutral-500">{tr('noData')}</p>
+          <p className={`text-sm ${typographyMutedClass}`}>{tr('noData')}</p>
         ) : (
           legend.slice(0, 6).map((item) => (
             <div key={item.key} className="flex items-center gap-2.5 text-sm min-w-0">
@@ -777,8 +776,8 @@ function AnalyticsDonutPanel({
                   aria-hidden
                 />
               )}
-              <span className="text-neutral-300 truncate flex-1">{item.label}</span>
-              <span className="text-neutral-400 font-medium shrink-0 tabular-nums">
+              <span className={`truncate flex-1 ${typographyBodyClass}`}>{item.label}</span>
+              <span className={`font-medium shrink-0 tabular-nums ${typographyMutedClass}`}>
                 {item.percentage > 0 ? (
                   `${item.percentage.toFixed(2)}%`
                 ) : (
@@ -1226,11 +1225,11 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
     <div className={`mx-auto max-w-2xl ${themeCardClass} p-4 sm:p-6`}>
       <div>
         <div className="mb-4">
-          <div className="flex items-center gap-2 text-neutral-100">
+          <div className={`flex items-center gap-2 ${typographyTitleClass}`}>
             <PieChartIcon className="h-6 w-6 shrink-0 text-emerald-400" />
             <h2 className="text-lg font-bold sm:text-xl">{tr('tabAnalytics')}</h2>
           </div>
-          <p className="mt-1 text-xs text-gray-400">{tr('tabAnalyticsDesc')}</p>
+          <p className={`mt-1 text-xs ${typographyMutedClass}`}>{tr('tabAnalyticsDesc')}</p>
         </div>
 
         <div className={filterBarContainerClass}>
@@ -1242,10 +1241,8 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                 if (view === v.id) return;
                 setView(v.id);
               }}
-              className={`flex-1 py-2.5 text-sm transition-all duration-300 ease-in-out ${
-                view === v.id
-                  ? 'rounded-xl bg-white text-neutral-900 shadow font-semibold'
-                  : filterBarInactiveTabClass
+              className={`flex-1 py-2.5 text-sm ${
+                view === v.id ? filterBarActiveTabClass : filterBarInactiveTabClass
               }`}
             >
               {v.label}
@@ -1297,8 +1294,8 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
         </div>
 
         <div className="mt-3 text-center">
-          <p className="text-base font-semibold capitalize">{periodLabel}</p>
-          {periodSubtitle && <p className="text-xs text-neutral-500 mt-0.5">{periodSubtitle}</p>}
+          <p className={`text-base font-semibold capitalize ${typographyTitleClass}`}>{periodLabel}</p>
+          {periodSubtitle && <p className={`text-xs mt-0.5 ${typographyMutedClass}`}>{periodSubtitle}</p>}
         </div>
 
         {/* Swipeable chart carousel — order is fixed and language-independent. */}
@@ -1370,8 +1367,8 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                 <div className="flex min-h-0 flex-1 items-center">
                 {dailyBreakdown.length === 0 ? (
                   <div className="flex h-full w-full flex-col items-center justify-center px-4 text-center">
-                    <PieChartIcon className="mb-2 h-10 w-10 text-neutral-600" />
-                    <p className="text-sm text-neutral-400">{tr('noDailyBreakdown')}</p>
+                    <PieChartIcon className={`mb-2 h-10 w-10 ${typographyMutedClass}`} />
+                    <p className={`text-sm ${typographyMutedClass}`}>{tr('noDailyBreakdown')}</p>
                   </div>
                 ) : (
                   <AnalyticsDonutPanel
@@ -1903,6 +1900,22 @@ function BudgetOverLimitBanner({ label }: { label: string }) {
 const budgetChartContainerClass =
   'relative h-40 w-40 shrink-0 pointer-events-none sm:h-48 sm:w-48';
 
+/** Shared Budget Status / Sub-Budget chart row geometry. */
+const budgetTrackerRowGridClass =
+  'grid min-h-[18rem] w-full grid-cols-1 items-center gap-4 sm:min-h-[19rem] sm:grid-cols-[1fr_minmax(11rem,12rem)] sm:gap-6';
+
+const budgetTrackerChartCoreClass =
+  'flex flex-col items-center justify-center text-center';
+
+const budgetTrackerChartTitleClass =
+  'mb-3 max-w-full px-2 text-base font-semibold sm:mb-4 sm:text-lg';
+
+const budgetTrackerLegendSideClass = (isRtl: boolean) =>
+  [
+    'flex w-full max-w-[14rem] sm:max-w-none',
+    isRtl ? 'items-end text-right' : 'items-start text-left',
+  ].join(' ');
+
 /** Accent panel wrapping only numeric stats + color legend (not the donut chart). */
 function BudgetStatsLegendPanel({
   isOver,
@@ -1930,15 +1943,17 @@ function BudgetStatsLegendPanel({
 function BudgetChartLegend({
   items,
   title,
+  centered = false,
 }: {
   title: string;
   items: ReadonlyArray<{ color: string; label: string }>;
+  centered?: boolean;
 }) {
   return (
-    <div className={`w-full space-y-1 px-0.5 text-[11px] ${typographyMutedClass}`}>
-      <p className="font-semibold text-neutral-200">{title}</p>
+    <div className={`w-full space-y-1 px-0.5 text-[11px] ${centered ? 'text-center' : ''} ${typographyMutedClass}`}>
+      <p className={`font-semibold ${typographyBodyClass}`}>{title}</p>
       {items.map((item) => (
-        <div key={item.label} className="flex items-center gap-2">
+        <div key={item.label} className={`flex items-center gap-2 ${centered ? 'justify-center' : ''}`}>
           <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
           <span>{item.label}</span>
         </div>
@@ -1959,7 +1974,9 @@ function SubBudgetTracker({
   onSetSubBudget,
   onRemoveSubBudget,
 }: SubBudgetTrackerProps) {
-  const { tr, ensureUserContents, formatMoney, dir, lang } = useLanguage();
+  const { tr, ensureUserContents, formatMoney, dir, lang, displayCurrency } = useLanguage();
+
+  const subBudgetAmountPlaceholder = `${currencySymbol(displayCurrency)} ${tr('amountLabel')}`;
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [newSubBudgetColor, setNewSubBudgetColor] = useState(DEFAULT_CATEGORY_COLOR);
@@ -2099,13 +2116,24 @@ function SubBudgetTracker({
   );
 
   const handleAdd = () => {
-    const amt = parseMoneyInput(amount);
-    if (name.trim() && amt !== null && amt > 0) {
-      onAddSubBudget(name, amt, newSubBudgetColor);
+    const parsed = parseMoneyInput(amount);
+    if (!name.trim() || parsed === null || !(parsed > 0)) return;
+
+    const resolveIlsAmount = async (): Promise<number | null> => {
+      if (displayCurrency === 'ILS') return roundMoneyAmount(parsed);
+      const rates = getCachedExchangeRates() ?? (await fetchExchangeRates().catch(() => null));
+      if (!rates) return null;
+      const converted = convertForeignToIls(parsed, displayCurrency, rates);
+      return converted == null ? null : roundMoneyAmount(converted);
+    };
+
+    void resolveIlsAmount().then((ilsAmount) => {
+      if (ilsAmount == null || !(ilsAmount > 0)) return;
+      onAddSubBudget(name, ilsAmount, newSubBudgetColor);
       setName('');
       setAmount('');
       setNewSubBudgetColor(DEFAULT_CATEGORY_COLOR);
-    }
+    });
   };
 
   return (
@@ -2130,11 +2158,11 @@ function SubBudgetTracker({
         <>
           {/* Main budget chart: used vs remaining */}
           <div className={`p-3 sm:p-5 ${subCardClass}`}>
-            <h3 className={`mb-4 text-center text-sm font-semibold sm:text-base ${typographyTitleClass}`}>
-              {tr('budgetStatus')}
-            </h3>
-            <div className="grid min-h-[18rem] w-full grid-cols-1 items-center gap-4 sm:min-h-[19rem] sm:grid-cols-[1fr_minmax(11rem,12rem)] sm:gap-6">
-              <div className="flex justify-center">
+            <div className={budgetTrackerRowGridClass}>
+              <div className={budgetTrackerChartCoreClass}>
+                <p className={`${budgetTrackerChartTitleClass} ${typographyTitleClass}`}>
+                  {tr('budgetStatus')}
+                </p>
                 <div className={budgetChartContainerClass}>
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
@@ -2166,12 +2194,7 @@ function SubBudgetTracker({
                 </div>
               </div>
 
-              <div
-                className={[
-                  'flex w-full max-w-[14rem] sm:max-w-none',
-                  dir === 'rtl' ? 'sm:items-end sm:text-right' : 'sm:items-start sm:text-left',
-                ].join(' ')}
-              >
+              <div className={budgetTrackerLegendSideClass(dir === 'rtl')}>
                 <BudgetStatsLegendPanel
                   isOver={isBudgetStatusOver}
                   overBanner={
@@ -2238,16 +2261,12 @@ function SubBudgetTracker({
                   })}
                 </div>
 
-                <div className={`relative w-full overflow-hidden p-3 sm:p-4 ${subCardClass}`}>
+                <div className={`relative w-full overflow-hidden p-3 pb-14 sm:p-4 sm:pb-16 ${subCardClass}`}>
                   {subCategoryCharts[subChartSlide] && (
                     <button
                       type="button"
                       onClick={() => onRemoveSubBudget(subCategoryCharts[subChartSlide].key)}
-                      className={[
-                        'z-30 inline-flex items-center justify-center self-start rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-300 transition-colors hover:bg-rose-500/20',
-                        'sm:absolute sm:bottom-4',
-                        dir === 'rtl' ? 'sm:left-4' : 'sm:right-4',
-                      ].join(' ')}
+                      className="absolute bottom-3 right-3 z-30 inline-flex max-w-[calc(100%-1.5rem)] items-center justify-center rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-300 transition-colors hover:bg-rose-500/20 sm:bottom-4 sm:right-4"
                       title={tr('removeSubBudget')}
                       aria-label={tr('removeSubBudget')}
                     >
@@ -2280,9 +2299,12 @@ function SubBudgetTracker({
                           }
                           goToSubChartSlide(subChartSlide - 1);
                         }}
-                        className="relative grid min-h-[18rem] w-full grid-cols-1 items-center gap-4 sm:min-h-[19rem] sm:grid-cols-[1fr_minmax(11rem,12rem)] sm:gap-6"
+                        className={`relative ${budgetTrackerRowGridClass}`}
                       >
-                        <div className="flex justify-center">
+                        <div className={budgetTrackerChartCoreClass}>
+                          <p className={`${budgetTrackerChartTitleClass} ${typographyTitleClass}`}>
+                            <LocalizedUserText text={activeSubChart.key} />
+                          </p>
                           <div className={budgetChartContainerClass}>
                             <ResponsiveContainer width="100%" height="100%">
                               <PieChart>
@@ -2317,15 +2339,8 @@ function SubBudgetTracker({
                             </ResponsiveContainer>
                           </div>
                         </div>
-                        <div
-                          className={[
-                            'flex w-full max-w-[14rem] flex-col gap-2 sm:max-w-none',
-                            dir === 'rtl' ? 'sm:items-end sm:text-right' : 'sm:items-start sm:text-left',
-                          ].join(' ')}
-                        >
-                          <p className={`text-sm font-semibold sm:text-base ${typographyBodyClass}`}>
-                            <LocalizedUserText text={activeSubChart.key} />
-                          </p>
+
+                        <div className={budgetTrackerLegendSideClass(dir === 'rtl')}>
                           <BudgetStatsLegendPanel
                             isOver={activeSubChart.isOverBudget}
                             overBanner={
@@ -2406,7 +2421,7 @@ function SubBudgetTracker({
                       handleAdd();
                     }
                   }}
-                  placeholder={tr('amountPlaceholder')}
+                  placeholder={subBudgetAmountPlaceholder}
                   className={`w-28 sm:w-32 px-3 py-2.5 text-sm ${surfaceInputSmClass}`}
                 />
                 <button
@@ -2450,9 +2465,12 @@ function SubBudgetTracker({
                           <LocalizedUserText text={v} />
                         )}
                       </span>
-                      <LtrNumeric className="text-neutral-500 text-sm">₪</LtrNumeric>
+                      <LtrNumeric className="text-neutral-500 text-sm">
+                        {currencySymbol(displayCurrency)}
+                      </LtrNumeric>
                       <MoneyAmountInput
                         value={subBudgets[v] ?? 0}
+                        displayCurrency={displayCurrency}
                         onCommit={(amount) => {
                           if (amount === null || amount <= 0) onRemoveSubBudget(v);
                           else onSetSubBudget(v, amount);
@@ -2464,16 +2482,29 @@ function SubBudgetTracker({
                 })}
                 <div className="flex items-center justify-between pt-1 text-xs">
                   <LtrNumeric className="text-neutral-500">
-                    {tr('allocated')}: {formatMoney(allocatedTotal)} / {formatMoney(budget)}
+                    {tr('allocated')}:{' '}
+                    <DisplayMoney amount={allocatedTotal} className="inline-block" /> /{' '}
+                    <DisplayMoney amount={budget} className="inline-block" />
                   </LtrNumeric>
                   <LtrNumeric
                     className={
                       allocatedTotal > budget ? 'text-rose-400 font-medium' : 'text-neutral-500'
                     }
                   >
-                    {allocatedTotal > budget
-                      ? `${tr('overBudget')}: ${formatMoney(allocatedTotal - budget)}`
-                      : `${tr('unallocated')}: ${formatMoney(generalAllocated)}`}
+                    {allocatedTotal > budget ? (
+                      <>
+                        {tr('overBudget')}:{' '}
+                        <DisplayMoney
+                          amount={allocatedTotal - budget}
+                          className="inline-block font-medium"
+                        />
+                      </>
+                    ) : (
+                      <>
+                        {tr('unallocated')}:{' '}
+                        <DisplayMoney amount={generalAllocated} className="inline-block" />
+                      </>
+                    )}
                   </LtrNumeric>
                 </div>
               </div>
@@ -4096,35 +4127,35 @@ function App() {
             {/* Financial summary — row 2 uses a fixed height so all three amount cells share one baseline */}
             <div className={`mb-6 ${themeCardClass} p-4 shadow-sm sm:mb-8 sm:p-6`}>
               <h2 className={`mb-4 text-lg font-bold md:text-xl ${typographyTitleClass}`}>{tr('financialSummaryTitle')}</h2>
-              <div className={`rounded-xl p-3 sm:p-4 ${subCardSmClass}`}>
+              <div className={`p-3 sm:p-4 ${filterInsetPanelClass}`}>
               <table className="w-full table-fixed border-collapse">
                 <tbody>
                   <tr>
-                    <td className="w-1/3 border-x border-[var(--color-sub-cards-border)] px-2 pb-2 text-center align-bottom">
-                      <span className="flex min-h-[2.5rem] items-end justify-center text-xs leading-snug text-gray-400 md:text-sm">
+                    <td className="w-1/3 border-x border-[var(--surface-input-border)] px-2 pb-2 text-center align-bottom">
+                      <span className={`flex min-h-[2.5rem] items-end justify-center text-xs leading-snug md:text-sm ${typographyMutedClass}`}>
                         {tr('monthlyBudget')}
                       </span>
                     </td>
-                    <td className="w-1/3 border-x border-[var(--color-sub-cards-border)] px-2 pb-2 text-center align-bottom">
-                      <span className="flex min-h-[2.5rem] items-end justify-center text-xs leading-snug text-gray-400 md:text-sm">
+                    <td className="w-1/3 border-x border-[var(--surface-input-border)] px-2 pb-2 text-center align-bottom">
+                      <span className={`flex min-h-[2.5rem] items-end justify-center text-xs leading-snug md:text-sm ${typographyMutedClass}`}>
                         {tr('totalExpenses')}
                       </span>
                     </td>
-                    <td className="w-1/3 border-x border-[var(--color-sub-cards-border)] px-2 pb-2 text-center align-bottom">
-                      <span className="flex min-h-[2.5rem] items-end justify-center text-xs leading-snug text-gray-400 md:text-sm">
+                    <td className="w-1/3 border-x border-[var(--surface-input-border)] px-2 pb-2 text-center align-bottom">
+                      <span className={`flex min-h-[2.5rem] items-end justify-center text-xs leading-snug md:text-sm ${typographyMutedClass}`}>
                         {tr('budgetStatus')}
                       </span>
                     </td>
                   </tr>
                   <tr>
-                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-[var(--color-sub-cards-border)] px-2 text-center align-middle">
+                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-[var(--surface-input-border)] px-2 text-center align-middle">
                       <div className="flex h-full min-h-0 items-center justify-center">
                         <LtrNumeric className={`block w-full truncate text-center text-sm font-bold leading-tight sm:text-base md:text-2xl ${typographyBodyClass}`}>
                           {selectedBudgetDisplayLabel}
                         </LtrNumeric>
                       </div>
                     </td>
-                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-[var(--color-sub-cards-border)] px-2 text-center align-middle">
+                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-[var(--surface-input-border)] px-2 text-center align-middle">
                       <div className="flex h-full min-h-0 items-center justify-center">
                         <LtrNumeric
                           className={`block w-full truncate text-center text-sm font-bold leading-tight sm:text-base md:text-2xl ${isOverBudget ? 'text-rose-400' : typographyBodyClass}`}
@@ -4133,7 +4164,7 @@ function App() {
                         </LtrNumeric>
                       </div>
                     </td>
-                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-[var(--color-sub-cards-border)] px-2 text-center align-middle">
+                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-[var(--surface-input-border)] px-2 text-center align-middle">
                       <div className="flex h-full min-h-0 items-center justify-center">
                         <LtrNumeric
                           className={`block w-full truncate text-center text-sm font-bold leading-tight sm:text-base md:text-2xl ${isOverBudget ? 'text-rose-400' : typographyBodyClass}`}
@@ -4144,9 +4175,9 @@ function App() {
                     </td>
                   </tr>
                   <tr>
-                    <td className="h-8 border-x border-[var(--color-sub-cards-border)] px-2 align-top" aria-hidden />
-                    <td className="h-8 border-x border-[var(--color-sub-cards-border)] px-2 align-top" aria-hidden />
-                    <td className="h-8 border-x border-[var(--color-sub-cards-border)] px-2 pt-1 text-center align-top text-[10px] leading-snug text-gray-400 md:text-xs">
+                    <td className="h-8 border-x border-[var(--surface-input-border)] px-2 align-top" aria-hidden />
+                    <td className="h-8 border-x border-[var(--surface-input-border)] px-2 align-top" aria-hidden />
+                    <td className={`h-8 border-x border-[var(--surface-input-border)] px-2 pt-1 text-center align-top text-[10px] leading-snug md:text-xs ${typographyMutedClass}`}>
                       {remaining >= 0 ? tr('remainingInBudget') : tr('overBudget')}
                     </td>
                   </tr>
@@ -4418,19 +4449,11 @@ function App() {
                     role="tab"
                     aria-selected={isActive}
                     onClick={() => setTimeFilter(filter.id)}
-                    className={`relative flex-1 py-2.5 text-sm transition-all duration-200 focus-visible:ring-2 focus-visible:ring-emerald-500/50 ${
-                      isActive
-                        ? 'rounded-xl font-semibold text-neutral-950'
-                        : filterBarInactiveTabClass
+                    className={`flex-1 py-2.5 text-sm ${
+                      isActive ? filterBarActiveTabClass : filterBarInactiveTabClass
                     }`}
                   >
-                    {isActive && (
-                      <span
-                        className={`absolute inset-0 rounded-xl ${primaryActionActivePillClass}`}
-                        aria-hidden
-                      />
-                    )}
-                    <span className="relative z-10">{({
+                    <span>{({
                       daily: tr('filterDaily'),
                       weekly: tr('filterWeekly'),
                       monthly: tr('filterMonthly'),

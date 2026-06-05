@@ -9,7 +9,7 @@ import {
 } from '../constants/currencies';
 import CurrencyFlag from './CurrencyFlag';
 import { primaryActionButtonBorderedClass, utilityNavButtonLgClass } from '../styles/actionButtonStyles';
-import { subCardSmClass, surfaceModalLgClass } from '../styles/themeSurfaceStyles';
+import { subCardSmClass, surfaceInputClass, surfaceModalLgClass } from '../styles/themeSurfaceStyles';
 
 export type CurrencyLibraryMode = 'display' | 'expense';
 
@@ -157,7 +157,7 @@ export default function CurrencyLibraryModal({
                     placeholder={tr('currencySearchPlaceholder')}
                     aria-label={tr('currencySearchPlaceholder')}
                     autoComplete="off"
-                    className="w-full rounded-xl border border-gray-600/80 bg-gray-950/70 ps-10 pe-4 py-3 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/50 transition-shadow"
+                    className={`w-full ps-10 pe-4 py-3 text-sm ${surfaceInputClass}`}
                   />
                 </div>
                 <p className="text-[11px] text-gray-500 mt-2 px-0.5">

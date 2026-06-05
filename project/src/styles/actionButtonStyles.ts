@@ -185,10 +185,17 @@ export const filterBarInactiveTabClass = [
   filterInactiveTabColors,
 ].join(' ');
 
-/** Dropdown / popover wrapper (currency menu, filter panels). */
+/** Active tab inside a filter bar — Category 6 (main-card / pure black). */
+export const filterBarActiveTabClass = [
+  'rounded-xl font-semibold transition-all duration-200 outline-none',
+  'bg-[var(--main-card-surface-bg)]',
+  'border border-[var(--main-card-surface-border)]',
+  'text-[var(--color-category-5)]',
+].join(' ');
+
+/** Dropdown / popover wrapper (currency menu, filter panels) — Category 4 shell. */
 export const filterDropdownWrapperClass = [
-  'rounded-xl border shadow-xl shadow-black/50',
-  filterBarColors,
+  'rounded-xl border border-[var(--surface-input-border)] bg-[var(--surface-input-bg)] shadow-xl shadow-black/50',
 ].join(' ');
 
 /** Nested panel surface inside settings / forms. */
@@ -199,9 +206,10 @@ export const filterPanelSurfaceClass = [
 
 /** Form control using surface palette (amount field, search in filter context). */
 export const filterFormControlClass = [
-  'rounded-xl border bg-[var(--surface-input-bg)] border-[var(--surface-input-border)]',
-  'text-[var(--surface-input-text)] placeholder-[var(--surface-input-placeholder)]',
-  'transition-all outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30',
+  'rounded-xl border border-[var(--surface-input-border)] bg-[var(--surface-input-bg)]',
+  'text-[var(--surface-input-text,var(--color-category-5))]',
+  'placeholder-[var(--surface-input-placeholder,var(--color-category-5-muted))]',
+  'transition-all outline-none focus:border-white/20 focus:ring-1 focus:ring-white/10',
 ].join(' ');
 
 // ─── AUTH SIGN-UP STATIC BUTTONS (NEVER THEMED) ───────────────────────────────
@@ -223,8 +231,8 @@ export const authSignupStaticPillClass = [
   'shadow-md shadow-black/15',
 ].join(' ');
 
-/** Level 3 inset panel nested inside a master card (calculators, charts). */
+/** Category 4 inset — analytical/data block nested inside Level 3 frames. */
 export const filterInsetPanelClass = [
-  'rounded-xl border',
-  'bg-[var(--color-depth-inner)] border-[var(--color-depth-inner-border)]',
+  'rounded-xl border border-[var(--surface-input-border)]',
+  'bg-[var(--surface-input-bg)]',
 ].join(' ');

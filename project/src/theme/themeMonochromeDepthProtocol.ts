@@ -14,7 +14,7 @@
  * Level 1 — Cat 6 master + gap canvas: #0A0A0A  (neutral-950)
  * Level 2 — Cat 7 sub-category capsules: #171717  (neutral-900)
  * Level 3 — Inner form/tool wrappers:    #27272A  (zinc-800)
- * Cat 4   — Inputs / dropdowns:        #18181B  (zinc-900)
+ * Cat 4   — Inputs / dropdowns:        #0A0A0A  (neutral-950)
  * Cat 5   — Typography default:        #FFFFFF  (pure white)
  * All levels — 1px perimeter:          rgba(255, 255, 255, 0.10)
  * =============================================================================
@@ -47,7 +47,7 @@ export const MONO_DEPTH_LEVEL_2 = '#171717';
 export const MONO_DEPTH_LEVEL_3 = '#27272A';
 
 /** Category 4 — input/dropdown surface (sinks inside Level 3). */
-export const MONO_DEPTH_CAT4_INPUT_BG = '#18181B';
+export const MONO_DEPTH_CAT4_INPUT_BG = '#0A0A0A';
 
 /** Category 4 — input perimeter border. */
 export const MONO_DEPTH_CAT4_INPUT_BORDER = 'rgba(255, 255, 255, 0.10)';

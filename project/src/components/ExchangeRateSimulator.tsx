@@ -13,6 +13,7 @@ import {
 import CommissionSaveModal from './CommissionSaveModal';
 import ManualRateSaveModal from './ManualRateSaveModal';
 import {
+  filterDropdownWrapperClass,
   primaryActionButtonClass,
   utilityNavCompactButtonClass,
   utilityNavDropdownSelectedClass,
@@ -86,7 +87,7 @@ const staticListCardClass = `rounded-xl p-3 sm:p-4 ${surfacePanelClass}`;
 
 /** Cap for in-panel selectors; commission portal uses viewport-aware maxHeight. */
 const COMMISSION_DROPDOWN_MAX_PX = 240;
-const currencySelectorDropdownClass = `z-50 max-h-60 overflow-y-auto overscroll-contain touch-pan-y p-1.5 shadow-xl shadow-black/40 [-webkit-overflow-scrolling:touch] ${surfacePanelClass}`;
+const currencySelectorDropdownClass = `z-50 max-h-60 overflow-y-auto overscroll-contain touch-pan-y p-1.5 [-webkit-overflow-scrolling:touch] ${filterDropdownWrapperClass}`;
 
 const toIsoDateLocal = (d: Date): string =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

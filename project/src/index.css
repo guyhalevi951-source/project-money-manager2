@@ -15,7 +15,7 @@
   --page-text: #ffffff;
   --page-text-muted: #ffffff;
   --page-text-subtle: #ffffff;
-  --page-input-bg: #18181b;
+  --page-input-bg: #0a0a0a;
   --page-input-border: rgba(255, 255, 255, 0.1);
   --btn-primary-bg: #6366f1;
   --btn-primary-hover: #818cf8;
@@ -35,10 +35,10 @@
   --btn-filter-text: #ffffff;
   --btn-filter-text-hover: #ffffff;
   --btn-filter-border: rgba(255, 255, 255, 0.1);
-  --surface-input-bg: #18181b;
+  --surface-input-bg: #0a0a0a;
   --surface-input-border: rgba(255, 255, 255, 0.1);
-  --surface-input-text: #ffffff;
-  --surface-input-placeholder: #ffffff;
+  --surface-input-text: var(--color-category-5);
+  --surface-input-placeholder: var(--color-category-5-muted);
   --surface-panel-bg: #27272a;
   --surface-panel-border: rgba(255, 255, 255, 0.1);
   --surface-modal-bg: #27272a;
@@ -115,18 +115,24 @@
   color: var(--color-category-5);
 }
 
+/* Category 4 — universal input / select / textarea surfaces */
+[data-theme-scope='app'] input:not([type='button']):not([type='submit']):not([type='reset']):not([role='switch']):not(.auth-signup-static),
+[data-theme-scope='app'] textarea,
+[data-theme-scope='app'] select,
 [data-settings-profile-scope] input:not([type='button']):not([type='submit']):not([type='reset']):not([role='switch']),
 [data-settings-profile-scope] textarea,
 [data-settings-profile-scope] select {
-  background-color: var(--surface-input-bg);
-  border-color: var(--surface-input-border);
-  color: var(--surface-input-text);
+  background-color: var(--surface-input-bg) !important;
+  border-color: var(--surface-input-border) !important;
+  color: var(--surface-input-text, var(--color-category-5)) !important;
   border-radius: 0.75rem;
 }
 
+[data-theme-scope='app'] input::placeholder,
+[data-theme-scope='app'] textarea::placeholder,
 [data-settings-profile-scope] input::placeholder,
 [data-settings-profile-scope] textarea::placeholder {
-  color: var(--surface-input-placeholder);
+  color: var(--surface-input-placeholder, var(--color-category-5-muted)) !important;
 }
 
 html {

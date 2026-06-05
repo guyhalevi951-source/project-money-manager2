@@ -413,17 +413,17 @@ export const typographyMutedClass = 'text-[var(--color-category-5-muted)]';
 
 const surfaceInputColors = [
   'bg-[var(--surface-input-bg)]',
-  'border-[var(--surface-input-border)]',
-  'text-[var(--surface-input-text)]',
-  'placeholder-[var(--surface-input-placeholder)]',
+  'border border-[var(--surface-input-border)]',
+  'text-[var(--surface-input-text,var(--color-category-5))]',
+  'placeholder-[var(--surface-input-placeholder,var(--color-category-5-muted))]',
 ].join(' ');
 
 const surfaceInputFocus =
-  'outline-none transition-all focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30';
+  'outline-none transition-all focus:border-white/20 focus:ring-1 focus:ring-white/10';
 
-/** Base class for all themed text inputs, textareas, and search bars. */
+/** Category 4 — all text inputs, textareas, search bars, select shells. */
 export const surfaceInputClass = [
-  'rounded-xl border',
+  'rounded-xl',
   surfaceInputColors,
   surfaceInputFocus,
 ].join(' ');
@@ -439,9 +439,9 @@ export const surfaceInputSmClass = `px-2 py-1.5 text-sm ${surfaceInputClass}`;
 
 /** Currency / select custom pill wrapper. */
 export const surfaceSelectPillClass = [
-  'rounded-xl border',
-  'bg-[var(--surface-input-bg)] border-[var(--surface-input-border)]',
-  'text-[var(--surface-input-text)]',
+  'rounded-xl border border-[var(--surface-input-border)]',
+  'bg-[var(--surface-input-bg)]',
+  'text-[var(--surface-input-text,var(--color-category-5))]',
   'transition-all outline-none',
 ].join(' ');
 

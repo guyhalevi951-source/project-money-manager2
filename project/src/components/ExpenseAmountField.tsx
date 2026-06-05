@@ -40,7 +40,7 @@ import {
   setCurrencyAutoDetectPref,
 } from '../services/currencyDetectionPreference';
 
-const expenseFormControlClass = `h-12 text-base focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 ${filterFormControlClass}`;
+const expenseFormControlClass = `h-12 text-base ${filterFormControlClass}`;
 
 const AMOUNT_INPUT_MAX_LENGTH = 14;
 
@@ -400,7 +400,7 @@ export default function ExpenseAmountField({
                       className={`min-w-[3.25rem] flex-1 basis-[calc(25%-0.5rem)] py-2 rounded-lg text-xs font-semibold tabular-nums transition-all active:scale-[0.98] flex flex-col items-center justify-center ${
                         selected
                           ? primaryActionSelectedChipClass
-                          : 'text-neutral-300 hover:text-white hover:bg-neutral-800/80'
+                          : 'text-[var(--color-category-5-muted)] hover:text-[var(--color-category-5)] hover:bg-white/5'
                       }`}
                     >
                       <CurrencyFlag countryCode={meta.countryCode} size="xs" alt={meta.name} />
@@ -414,7 +414,7 @@ export default function ExpenseAmountField({
                   type="button"
                   onClick={handleOpenLibrary}
                   aria-label={tr('currencyLibraryTitle')}
-                  className="min-w-[3.25rem] flex-1 basis-[calc(25%-0.5rem)] py-2 rounded-lg text-xs font-semibold transition-all active:scale-[0.98] border border-dashed border-neutral-600/80 text-neutral-300 hover:text-white hover:bg-neutral-800/80 hover:border-neutral-500"
+                  className="min-w-[3.25rem] flex-1 basis-[calc(25%-0.5rem)] py-2 rounded-lg text-xs font-semibold transition-all active:scale-[0.98] border border-dashed border-[var(--surface-input-border)] text-[var(--color-category-5-muted)] hover:text-[var(--color-category-5)] hover:bg-white/5"
                 >
                   <Plus className="w-4 h-4 mx-auto" strokeWidth={2.25} />
                   <span className="block text-[9px] font-medium opacity-80 mt-0.5">+</span>
