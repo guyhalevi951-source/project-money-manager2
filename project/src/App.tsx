@@ -427,6 +427,28 @@ const HISTORY_TIME_FILTERS: { id: HistoryTimeFilter }[] = [
   { id: 'yearly' },
 ];
 
+/** Identical column template for expense history header + data rows (desktop). */
+const EXPENSE_HISTORY_ROW_GRID =
+  'grid w-full grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)_minmax(0,1.25fr)_minmax(0,1fr)_4.5rem] items-center gap-x-3';
+
+function shouldShowExpenseEquivalentLine(
+  expense: { originalAmount?: number; originalCurrency?: string },
+  displayCurrency: ExpenseCurrency,
+): boolean {
+  const hasOriginal =
+    expense.originalAmount != null &&
+    expense.originalAmount > 0 &&
+    Boolean(expense.originalCurrency?.trim());
+  if (!hasOriginal) {
+    return displayCurrency !== 'ILS';
+  }
+  const expenseCurrency = symbolToCurrency(expense.originalCurrency!);
+  if (!expenseCurrency) {
+    return true;
+  }
+  return expenseCurrency !== displayCurrency;
+}
+
 const expenseMatchesHistoryTimeFilter = (
   expenseDate: string,
   filter: HistoryTimeFilter,
@@ -4374,10 +4396,10 @@ function App() {
 
         {/* ============================ EXPENSES ============================ */}
         {activeTab === 'expenses' && (
-        <div className={`${themeCardClass} overflow-hidden`}>
+        <div className={`w-full ${themeCardClass}`}>
           <div className="border-b border-[var(--main-card-surface-border)] p-4 sm:p-6">
             <h2 className={`text-base sm:text-lg font-semibold ${typographyTitleClass}`}>{tr('expenseHistoryTitle')}</h2>
-            <p className="text-sm text-neutral-500 mt-1">
+            <p className={`text-sm mt-1 ${typographyMutedClass}`}>
               {historyExpenses.length} • {tr('totalShort')}{' '}
               <DisplayMoney amount={historyTotal} className="inline-block font-medium" />
             </p>
@@ -4459,13 +4481,13 @@ function App() {
           ) : (
             <>
               {/* Mobile: card list (native-app feel) */}
-              <ul className={`md:hidden ${subCardNestedListStackClass}`} data-nested-list-stack>
+              <ul className={`md:hidden w-full ${subCardNestedListStackClass}`} data-nested-list-stack>
                 {historyExpenses.map((expense) => {
                   const categoryInfo = getCategoryInfo(expense.category);
                   const IconComponent = categoryInfo.icon;
 
                   return (
-                    <li key={expense.id} className={`${subCardNestedItemClass} ${subCardRowClass}`} data-nested-list-item>
+                    <li key={expense.id} className={`w-full ${subCardNestedItemClass} ${subCardRowClass}`} data-nested-list-item>
                       <div className="flex items-center gap-3">
                         <CategoryIconBadge
                           icon={IconComponent}
@@ -4489,12 +4511,13 @@ function App() {
                             <p className="mt-0.5 text-xs font-medium text-emerald-300">{tr('expenseUpdated')}</p>
                           )}
                         </div>
-                        <div className="shrink-0 text-left">
+                        <div className="flex shrink-0 items-center text-left">
                           <ExpenseAmountDisplay
                             amount={expense.amount}
                             originalAmount={expense.originalAmount}
                             originalCurrency={expense.originalCurrency}
                             variant="card"
+                            showSecondaryLine={shouldShowExpenseEquivalentLine(expense, displayCurrency)}
                           />
                         </div>
                         <div className="shrink-0 flex items-center gap-1">
@@ -4521,78 +4544,89 @@ function App() {
                 })}
               </ul>
 
-              {/* Desktop: table */}
-              <div className="hidden md:block overflow-x-auto">
-                <table className="w-full">
-                  <thead className={subCardTableHeadClass}>
-                    <tr>
-                      <th className="text-right px-6 py-4 text-sm font-semibold text-neutral-400">{tr('description')}</th>
-                      <th className="text-right px-6 py-4 text-sm font-semibold text-neutral-400">
-                        {tr('amountLabel')} ({currencySymbol(displayCurrency)})
-                      </th>
-                      <th className="text-right px-6 py-4 text-sm font-semibold text-neutral-400">{tr('category')}</th>
-                      <th className="text-right px-6 py-4 text-sm font-semibold text-neutral-400">{tr('date')}</th>
-                      <th className="px-6 py-4 text-sm font-semibold text-neutral-400">{tr('actions')}</th>
-                    </tr>
-                  </thead>
-                  <tbody className={subCardNestedListStackClass} data-nested-list-stack>
-                    {historyExpenses.map((expense) => {
-                      const categoryInfo = getCategoryInfo(expense.category);
-                      const IconComponent = categoryInfo.icon;
+              {/* Desktop: aligned full-width grid (header + rows share identical columns) */}
+              <div className="hidden md:block w-full" role="table" aria-label={tr('expenseHistoryTitle')}>
+                <div
+                  role="row"
+                  className={`${EXPENSE_HISTORY_ROW_GRID} ${subCardTableHeadClass} border-b border-[var(--color-sub-cards-border)] px-6 py-4`}
+                >
+                  <div role="columnheader" className={`text-end text-sm font-semibold ${typographyLabelClass}`}>
+                    {tr('description')}
+                  </div>
+                  <div role="columnheader" className={`text-end text-sm font-semibold ${typographyLabelClass}`}>
+                    {tr('amountLabel')} ({currencySymbol(displayCurrency)})
+                  </div>
+                  <div role="columnheader" className={`text-end text-sm font-semibold ${typographyLabelClass}`}>
+                    {tr('category')}
+                  </div>
+                  <div role="columnheader" className={`text-end text-sm font-semibold ${typographyLabelClass}`}>
+                    {tr('date')}
+                  </div>
+                  <div role="columnheader" className={`text-center text-sm font-semibold ${typographyLabelClass}`}>
+                    {tr('actions')}
+                  </div>
+                </div>
+                <div className={`w-full ${subCardNestedListStackClass}`} data-nested-list-stack role="rowgroup">
+                  {historyExpenses.map((expense) => {
+                    const categoryInfo = getCategoryInfo(expense.category);
+                    const IconComponent = categoryInfo.icon;
 
-                      return (
-                        <tr key={expense.id} className={subCardRowClass} data-nested-list-item>
-                          <td className="px-6 py-4">
-                            <LocalizedUserText
-                              text={expenseDescriptionLabel(expense.description)}
-                              className={`font-medium ${
-                                expense.description.trim() ? typographyBodyClass : `${typographyMutedClass} italic`
-                              }`}
-                            />
-                          </td>
-                          <td className="px-6 py-4">
-                            <ExpenseAmountDisplay
-                              amount={expense.amount}
-                              originalAmount={expense.originalAmount}
-                              originalCurrency={expense.originalCurrency}
-                            />
-                          </td>
-                          <td className="px-6 py-4">
-                            <CategoryColorChip color={categoryInfo.color} icon={IconComponent}>
-                              <LocalizedUserText text={expense.category} />
-                            </CategoryColorChip>
-                          </td>
-                          <td className="px-6 py-4 text-neutral-400">
-                            {formatDisplayDate(expense.date, lang)}
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="flex items-center justify-center gap-1">
-                              <button
-                                onClick={() => handleEditExpenseStart(expense)}
-                                className="text-neutral-500 hover:text-indigo-300 hover:bg-indigo-500/10 p-2 rounded-lg transition-all"
-                                title={tr('edit')}
-                                aria-label={tr('editExpense')}
-                              >
-                                <Pencil className="w-5 h-5" />
-                              </button>
-                              <button
-                                onClick={() => handleDeleteExpense(expense.id)}
-                                className="text-neutral-500 hover:text-rose-400 hover:bg-rose-500/10 p-2 rounded-lg transition-all"
-                                title={tr('delete')}
-                                aria-label={tr('deleteExpense')}
-                              >
-                                <Trash2 className="w-5 h-5" />
-                              </button>
-                              {recentlyUpdatedExpenseId === expense.id && (
-                                <span className="text-xs text-emerald-300 font-medium">{tr('expenseUpdated')}</span>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                    return (
+                      <div
+                        key={expense.id}
+                        role="row"
+                        className={`${EXPENSE_HISTORY_ROW_GRID} ${subCardRowClass} w-full px-6 py-4`}
+                        data-nested-list-item
+                      >
+                        <div role="cell" className="min-w-0 text-end">
+                          <LocalizedUserText
+                            text={expenseDescriptionLabel(expense.description)}
+                            className={`font-medium ${
+                              expense.description.trim() ? typographyBodyClass : `${typographyMutedClass} italic`
+                            }`}
+                          />
+                        </div>
+                        <div role="cell" className="flex items-center justify-end text-end">
+                          <ExpenseAmountDisplay
+                            amount={expense.amount}
+                            originalAmount={expense.originalAmount}
+                            originalCurrency={expense.originalCurrency}
+                            showSecondaryLine={shouldShowExpenseEquivalentLine(expense, displayCurrency)}
+                          />
+                        </div>
+                        <div role="cell" className="flex justify-end">
+                          <CategoryColorChip color={categoryInfo.color} icon={IconComponent}>
+                            <LocalizedUserText text={expense.category} />
+                          </CategoryColorChip>
+                        </div>
+                        <div role="cell" className={`text-end ${typographyMutedClass}`}>
+                          {formatDisplayDate(expense.date, lang)}
+                        </div>
+                        <div role="cell" className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={() => handleEditExpenseStart(expense)}
+                            className="p-2 rounded-lg transition-all hover:bg-[var(--color-depth-inner)] active:opacity-90"
+                            title={tr('edit')}
+                            aria-label={tr('editExpense')}
+                          >
+                            <Pencil className="w-5 h-5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteExpense(expense.id)}
+                            className="p-2 rounded-lg transition-all hover:bg-[var(--color-depth-inner)] active:opacity-90"
+                            title={tr('delete')}
+                            aria-label={tr('deleteExpense')}
+                          >
+                            <Trash2 className="w-5 h-5" />
+                          </button>
+                          {recentlyUpdatedExpenseId === expense.id && (
+                            <span className="text-xs font-medium text-emerald-300">{tr('expenseUpdated')}</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </>
           )}

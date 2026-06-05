@@ -5,6 +5,8 @@ interface ExpenseAmountDisplayProps {
   originalAmount?: number;
   originalCurrency?: string;
   variant?: 'table' | 'card';
+  /** When false, hides the `(≈ …)` equivalent line (e.g. expense currency matches display currency). */
+  showSecondaryLine?: boolean;
 }
 
 export default function ExpenseAmountDisplay({
@@ -12,9 +14,11 @@ export default function ExpenseAmountDisplay({
   originalAmount,
   originalCurrency,
   variant = 'table',
+  showSecondaryLine = true,
 }: ExpenseAmountDisplayProps) {
   const { formatExpenseMoney } = useLanguage();
   const { primary, secondary } = formatExpenseMoney(amount, originalAmount, originalCurrency);
+  const equivalentLine = showSecondaryLine ? secondary : undefined;
 
   const mainClass =
     variant === 'card'
@@ -22,10 +26,16 @@ export default function ExpenseAmountDisplay({
       : 'text-lg font-semibold text-neutral-100';
 
   return (
-    <div className={`flex flex-col ${variant === 'card' ? 'items-end' : 'items-start sm:items-end'} gap-0.5`}>
+    <div
+      className={[
+        'flex flex-col justify-center',
+        variant === 'card' ? 'items-end' : 'items-start sm:items-end',
+        equivalentLine ? 'gap-0.5' : 'gap-0',
+      ].join(' ')}
+    >
       <LtrNumeric className={`${mainClass} whitespace-nowrap`}>{primary}</LtrNumeric>
-      {secondary && (
-        <LtrNumeric className="text-xs text-neutral-500 whitespace-nowrap">{secondary}</LtrNumeric>
+      {equivalentLine && (
+        <LtrNumeric className="text-xs text-neutral-500 whitespace-nowrap">{equivalentLine}</LtrNumeric>
       )}
     </div>
   );
