@@ -4012,7 +4012,7 @@ function App() {
                 onClick={handleQuickLanguageToggle}
                 title={tr('authSwitchLanguage')}
                 aria-label={tr('authSwitchLanguage')}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-neutral-700 bg-neutral-900/80 text-neutral-300 transition-colors hover:bg-neutral-800 hover:text-neutral-100 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
+                className={`inline-flex h-10 w-10 items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40 ${utilityNavMenuToggleClass}`}
               >
                 <Globe className="h-4 w-4 sm:h-5 sm:w-5" />
               </button>
@@ -4054,8 +4054,12 @@ function App() {
         />
       )}
 
-      <div className="relative flex flex-1 flex-col">
-      <main className="relative z-0 mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-6 sm:py-8 pb-24 md:pb-10 lg:px-8">
+      <div className="relative flex min-h-0 flex-1 flex-col">
+      <main
+        className={`relative z-0 mx-auto w-full max-w-5xl min-h-0 flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8 ${
+          profileOpen || settingsOpen ? 'overflow-hidden pb-4 md:pb-6' : 'pb-24 md:pb-10'
+        }`}
+      >
         {profileOpen ? (
           <ProfilePage
             user={user}

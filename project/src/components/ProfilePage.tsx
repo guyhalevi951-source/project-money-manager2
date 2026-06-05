@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Pencil, RefreshCw, X } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
+import {
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Palette,
+  Pencil,
+  RefreshCw,
+  SlidersHorizontal,
+  UserRound,
+  X,
+} from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { useLanguage } from '../LanguageContext';
 import { formatTranslation } from '../translations';
@@ -26,6 +37,15 @@ import {
   type PageThemeMode,
   type ThemePreferences,
 } from '../services/buttonThemeService';
+
+function createFreshDefaultTheme(): ThemePreferences {
+  return {
+    ...DEFAULT_THEME_PREFERENCES,
+    buttons: { ...DEFAULT_THEME_PREFERENCES.buttons },
+  };
+}
+
+type ThemeSaveFeedback = 'idle' | 'saving' | 'saved' | 'reset';
 
 interface ProfilePageProps {
   user: FirebaseUser;
@@ -56,6 +76,27 @@ const GROUP_ICONS: Record<ButtonGroupKey, string> = {
   filter: '📝',
 };
 
+type MasterSection = 'profile' | 'theme';
+type ThemeAccordionSection = 'page' | 'buttons';
+
+const accordionPanelMotion = {
+  initial: { opacity: 0, height: 0 },
+  animate: { opacity: 1, height: 'auto' },
+  exit: { opacity: 0, height: 0 },
+  transition: { duration: 0.22, ease: 'easeOut' as const },
+};
+
+function MasterChevron({ open }: { open: boolean }) {
+  return (
+    <ChevronDown
+      className={`h-5 w-5 shrink-0 text-gray-300 transition-transform duration-300 ease-in-out ${
+        open ? 'rotate-180' : 'rotate-0'
+      }`}
+      aria-hidden
+    />
+  );
+}
+
 export default function ProfilePage({
   user,
   userName,
@@ -75,8 +116,45 @@ export default function ProfilePage({
     ...themePreferences,
     buttons: { ...themePreferences.buttons },
   }));
-  const [themeSaveState, setThemeSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [themeSaveState, setThemeSaveState] = useState<ThemeSaveFeedback>('idle');
+  const [openMasterSections, setOpenMasterSections] = useState<Set<MasterSection>>(() => new Set());
+  const [openThemeSections, setOpenThemeSections] = useState<Set<ThemeAccordionSection>>(() => new Set());
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const themeSaveStateRef = useRef<ThemeSaveFeedback>('idle');
+
+  const isMasterOpen = useCallback(
+    (key: MasterSection) => openMasterSections.has(key),
+    [openMasterSections],
+  );
+
+  const toggleMasterSection = useCallback((key: MasterSection) => {
+    setOpenMasterSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
+  const isThemeSectionOpen = useCallback(
+    (key: ThemeAccordionSection) => openThemeSections.has(key),
+    [openThemeSections],
+  );
+
+  const toggleThemeSection = useCallback((key: ThemeAccordionSection) => {
+    setOpenThemeSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     setDraftTheme({
@@ -150,22 +228,38 @@ export default function ProfilePage({
     setDraftTheme((prev) => ({ ...prev, pageMode: 'custom', pageCustomHex: hex }));
   }, []);
 
+  useEffect(() => {
+    themeSaveStateRef.current = themeSaveState;
+  }, [themeSaveState]);
+
+  const persistThemePreferences = useCallback(
+    (prefs: ThemePreferences, feedback: Exclude<ThemeSaveFeedback, 'idle' | 'saving'>) => {
+      if (themeSaveStateRef.current === 'saving') return;
+
+      const nextPrefs: ThemePreferences = {
+        ...prefs,
+        buttons: { ...prefs.buttons },
+      };
+
+      setThemeSaveState('saving');
+      setDraftTheme(nextPrefs);
+      setThemePreferences(nextPrefs);
+
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => {
+        setThemeSaveState(feedback);
+        savedTimerRef.current = setTimeout(() => setThemeSaveState('idle'), 2400);
+      }, 200);
+    },
+    [setThemePreferences],
+  );
+
   const handleSaveTheme = () => {
-    if (themeSaveState === 'saving') return;
-    setThemeSaveState('saving');
-    setThemePreferences(draftTheme);
-    if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
-    savedTimerRef.current = setTimeout(() => {
-      setThemeSaveState('saved');
-      savedTimerRef.current = setTimeout(() => setThemeSaveState('idle'), 1800);
-    }, 200);
+    persistThemePreferences(draftTheme, 'saved');
   };
 
   const handleResetTheme = () => {
-    setDraftTheme({
-      ...DEFAULT_THEME_PREFERENCES,
-      buttons: { ...DEFAULT_THEME_PREFERENCES.buttons },
-    });
+    persistThemePreferences(createFreshDefaultTheme(), 'reset');
   };
 
   const isDirty = !themePreferencesEqual(draftTheme, themePreferences);
@@ -180,161 +274,314 @@ export default function ProfilePage({
         : PAGE_THEME_META[draftTheme.pageMode].labelEn;
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
-      {/* ── Avatar / profile card ───────────────────────────────────────── */}
-      <div className={`w-full p-5 sm:p-8 ${themeCardLgClass}`}>
-        <div className="mb-5 flex items-center justify-between">
-          <h2 className={`text-xl font-bold sm:text-2xl ${themeTextClass}`}>{tr('profile')}</h2>
-          <button
-            type="button"
-            onClick={onBack}
-            className={`inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--page-border)] bg-[var(--page-surface-muted)] ${themeTextMutedClass} transition-colors hover:bg-[var(--page-border)]`}
-            aria-label={tr('close')}
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        <div className="flex flex-col items-center text-center">
-          <p className={`mb-6 text-lg font-semibold ${themeTextClass}`}>{welcome}</p>
-          <button
-            type="button"
-            onClick={() => setPickerOpen(true)}
-            className="group relative mb-6 rounded-full"
-            aria-label={tr('profileEditAvatarAria')}
-          >
-            <img
-              src={selectedAvatar}
-              alt=""
-              className="h-24 w-24 rounded-full border-4 border-emerald-500/40 object-cover shadow-lg shadow-black/35 sm:h-32 sm:w-32"
-              onError={(e) => {
-                e.currentTarget.src = DEFAULT_GUEST_AVATAR_URL;
-                setSelectedAvatar(DEFAULT_GUEST_AVATAR_URL);
-              }}
-            />
-            <span className={`absolute -bottom-1 -right-1 inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--page-border)] bg-[var(--page-surface-muted)] ${themeTextClass} shadow-md transition-colors group-hover:bg-[var(--page-border)]`}>
-              <Pencil className="h-4 w-4" />
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleSaveAvatar}
-            disabled={saving}
-            className={`inline-flex min-h-[2.75rem] min-w-[10rem] items-center justify-center px-6 py-2.5 text-base disabled:cursor-not-allowed disabled:opacity-60 ${primaryActionButtonClass}`}
-          >
-            {saving ? tr('profileSaving') : tr('profileSave')}
-          </button>
-        </div>
+    <div className="relative mx-auto flex min-h-0 w-full max-w-3xl max-h-[calc(100dvh-6.5rem)] flex-col sm:max-h-[calc(100dvh-5.5rem)] md:max-h-[calc(100dvh-5rem)]">
+      {/* Static close — sticky while scrolling accordion content */}
+      <div className="sticky top-0 z-30 flex w-full shrink-0 items-center justify-start border-b border-[var(--page-border)]/50 bg-[var(--page-bg)]/95 py-2 backdrop-blur-sm">
+        <button
+          type="button"
+          onClick={onBack}
+          className={`inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--page-border)] bg-[var(--page-surface-muted)] ${themeTextMutedClass} transition-colors hover:bg-[var(--page-border)]`}
+          aria-label={tr('close')}
+        >
+          <X className="h-5 w-5" />
+        </button>
       </div>
 
-      {/* ── Color theme customization card ──────────────────────────────── */}
-      <div className={`w-full p-5 sm:p-6 ${themeCardLgClass}`}>
-        <div className="mb-1 flex items-start justify-between gap-3">
-          <div>
-            <h3 className={`text-base font-bold sm:text-lg ${themeTextClass}`}>
-              {tr('profileColorThemeTitle')}
-            </h3>
-            <p className={`mt-0.5 text-xs sm:text-sm ${themeTextMutedClass}`}>
-              {tr('profileColorThemeDesc')}
-            </p>
-          </div>
+      <div
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]"
+        style={{ paddingBottom: 'max(3rem, calc(3rem + env(safe-area-inset-bottom, 0px)))' }}
+      >
+        <div className="flex flex-col gap-3 pb-12 pt-2">
+      {/* ── Master accordion: Profile ───────────────────────────────────── */}
+      <div className={`w-full ${themeCardLgClass}`}>
+        <div className="flex items-center gap-2 p-5 sm:p-6">
           <button
             type="button"
-            onClick={handleResetTheme}
-            title={tr('profileColorThemeReset')}
-            className={`mt-0.5 h-8 w-8 shrink-0 ${utilityNavIconButtonClass}`}
-            aria-label={tr('profileColorThemeReset')}
+            onClick={() => toggleMasterSection('profile')}
+            aria-expanded={isMasterOpen('profile')}
+            className="flex min-w-0 flex-1 cursor-pointer items-center justify-between gap-3 text-start transition-colors"
           >
-            <RefreshCw className="h-3.5 w-3.5" />
-          </button>
-        </div>
-
-        <div className="mt-5 flex flex-col gap-4">
-          {/* Global page theme */}
-          <div className={`rounded-2xl p-4 ${themeCardMutedClass}`}>
-            <div className="mb-3 flex items-start gap-2">
-              <span className="mt-0.5 text-base leading-none" aria-hidden="true">
-                🎨
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className={`text-sm font-semibold ${themeTextClass}`}>
-                  {tr('profilePageThemeTitle')}
-                </p>
-                <p className={`mt-0.5 text-xs leading-relaxed ${themeTextMutedClass}`}>
-                  {tr('profilePageThemeDesc')}
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-500/25 bg-emerald-500/10">
+                <UserRound className="h-5 w-5 text-emerald-400" />
+              </div>
+              <div className="min-w-0">
+                <h2 className={`truncate text-xl font-bold sm:text-2xl ${themeTextClass}`}>
+                  {tr('profile')}
+                </h2>
+                <p className={`mt-0.5 truncate text-xs sm:text-sm ${themeTextMutedClass}`}>
+                  {tr('profileSectionDesc')}
                 </p>
               </div>
             </div>
-
-            <PageThemePicker
-              mode={draftTheme.pageMode}
-              customHex={draftTheme.pageCustomHex}
-              onModeChange={handlePageModeChange}
-              onCustomHexChange={handlePageCustomHexChange}
-            />
-
-            <p className={`mt-2 text-xs ${themeTextSubtleClass}`}>{pageModeLabel}</p>
-          </div>
-
-          {/* Button groups */}
-          {GROUP_ORDER.map((groupKey) => {
-            const meta = BUTTON_GROUP_META[groupKey];
-            const currentChoice = getGroupColorChoice(draftTheme, groupKey);
-
-            return (
-              <div key={groupKey} className={`rounded-2xl p-4 ${themeCardMutedClass}`}>
-                <div className="mb-3 flex items-start gap-2">
-                  <span className="mt-0.5 text-base leading-none" aria-hidden="true">
-                    {GROUP_ICONS[groupKey]}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className={`text-sm font-semibold ${themeTextClass}`}>
-                      {isHe ? meta.labelHe : meta.labelEn}
-                    </p>
-                    <p className={`mt-0.5 text-xs leading-relaxed ${themeTextMutedClass}`}>
-                      {isHe ? meta.descHe : meta.descEn}
-                    </p>
-                  </div>
-                </div>
-
-                <ButtonGroupColorPicker
-                  group={groupKey}
-                  value={currentChoice}
-                  onChange={(choice) => handleGroupColorChange(groupKey, choice)}
-                />
-
-                <p className={`mt-2 text-xs ${themeTextSubtleClass}`}>
-                  {getButtonChoiceLabel(groupKey, currentChoice, lang)}
-                </p>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="mt-5 flex items-center justify-end gap-3">
-          {themeSaveState === 'saved' && (
-            <span className="flex items-center gap-1.5 text-sm text-emerald-400">
-              <Check className="h-4 w-4" strokeWidth={2.5} />
-              {tr('profileColorThemeSaved')}
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={handleSaveTheme}
-            disabled={!isDirty && themeSaveState === 'idle'}
-            className={[
-              'inline-flex min-h-[2.75rem] min-w-[10rem] items-center justify-center gap-2 px-5 py-2.5 text-sm',
-              primaryActionButtonClass,
-              !isDirty && themeSaveState === 'idle' ? 'cursor-not-allowed opacity-50' : '',
-            ].join(' ')}
-          >
-            {themeSaveState === 'saving'
-              ? tr('profileColorThemeSaving')
-              : tr('profileColorThemeSave')}
+            <MasterChevron open={isMasterOpen('profile')} />
           </button>
         </div>
+
+        <AnimatePresence initial={false}>
+          {isMasterOpen('profile') && (
+            <motion.div key="profile-master-panel" {...accordionPanelMotion} className="overflow-hidden">
+              <div className="flex flex-col items-center px-5 pb-5 text-center sm:px-8 sm:pb-8">
+                <p className={`mb-6 text-lg font-semibold ${themeTextClass}`}>{welcome}</p>
+                <button
+                  type="button"
+                  onClick={() => setPickerOpen(true)}
+                  className="group relative mb-6 rounded-full"
+                  aria-label={tr('profileEditAvatarAria')}
+                >
+                  <img
+                    src={selectedAvatar}
+                    alt=""
+                    className="h-24 w-24 rounded-full border-4 border-emerald-500/40 object-cover shadow-lg shadow-black/35 sm:h-32 sm:w-32"
+                    onError={(e) => {
+                      e.currentTarget.src = DEFAULT_GUEST_AVATAR_URL;
+                      setSelectedAvatar(DEFAULT_GUEST_AVATAR_URL);
+                    }}
+                  />
+                  <span
+                    className={`absolute -bottom-1 -right-1 inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--page-border)] bg-[var(--page-surface-muted)] ${themeTextClass} shadow-md transition-colors group-hover:bg-[var(--page-border)]`}
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSaveAvatar}
+                  disabled={saving}
+                  className={`inline-flex min-h-[2.75rem] min-w-[10rem] items-center justify-center px-6 py-2.5 text-base disabled:cursor-not-allowed disabled:opacity-60 ${primaryActionButtonClass}`}
+                >
+                  {saving ? tr('profileSaving') : tr('profileSave')}
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
+
+      {/* ── Master accordion: Color theme customization ─────────────────── */}
+      <div className={`w-full ${themeCardLgClass}`}>
+        <div className="flex items-center gap-2 p-5 sm:p-6">
+          <button
+            type="button"
+            onClick={() => toggleMasterSection('theme')}
+            aria-expanded={isMasterOpen('theme')}
+            className="flex min-w-0 flex-1 cursor-pointer items-center justify-between gap-3 text-start transition-colors"
+          >
+            <div className="min-w-0 flex-1">
+              <h3 className={`truncate text-base font-bold sm:text-lg ${themeTextClass}`}>
+                {tr('profileColorThemeTitle')}
+              </h3>
+              <p className={`mt-0.5 text-xs sm:text-sm ${themeTextMutedClass}`}>
+                {tr('profileColorThemeDesc')}
+              </p>
+            </div>
+            <MasterChevron open={isMasterOpen('theme')} />
+          </button>
+          <button
+            type="button"
+            onClick={handleResetTheme}
+            disabled={themeSaveState === 'saving'}
+            title={tr('profileColorThemeReset')}
+            className={`h-8 w-8 shrink-0 disabled:cursor-not-allowed disabled:opacity-50 ${utilityNavIconButtonClass}`}
+            aria-label={tr('profileColorThemeReset')}
+          >
+            <RefreshCw
+              className={`h-3.5 w-3.5 ${themeSaveState === 'saving' ? 'animate-spin' : ''}`}
+            />
+          </button>
+        </div>
+
+        <AnimatePresence initial={false}>
+          {isMasterOpen('theme') && (
+            <motion.div key="theme-master-panel" {...accordionPanelMotion} className="overflow-visible">
+              <div className="space-y-3 px-5 pb-8 sm:px-6 sm:pb-10">
+                {/* Nested accordion: Global Theme & Backgrounds */}
+                <button
+                  type="button"
+                  onClick={() => toggleThemeSection('page')}
+                  aria-expanded={isThemeSectionOpen('page')}
+                  className="w-full cursor-pointer rounded-lg bg-gray-800 p-4 transition-colors hover:bg-gray-700"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-500/25 bg-emerald-500/10">
+                        <Palette className="h-5 w-5 text-emerald-400" />
+                      </div>
+                      <div className="min-w-0 text-start">
+                        <h4 className="truncate text-base font-semibold text-white sm:text-lg">
+                          {tr('profileThemeAccordionPageTitle')}
+                        </h4>
+                        <p className="mt-0.5 text-xs text-gray-400 sm:text-sm">
+                          {tr('profileThemeAccordionPageDesc')}
+                        </p>
+                      </div>
+                    </div>
+                    {isThemeSectionOpen('page') ? (
+                      <ChevronDown className="h-5 w-5 shrink-0 text-gray-300" />
+                    ) : (
+                      <ChevronUp className="h-5 w-5 shrink-0 text-gray-300" />
+                    )}
+                  </div>
+                </button>
+
+                <AnimatePresence initial={false}>
+                  {isThemeSectionOpen('page') && (
+                    <motion.div
+                      key="profile-theme-page"
+                      {...accordionPanelMotion}
+                      className="overflow-visible rounded-xl border border-gray-700/70 bg-gray-900/70 p-3 shadow-sm shadow-black/20 sm:p-4"
+                    >
+                      <div className={`rounded-2xl p-4 ${themeCardMutedClass}`}>
+                        <div className="mb-3 flex items-start gap-2">
+                          <span className="mt-0.5 text-base leading-none" aria-hidden="true">
+                            🎨
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className={`text-sm font-semibold ${themeTextClass}`}>
+                              {tr('profilePageThemeTitle')}
+                            </p>
+                            <p className={`mt-0.5 text-xs leading-relaxed ${themeTextMutedClass}`}>
+                              {tr('profilePageThemeDesc')}
+                            </p>
+                          </div>
+                        </div>
+
+                        <PageThemePicker
+                          mode={draftTheme.pageMode}
+                          customHex={draftTheme.pageCustomHex}
+                          onModeChange={handlePageModeChange}
+                          onCustomHexChange={handlePageCustomHexChange}
+                        />
+
+                        <p className={`mt-2 text-xs ${themeTextSubtleClass}`}>{pageModeLabel}</p>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Nested accordion: Button & Input Field Colors */}
+                <button
+                  type="button"
+                  onClick={() => toggleThemeSection('buttons')}
+                  aria-expanded={isThemeSectionOpen('buttons')}
+                  className="w-full cursor-pointer rounded-lg bg-gray-800 p-4 transition-colors hover:bg-gray-700"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-violet-500/25 bg-violet-500/10">
+                        <SlidersHorizontal className="h-5 w-5 text-violet-400" />
+                      </div>
+                      <div className="min-w-0 text-start">
+                        <h4 className="truncate text-base font-semibold text-white sm:text-lg">
+                          {tr('profileThemeAccordionButtonsTitle')}
+                        </h4>
+                        <p className="mt-0.5 text-xs text-gray-400 sm:text-sm">
+                          {tr('profileThemeAccordionButtonsDesc')}
+                        </p>
+                      </div>
+                    </div>
+                    {isThemeSectionOpen('buttons') ? (
+                      <ChevronDown className="h-5 w-5 shrink-0 text-gray-300" />
+                    ) : (
+                      <ChevronUp className="h-5 w-5 shrink-0 text-gray-300" />
+                    )}
+                  </div>
+                </button>
+
+                <AnimatePresence initial={false}>
+                  {isThemeSectionOpen('buttons') && (
+                    <motion.div
+                      key="profile-theme-buttons"
+                      {...accordionPanelMotion}
+                      className="overflow-visible space-y-4 rounded-xl border border-gray-700/70 bg-gray-900/70 p-3 shadow-sm shadow-black/20 sm:p-4"
+                    >
+                      {GROUP_ORDER.map((groupKey) => {
+                        const meta = BUTTON_GROUP_META[groupKey];
+                        const currentChoice = getGroupColorChoice(draftTheme, groupKey);
+
+                        return (
+                          <div key={groupKey} className={`rounded-2xl p-4 ${themeCardMutedClass}`}>
+                            <div className="mb-3 flex items-start gap-2">
+                              <span className="mt-0.5 text-base leading-none" aria-hidden="true">
+                                {GROUP_ICONS[groupKey]}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <p className={`text-sm font-semibold ${themeTextClass}`}>
+                                  {isHe ? meta.labelHe : meta.labelEn}
+                                </p>
+                                <p className={`mt-0.5 text-xs leading-relaxed ${themeTextMutedClass}`}>
+                                  {isHe ? meta.descHe : meta.descEn}
+                                </p>
+                              </div>
+                            </div>
+
+                            <ButtonGroupColorPicker
+                              group={groupKey}
+                              value={currentChoice}
+                              onChange={(choice) => handleGroupColorChange(groupKey, choice)}
+                            />
+
+                            <p className={`mt-2 text-xs ${themeTextSubtleClass}`}>
+                              {getButtonChoiceLabel(groupKey, currentChoice, lang)}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <div className="flex items-center justify-end gap-3 pt-2">
+                  {themeSaveState === 'saved' && (
+                    <span className="flex items-center gap-1.5 text-sm text-emerald-400">
+                      <Check className="h-4 w-4" strokeWidth={2.5} />
+                      {tr('profileColorThemeSaved')}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleSaveTheme}
+                    disabled={(!isDirty && themeSaveState === 'idle') || themeSaveState === 'saving'}
+                    className={[
+                      'inline-flex min-h-[2.75rem] min-w-[10rem] items-center justify-center gap-2 px-5 py-2.5 text-sm',
+                      primaryActionButtonClass,
+                      !isDirty && themeSaveState === 'idle' ? 'cursor-not-allowed opacity-50' : '',
+                    ].join(' ')}
+                  >
+                    {themeSaveState === 'saving'
+                      ? tr('profileColorThemeSaving')
+                      : tr('profileColorThemeSave')}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+        </div>
+      </div>
+
+      <AnimatePresence>
+        {themeSaveState === 'reset' && (
+          <motion.div
+            key="profile-theme-reset-toast"
+            role="status"
+            aria-live="polite"
+            initial={{ opacity: 0, y: 12, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.98 }}
+            transition={{ duration: 0.22, ease: 'easeOut' }}
+            className="pointer-events-none fixed bottom-6 left-1/2 z-50 w-[min(calc(100%-2rem),24rem)] -translate-x-1/2 rounded-xl border border-emerald-500/35 bg-emerald-950/95 px-4 py-3 text-center text-sm font-medium text-emerald-200 shadow-xl shadow-black/40 backdrop-blur-sm"
+            style={{ marginBottom: 'env(safe-area-inset-bottom, 0px)' }}
+          >
+            <span className="inline-flex items-center justify-center gap-2">
+              <Check className="h-4 w-4 shrink-0" strokeWidth={2.5} />
+              {tr('profileColorThemeResetSaved')}
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Avatar picker modal ─────────────────────────────────────────── */}
       {pickerOpen && (

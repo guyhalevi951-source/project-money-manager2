@@ -273,8 +273,8 @@ export const BUTTON_GROUP_META: Record<
   nav: {
     labelHe: 'ניווט ומעבר דפים',
     labelEn: 'App Navigation',
-    descHe: 'כפתורי ניווט כמו תתי-תקציבים, היסטוריית הוצאות וגרפים',
-    descEn: 'Navigation buttons like sub-budgets, expense history, and charts',
+    descHe: 'כפתור בית, תפריט ניווט, כפתור שפה (גלובוס) וקיצורי דפים',
+    descEn: 'Home button, nav menu, language globe button, and page shortcuts',
   },
   filter: {
     labelHe: 'שדות קלט, סינון וכרטיסים כהים',
