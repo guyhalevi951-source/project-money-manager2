@@ -30,6 +30,10 @@ import {
   type CurrencyLayoutItem,
 } from './currencyLayoutService';
 import {
+  DEFAULT_BUTTON_THEME,
+  type ButtonGroupTheme,
+} from './buttonThemeService';
+import {
   GLOBAL_COMMISSION_CURRENCY,
   normalizeCommissionCurrency,
   type CommissionCurrency,
@@ -46,6 +50,7 @@ export interface UserSettings {
   saved_colors: string[];
   custom_currencies: ExpenseCurrency[];
   currency_layout: CurrencyLayoutItem[];
+  button_theme: ButtonGroupTheme;
 }
 
 export interface UserCategoriesData {
@@ -76,6 +81,7 @@ export const EMPTY_USER_SETTINGS: UserSettings = {
   saved_colors: [],
   custom_currencies: [],
   currency_layout: buildDefaultCurrencyLayout(),
+  button_theme: { ...DEFAULT_BUTTON_THEME },
 };
 
 export const EMPTY_USER_CATEGORIES: UserCategoriesData = {
@@ -131,6 +137,16 @@ function parseSettings(raw: Record<string, unknown> | undefined): UserSettings {
       ? reconcileCurrencyLayout(parsedLayout, custom_currencies)
       : buildDefaultCurrencyLayout(custom_currencies);
 
+  const rawTheme = raw.button_theme;
+  const button_theme: ButtonGroupTheme =
+    rawTheme &&
+    typeof rawTheme === 'object' &&
+    typeof (rawTheme as Record<string, unknown>).primary === 'string' &&
+    typeof (rawTheme as Record<string, unknown>).currency === 'string' &&
+    typeof (rawTheme as Record<string, unknown>).nav === 'string'
+      ? (rawTheme as ButtonGroupTheme)
+      : { ...DEFAULT_BUTTON_THEME };
+
   return {
     lang,
     keepOriginalValues,
@@ -138,6 +154,7 @@ function parseSettings(raw: Record<string, unknown> | undefined): UserSettings {
     saved_colors: normalizeSavedColors(raw.saved_colors),
     custom_currencies,
     currency_layout,
+    button_theme,
   };
 }
 
@@ -294,6 +311,25 @@ export function loadLegacySettingsFromLocalStorage(): UserSettings {
     currency_layout = reconcileCurrencyLayout(currency_layout, custom_currencies);
   }
 
+  let button_theme: ButtonGroupTheme = { ...DEFAULT_BUTTON_THEME };
+  try {
+    const raw = window.localStorage.getItem('money_manager_button_theme_v1');
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        typeof (parsed as Record<string, unknown>).primary === 'string' &&
+        typeof (parsed as Record<string, unknown>).currency === 'string' &&
+        typeof (parsed as Record<string, unknown>).nav === 'string'
+      ) {
+        button_theme = parsed as ButtonGroupTheme;
+      }
+    }
+  } catch {
+    button_theme = { ...DEFAULT_BUTTON_THEME };
+  }
+
   return {
     lang,
     keepOriginalValues,
@@ -301,6 +337,7 @@ export function loadLegacySettingsFromLocalStorage(): UserSettings {
     saved_colors,
     custom_currencies,
     currency_layout,
+    button_theme,
   };
 }
 
@@ -454,6 +491,7 @@ export async function migrateLegacyDataToCloud(uid: string): Promise<void> {
         saved_colors: settings.saved_colors,
         custom_currencies: settings.custom_currencies,
         currency_layout: settings.currency_layout,
+        button_theme: settings.button_theme,
         updatedAt: serverTimestamp(),
       },
       { merge: true },
@@ -568,6 +606,7 @@ export async function saveSettingsToCloud(uid: string, settings: UserSettings): 
       saved_colors: settings.saved_colors,
       custom_currencies: settings.custom_currencies,
       currency_layout: settings.currency_layout,
+      button_theme: settings.button_theme,
       updatedAt: serverTimestamp(),
     },
     { merge: true },

@@ -1,5 +1,10 @@
 /**
- * Unified button design tokens — two functional groups only.
+ * Unified button design tokens — two functional groups + currency utility.
+ *
+ * Colors are driven by CSS custom properties that are set by the button theme
+ * system (buttonThemeService.ts → LanguageContext). Tailwind's JIT compiler
+ * picks up all var() arbitrary classes from this file at build time.
+ *
  * Import from here; do not duplicate color classes in components.
  */
 
@@ -7,11 +12,12 @@ const transition = 'transition-all active:scale-[0.98]';
 
 // ─── PRIMARY ACTION GROUP ─────────────────────────────────────────────────────
 // Data-changing CTAs: submit, save, confirm, add expense, update budget.
+// Colors are driven by --btn-primary-* CSS variables.
 
 const primaryColors =
-  'bg-indigo-500 hover:bg-indigo-400 active:bg-indigo-600 text-white font-semibold';
+  'bg-[var(--btn-primary-bg)] hover:bg-[var(--btn-primary-hover)] active:bg-[var(--btn-primary-active)] text-white font-semibold';
 
-const primaryShadow = 'shadow-md shadow-indigo-500/10';
+const primaryShadow = 'shadow-md shadow-black/15';
 
 export const primaryActionButtonClass = [
   'rounded-xl',
@@ -22,7 +28,7 @@ export const primaryActionButtonClass = [
 
 export const primaryActionButtonBorderedClass = [
   primaryActionButtonClass,
-  'border border-indigo-400/30',
+  'border border-white/20',
 ].join(' ');
 
 /** @deprecated Use primaryActionButtonClass — kept for existing imports. */
@@ -35,19 +41,20 @@ export const primaryActionActivePillClass = [
 ].join(' ');
 
 export const primaryActionDisabled =
-  'disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-indigo-500';
+  'disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-[var(--btn-primary-bg)]';
 
-export const primaryActionAccentIconClass = 'text-indigo-400';
+export const primaryActionAccentIconClass = 'text-[var(--btn-primary-bg)]';
 
 /** Selected chip / toggle state (currency picker, active filter). */
 export const primaryActionSelectedChipClass =
-  'bg-indigo-500 text-white shadow-md shadow-indigo-500/30 ring-1 ring-indigo-400/40';
+  'bg-[var(--btn-primary-bg)] text-white shadow-md shadow-black/20 ring-1 ring-white/20';
 
 // ─── CURRENCY UTILITY GROUP ───────────────────────────────────────────────────
-// Vibrant royal blue for currency configuration shortcuts only.
+// Vibrant solid-color buttons for currency configuration shortcuts only.
+// Colors driven by --btn-currency-* CSS variables.
 
 const currencyUtilityColors =
-  'bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-medium';
+  'bg-[var(--btn-currency-bg)] hover:bg-[var(--btn-currency-hover)] active:bg-[var(--btn-currency-active)] text-white font-medium';
 
 /** Budget-row currency shortcuts (display currency, manual rate, commissions). */
 export const currencyUtilityButtonClass = [
@@ -64,10 +71,17 @@ export const currencyUtilityButtonLgClass = [
 ].join(' ');
 
 // ─── UTILITY & NAVIGATION GROUP ───────────────────────────────────────────────
-// Settings shortcuts, page navigation, sub-budgets, currency panels, menu toggles.
+// Settings shortcuts, page navigation, sub-budgets, menu toggles.
+// Colors driven by --btn-nav-* CSS variables.
 
-const utilityColors =
-  'bg-indigo-950/60 text-indigo-200 border border-indigo-900/50 hover:bg-indigo-900/70 hover:text-indigo-100';
+const utilityColors = [
+  'bg-[var(--btn-nav-bg)]',
+  'hover:bg-[var(--btn-nav-hover)]',
+  'active:bg-[var(--btn-nav-active)]',
+  'text-[var(--btn-nav-text)]',
+  'hover:text-[var(--btn-nav-text-hover)]',
+  'border border-[var(--btn-nav-border)]',
+].join(' ');
 
 /** Compact chip (currency settings row). */
 export const utilityNavButtonClass = [
@@ -93,19 +107,21 @@ export const utilityNavShortcutClass = [
 /** Active / selected navigation tab. */
 export const utilityNavActiveTabClass = [
   'rounded-2xl text-white font-medium',
-  'bg-indigo-900/90 border border-indigo-700/60 shadow-md shadow-indigo-950/40',
+  'bg-[var(--btn-primary-bg)] border border-white/20 shadow-md shadow-black/30',
   transition,
 ].join(' ');
 
 /** Icon badge inside nav toggle (grid / home). */
 export const utilityNavIconBadgeClass = [
-  'flex items-center justify-center rounded-xl bg-indigo-950/60 border border-indigo-900/50 text-indigo-200',
+  'flex items-center justify-center rounded-xl',
+  'bg-[var(--btn-nav-bg)] border border-[var(--btn-nav-border)] text-[var(--btn-nav-text)]',
 ].join(' ');
 
 /** Mobile menu / grid toggle button. */
 export const utilityNavMenuToggleClass = [
-  'inline-flex items-center justify-center rounded-full border bg-indigo-950/60 text-indigo-200 border-indigo-900/50',
-  'hover:bg-indigo-900/70 hover:text-indigo-100',
+  'inline-flex items-center justify-center rounded-full border',
+  'bg-[var(--btn-nav-bg)] text-[var(--btn-nav-text)] border-[var(--btn-nav-border)]',
+  'hover:bg-[var(--btn-nav-hover)] hover:text-[var(--btn-nav-text-hover)]',
   transition,
 ].join(' ');
 
@@ -140,4 +156,4 @@ export const primaryActionCompactButtonClass = [
 
 /** Selected option inside a dropdown listbox. */
 export const utilityNavDropdownSelectedClass =
-  'bg-indigo-900/50 text-indigo-200';
+  'bg-[var(--btn-nav-hover)] text-[var(--btn-nav-text-hover)]';

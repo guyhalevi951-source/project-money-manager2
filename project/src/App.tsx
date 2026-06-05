@@ -2596,6 +2596,7 @@ function App() {
     savedColors,
     customCurrencies,
     currencyLayout,
+    buttonTheme,
     setSettingsPersistence,
     applySettingsFromCloud,
   } = useLanguage();
@@ -2615,6 +2616,7 @@ function App() {
     savedColors,
     customCurrencies,
     currencyLayout,
+    buttonTheme,
   });
 
   settingsMergeRef.current = {
@@ -2623,6 +2625,7 @@ function App() {
     savedColors,
     customCurrencies,
     currencyLayout,
+    buttonTheme,
   };
 
   useEffect(() => {
@@ -3262,6 +3265,7 @@ function App() {
                     saved_colors: mergeBase.savedColors,
                     custom_currencies: mergeBase.customCurrencies,
                     currency_layout: mergeBase.currencyLayout,
+                    button_theme: mergeBase.buttonTheme,
                   };
               applySettingsFromCloud(merged);
             } else if (meta.exists) {
@@ -3427,6 +3431,7 @@ function App() {
         saved_colors: savedColors,
         custom_currencies: customCurrencies,
         currency_layout: currencyLayout,
+        button_theme: buttonTheme,
       }).catch(() => {
         // Non-blocking; next change will retry.
       });
@@ -3440,6 +3445,7 @@ function App() {
     savedColors,
     customCurrencies,
     currencyLayout,
+    buttonTheme,
     dataReady,
     user,
     settingsCloudReady,
