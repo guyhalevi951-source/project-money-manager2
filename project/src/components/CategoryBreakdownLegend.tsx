@@ -2,6 +2,7 @@ import type { CategoryBreakdownSlice } from '../categories';
 import CategoryIconBadge from './CategoryIconBadge';
 import DisplayMoney from './DisplayMoney';
 import { LocalizedUserText, LtrNumeric, useLanguage } from '../LanguageContext';
+import { typographyBodyClass, typographyLabelClass, typographyMutedClass } from '../styles/themeSurfaceStyles';
 
 interface CategoryBreakdownLegendProps {
   items: CategoryBreakdownSlice[];
@@ -19,12 +20,12 @@ function LegendLine({
 }) {
   return (
     <p className="min-w-0 leading-snug">
-      <span className="text-neutral-300 font-medium">
+      <span className={`font-medium ${typographyLabelClass}`}>
         <LocalizedUserText text={item.value} />
       </span>
-      <span className="text-neutral-500">: </span>
-      <DisplayMoney amount={item.amount} className="text-neutral-100 font-semibold inline-block" />
-      <span className="text-neutral-500 whitespace-nowrap">
+      <span className={typographyMutedClass}>: </span>
+      <DisplayMoney amount={item.amount} className={`font-semibold inline-block ${typographyBodyClass}`} />
+      <span className={`whitespace-nowrap ${typographyMutedClass}`}>
         {' '}
         (<LtrNumeric>{item.percentage.toFixed(percentageDecimals)}%</LtrNumeric>)
       </span>

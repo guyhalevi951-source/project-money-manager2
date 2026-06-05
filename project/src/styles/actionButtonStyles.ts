@@ -1,10 +1,10 @@
 /**
- * Unified button design tokens — two functional groups + currency utility.
+ * Theme style tokens — Categories 1–4 (see theme/themeCategoryMapping.ts).
  *
- * Colors are driven by CSS custom properties that are set by the button theme
- * system (buttonThemeService.ts → LanguageContext). Tailwind's JIT compiler
- * picks up all var() arbitrary classes from this file at build time.
+ * Cat 1 primary: primaryAction* — Cat 2 utility: currencyUtility*
+ * Cat 3 navigation: utilityNav* — Cat 4 input/filter: filterBar*, filterForm*
  *
+ * Classify new controls via classifyThemeCategory() before picking a token.
  * Import from here; do not duplicate color classes in components.
  */
 
@@ -15,7 +15,7 @@ const transition = 'transition-all active:scale-[0.98]';
 // Colors are driven by --btn-primary-* CSS variables.
 
 const primaryColors =
-  'bg-[var(--btn-primary-bg)] hover:bg-[var(--btn-primary-hover)] active:bg-[var(--btn-primary-active)] text-white font-semibold';
+  'bg-[var(--btn-primary-bg)] hover:bg-[var(--btn-primary-hover)] active:bg-[var(--btn-primary-active)] text-[var(--btn-primary-fg,#ffffff)] font-semibold';
 
 const primaryShadow = 'shadow-md shadow-black/15';
 
@@ -47,14 +47,14 @@ export const primaryActionAccentIconClass = 'text-[var(--btn-primary-bg)]';
 
 /** Selected chip / toggle state (currency picker, active filter). */
 export const primaryActionSelectedChipClass =
-  'bg-[var(--btn-primary-bg)] text-white shadow-md shadow-black/20 ring-1 ring-white/20';
+  'bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg,#ffffff)] shadow-md shadow-black/20 ring-1 ring-white/20';
 
 // ─── CURRENCY UTILITY GROUP ───────────────────────────────────────────────────
 // Vibrant solid-color buttons for currency configuration shortcuts only.
 // Colors driven by --btn-currency-* CSS variables.
 
 const currencyUtilityColors =
-  'bg-[var(--btn-currency-bg)] hover:bg-[var(--btn-currency-hover)] active:bg-[var(--btn-currency-active)] text-white font-medium';
+  'bg-[var(--btn-currency-bg)] hover:bg-[var(--btn-currency-hover)] active:bg-[var(--btn-currency-active)] text-[var(--btn-currency-fg,#ffffff)] font-medium';
 
 /** Budget-row currency shortcuts (display currency, manual rate, commissions). */
 export const currencyUtilityButtonClass = [
@@ -106,7 +106,7 @@ export const utilityNavShortcutClass = [
 
 /** Active / selected navigation tab. */
 export const utilityNavActiveTabClass = [
-  'rounded-2xl text-white font-medium',
+  'rounded-2xl text-[var(--btn-primary-fg,#ffffff)] font-medium',
   'bg-[var(--btn-primary-bg)] border border-white/20 shadow-md shadow-black/30',
   transition,
 ].join(' ');
@@ -208,6 +208,7 @@ export const filterFormControlClass = [
 // Hardcoded indigo — excluded from all dynamic theme groups per product requirement.
 
 export const authSignupStaticButtonClass = [
+  'auth-signup-static',
   'rounded-xl',
   'bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700',
   'text-white font-semibold',
@@ -216,13 +217,14 @@ export const authSignupStaticButtonClass = [
 ].join(' ');
 
 export const authSignupStaticPillClass = [
+  'auth-signup-static',
   'rounded-xl',
   'bg-indigo-600 text-white font-semibold',
   'shadow-md shadow-black/15',
 ].join(' ');
 
-/** Chart / carousel inset panel. */
+/** Level 3 inset panel nested inside a master card (calculators, charts). */
 export const filterInsetPanelClass = [
-  'rounded-2xl',
-  'bg-[var(--surface-panel-bg)] border border-[var(--surface-panel-border)]',
+  'rounded-xl border',
+  'bg-[var(--color-depth-inner)] border-[var(--color-depth-inner-border)]',
 ].join(' ');

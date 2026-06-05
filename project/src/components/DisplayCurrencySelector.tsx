@@ -34,6 +34,13 @@ import {
   utilityNavButtonLgClass,
   utilityNavActiveTabClass,
 } from '../styles/actionButtonStyles';
+import {
+  subCardClass,
+  subCardGridCellClass,
+  subCardGridCellIdleClass,
+  surfaceModalLgClass,
+  themeTextClass,
+} from '../styles/themeSurfaceStyles';
 
 const DEFAULT_DISPLAY_CURRENCY: CoreCurrencyCode = 'ILS';
 
@@ -79,7 +86,7 @@ function CurrencyPinSaveConfirmModal({
           role="dialog"
           aria-modal="true"
           aria-labelledby="currency-pin-save-title"
-          className="relative w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl border border-gray-700/80 bg-gray-900/95 backdrop-blur-xl shadow-2xl shadow-black/50 p-5 sm:p-6"
+          className={`relative w-full p-5 backdrop-blur-xl sm:max-w-sm sm:rounded-2xl sm:p-6 ${surfaceModalLgClass}`}
         >
           <p id="currency-pin-save-title" className="text-base sm:text-lg font-semibold text-white leading-relaxed">
             {tr('currencySavePinnedConfirm')}
@@ -109,7 +116,7 @@ function CurrencyPinSaveConfirmModal({
 // ─── Currency card ────────────────────────────────────────────────────────────
 
 const cellInnerClass =
-  'absolute inset-0 flex flex-col items-center justify-center rounded-xl text-sm sm:text-base font-semibold tabular-nums transition-all min-h-0';
+  'absolute inset-0 flex flex-col items-center justify-center text-sm sm:text-base font-semibold tabular-nums min-h-0';
 
 interface CurrencyCellProps {
   code: CurrencyCode;
@@ -199,17 +206,17 @@ function CurrencyCell({
         onClick={() => onSelect(code)}
         onPointerDown={(e) => { if (editMode) e.stopPropagation(); }}
         tabIndex={editMode ? -1 : 0}
-        className={`${cellInnerClass} ${editMode ? 'pt-1' : ''} ${
+        className={`${cellInnerClass} ${subCardGridCellClass} ${editMode ? 'pt-1' : ''} ${
           editMode
-            ? `text-gray-200 bg-gray-800/60 ring-1 ring-amber-500/25 pointer-events-none ${
+            ? `${themeTextClass} ring-1 ring-amber-500/25 pointer-events-none ${
                 isDragging
                   ? 'scale-105 shadow-2xl shadow-black/50 opacity-90 ring-2 ring-amber-400/70'
                   : 'opacity-95'
               }`
             : `active:scale-[0.98] ${
                 selected
-                  ? primaryActionSelectedChipClass
-                  : 'text-gray-300 bg-gray-800/40 hover:text-white hover:bg-gray-800/80'
+                  ? `${primaryActionSelectedChipClass} border-[var(--btn-primary-bg)]`
+                  : subCardGridCellIdleClass
               }`
         }`}
         aria-pressed={selected}
@@ -434,7 +441,7 @@ function DisplayCurrencySelector({ recentExpenseCurrencies: _recent }: DisplayCu
           type="button"
           onClick={() => setLibraryOpen(true)}
           aria-label={tr('currencyLibraryTitle')}
-          className={`${cellInnerClass} active:scale-[0.98] text-gray-300 bg-gray-800/40 hover:text-white hover:bg-gray-800/80 ${
+          className={`${cellInnerClass} ${subCardGridCellIdleClass} active:scale-[0.98] ${
             libraryOpen ? 'ring-1 ring-indigo-400/40 text-indigo-300' : ''
           }`}
         >
@@ -528,7 +535,7 @@ function DisplayCurrencySelector({ recentExpenseCurrencies: _recent }: DisplayCu
       {editMode ? (
         <div
           dir="ltr"
-          className="rounded-2xl bg-gray-950/80 border border-amber-500/40 ring-1 ring-amber-500/20 p-1.5 sm:p-2"
+          className={`p-1.5 ring-1 ring-amber-500/20 sm:p-2 ${subCardClass} border-amber-500/40`}
         >
           {editGrid}
         </div>
@@ -536,7 +543,7 @@ function DisplayCurrencySelector({ recentExpenseCurrencies: _recent }: DisplayCu
         <motion.div
           layout
           dir="ltr"
-          className="rounded-2xl bg-gray-950/80 border border-gray-700 p-1.5 sm:p-2"
+          className={`p-1.5 sm:p-2 ${subCardClass}`}
         >
           {readonlyGrid}
         </motion.div>

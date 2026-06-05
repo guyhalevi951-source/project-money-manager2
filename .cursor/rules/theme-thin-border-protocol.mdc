@@ -1,0 +1,50 @@
+---
+description: Thin border enclosure protocol — mandatory 1px perimeter borders on nested structural containers.
+globs: project/src/**/*.{tsx,ts}
+alwaysApply: true
+---
+
+# Thin border enclosure protocol (v1.0.0)
+
+Source of truth: `project/src/theme/themeThinBorderProtocol.ts`
+Re-exported via: `buttonThemeService.ts`, `themeSurfaceStyles.ts`
+
+## Mandatory rule (חוק מסגרת היקפית)
+
+Whenever two structural layout containers share a visual boundary or are nested using identical/custom theme colors, wrap the **inner** element with a uniform **1px full-perimeter `border`** (not only `border-b`).
+
+## CSS variables (auto-computed on theme change)
+
+| Variable | Use |
+|----------|-----|
+| `--theme-enclosure-border` | Page-level / generic nested tint |
+| `--main-card-surface-border` | Cat 6 master cards (alpha overlay from card bg) |
+| `--color-sub-cards-border` | Cat 7 nested panels (alpha overlay from sub-card bg) |
+| `--surface-input-border` | Cat 4 inputs inside bordered panels |
+
+Dark surfaces → `rgba(255, 255, 255, 0.12)` · Light surfaces → `rgba(0, 0, 0, 0.10)`
+
+## Required tokens
+
+- Cat 6 masters: `themeCardClass`, `themeCardLgClass` (include `border`)
+- Cat 7 nested: `subCardClass`, `subCardSmClass`, `subCardAccordionShellClass`
+- Nested stacks: `SubCardNestedStack` + `SubCardNestedItem` (`data-nested-list-enclosed`)
+- Grid cells: `subCardGridCellClass`, `subCardGridCellIdleClass`
+
+## Applies to
+
+- Profile/Settings accordion section frames (מטבעות, הגדרות כלליות, עיצוב כפתורים)
+- Dashboard month selector & financial summary inset panels
+- Currency grid cards (ILS, USD, …) in מטבע תצוגה
+- Chart/carousel insets (`filterInsetPanelClass`)
+
+## Forbidden
+
+- Nested Cat 7 blocks without a full `border` when inside Cat 6
+- Hardcoded `border-gray-*` / `divide-neutral-*` for structural separation inside themed cards
+- Replacing enclosure borders with shadow-only depth
+
+## Cat 4 & Cat 1 inside bordered panels
+
+Inputs use `surfaceInputClass` / `filterFormControlClass` (own `--surface-input-border`).
+Buttons retain group tokens (`primaryActionButtonClass`, etc.) — do not remove their borders/rings.

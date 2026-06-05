@@ -17,7 +17,6 @@ import {
 import {
   isSupportedCurrency,
   normalizeCustomCurrencies,
-  normalizeDisplayCurrency,
   type CurrencyCode,
   type ExpenseCurrency,
 } from './services/currencyRegistry';
@@ -32,11 +31,12 @@ import {
 } from './services/userFirebaseSync';
 import {
   applyThemeCSS,
-  loadThemePreferences,
+  DEFAULT_THEME_PREFERENCES,
   saveThemePreferencesToStorage,
   type ThemePreferences,
 } from './services/buttonThemeService';
-import { getSavedColors as getLocalSavedColors } from './services/savedColorsService';
+import { EMPTY_USER_SETTINGS } from './services/userFirebaseSync';
+/** Theme layout (overflow/z-index/scroll): theme/themeLayoutProtocol.ts */
 import {
   formatMoneyFromIls,
   resolveExpenseDisplayAmount,
@@ -46,7 +46,6 @@ import {
   addCurrencyToLayout,
   CURRENCY_LAYOUT_STORAGE_KEY,
   deriveCustomCurrenciesFromLayout,
-  getInitialCurrencyLayout,
   normalizeLayoutOrder,
   reconcileCurrencyLayout,
   type CurrencyLayoutItem,
@@ -95,6 +94,21 @@ interface LanguageContextValue {
   ensureUserContents: (texts: string[]) => Promise<void>;
 }
 
+/**
+ * Theme provider — persists ThemePreferences and calls applyThemeCSS on change.
+ *
+ * Category assignment standard (v1.1.0): src/theme/themeCategoryMapping.ts
+ * - Cat 0 page canvas → pageMode / themePageRootClass
+ * - Cat 1 primary actions → buttons.primary / primaryActionButtonClass
+ * - Cat 2 management tools → buttons.currency / currencyUtilityButtonClass
+ * - Cat 3 navigation → buttons.nav / utilityNav*Class
+ * - Cat 4 input surfaces → filterGroupColor / surfaceInput* & filterBar*
+ * - Cat 5 typography → textColor / typography*Class (+ index.css override rules)
+ * - Cat 6 main cards → mainCardSurfaceColor / themeCard* & surfaceModal*
+ * - Cat 7 sub-cards → subCardColor / subCard* & --color-sub-cards
+ *
+ * New UI: classifyThemeCategory(hint) → approved token → themeCategoryProps(id)
+ */
 const LanguageContext = createContext<LanguageContextValue | null>(null);
 
 const LANGUAGE_STORAGE_KEY = 'money-manager-language';
@@ -102,20 +116,6 @@ const KEEP_ORIGINAL_VALUES_STORAGE_KEY = 'money-manager-keep-original-values';
 const DISPLAY_CURRENCY_STORAGE_KEY = 'money-manager-display-currency';
 
 const CUSTOM_CURRENCIES_STORAGE_KEY = 'money-manager-custom-currencies';
-
-function getInitialDisplayCurrency(): CurrencyCode {
-  return normalizeDisplayCurrency(window.localStorage.getItem(DISPLAY_CURRENCY_STORAGE_KEY));
-}
-
-function getInitialCustomCurrencies(): ExpenseCurrency[] {
-  try {
-    const raw = window.localStorage.getItem(CUSTOM_CURRENCIES_STORAGE_KEY);
-    if (!raw) return [];
-    return normalizeCustomCurrencies(JSON.parse(raw));
-  } catch {
-    return [];
-  }
-}
 
 const hasHebrew = (text: string) => /[\u0590-\u05FF]/.test(text);
 const detectSourceLang = (text: string): Lang => (hasHebrew(text) ? 'he' : 'en');
@@ -125,15 +125,7 @@ const translationKey = (text: string, fromLang: Lang, toLang: Lang) =>
 function getInitialLang(): Lang {
   const preferred = readPreferredLanguage();
   if (preferred) return preferred;
-
-  const fromStorage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
-  if (fromStorage === 'he' || fromStorage === 'en') {
-    writePreferredLanguage(fromStorage);
-    return fromStorage;
-  }
-
-  const browserLang = navigator.language.toLowerCase();
-  return browserLang.startsWith('he') ? 'he' : 'en';
+  return EMPTY_USER_SETTINGS.lang;
 }
 
 function resolveUserContent(
@@ -161,22 +153,24 @@ function resolveUserContent(
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [lang, setLangState] = useState<Lang>(() => getInitialLang());
   const skipLangLocalPersistRef = useRef(false);
-  const [keepOriginalValues, setKeepOriginalValues] = useState<boolean>(() => {
-    const fromStorage = window.localStorage.getItem(KEEP_ORIGINAL_VALUES_STORAGE_KEY);
-    return fromStorage === 'true';
-  });
-  const [displayCurrency, setDisplayCurrencyState] = useState<ExpenseCurrency>(() =>
-    getInitialDisplayCurrency(),
+  const [keepOriginalValues, setKeepOriginalValues] = useState<boolean>(
+    () => EMPTY_USER_SETTINGS.keepOriginalValues,
   );
-  const [customCurrencies, setCustomCurrencies] = useState<ExpenseCurrency[]>(() =>
-    getInitialCustomCurrencies(),
+  const [displayCurrency, setDisplayCurrencyState] = useState<ExpenseCurrency>(
+    () => EMPTY_USER_SETTINGS.displayCurrency,
+  );
+  const [customCurrencies, setCustomCurrencies] = useState<ExpenseCurrency[]>(
+    () => [...EMPTY_USER_SETTINGS.custom_currencies],
   );
   const [currencyLayout, setCurrencyLayout] = useState<CurrencyLayoutItem[]>(() =>
-    getInitialCurrencyLayout(getInitialCustomCurrencies()),
+    reconcileCurrencyLayout(
+      EMPTY_USER_SETTINGS.currency_layout,
+      EMPTY_USER_SETTINGS.custom_currencies,
+    ),
   );
-  const [savedColors, setSavedColors] = useState<string[]>(() => getLocalSavedColors());
+  const [savedColors, setSavedColors] = useState<string[]>(() => []);
   const [themePreferences, setThemePreferencesState] = useState<ThemePreferences>(() => {
-    const prefs = loadThemePreferences();
+    const prefs = { ...DEFAULT_THEME_PREFERENCES };
     applyThemeCSS(prefs);
     return prefs;
   });

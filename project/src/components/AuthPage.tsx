@@ -21,6 +21,7 @@ import {
   primaryActionActivePillClass,
   primaryActionButtonClass,
 } from '../styles/actionButtonStyles';
+import { themeCardLgClass } from '../styles/themeSurfaceStyles';
 import type { Lang } from '../translations';
 import {
   clearAuthPageLang,
@@ -252,7 +253,7 @@ export default function AuthPage() {
         className="relative w-full max-w-md"
       >
         {/* Glass card */}
-        <div className="relative rounded-3xl border border-slate-800/80 bg-slate-900/40 backdrop-blur-xl shadow-2xl shadow-black/50 p-6 sm:p-8">
+        <div className={`relative p-6 backdrop-blur-xl sm:p-8 ${themeCardLgClass}`}>
           <button
             type="button"
             onClick={toggleAuthLanguage}

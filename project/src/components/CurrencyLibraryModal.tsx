@@ -9,6 +9,7 @@ import {
 } from '../constants/currencies';
 import CurrencyFlag from './CurrencyFlag';
 import { primaryActionButtonBorderedClass, utilityNavButtonLgClass } from '../styles/actionButtonStyles';
+import { subCardSmClass, surfaceModalLgClass } from '../styles/themeSurfaceStyles';
 
 export type CurrencyLibraryMode = 'display' | 'expense';
 
@@ -119,7 +120,7 @@ export default function CurrencyLibraryModal({
           role="dialog"
           aria-modal="true"
           aria-labelledby="currency-library-title"
-          className="relative w-full sm:max-w-lg max-h-[min(88vh,680px)] flex flex-col rounded-t-2xl sm:rounded-2xl border border-gray-700/80 bg-gray-900/95 backdrop-blur-xl shadow-2xl shadow-black/50"
+          className={`relative flex max-h-[min(88vh,680px)] w-full max-w-lg flex-col backdrop-blur-xl ${surfaceModalLgClass}`}
           onClick={(event) => event.stopPropagation()}
         >
           <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-4 border-b border-gray-700/60 shrink-0">
@@ -175,7 +176,7 @@ export default function CurrencyLibraryModal({
                         <button
                           type="button"
                           onClick={() => handleSelectCurrency(code)}
-                          className="w-full text-start rounded-xl border border-gray-700/50 bg-gray-950/40 hover:bg-gray-800/60 hover:border-gray-600/70 px-3.5 py-3 transition-all active:scale-[0.99]"
+                          className={`w-full text-start px-3.5 py-3 transition-all hover:opacity-90 active:scale-[0.99] ${subCardSmClass}`}
                         >
                           <div className="flex items-center gap-3">
                             <span
@@ -208,7 +209,7 @@ export default function CurrencyLibraryModal({
             selectedCode &&
             selectedMeta && (
               <div className="px-4 sm:px-5 py-5 space-y-5 flex-1 overflow-y-auto">
-                <div className="rounded-xl border border-gray-700/60 bg-gray-950/50 p-4">
+                <div className={`p-4 ${subCardSmClass}`}>
                   <div className="flex items-center gap-3">
                     <span
                       dir="ltr"

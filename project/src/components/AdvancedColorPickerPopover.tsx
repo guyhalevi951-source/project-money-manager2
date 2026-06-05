@@ -1,10 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check } from 'lucide-react';
 import { clamp01, hexToHsv, hsvToHex } from '../utils/colorUtils';
 import { isCustomHexColor, normalizeCustomHex } from '../categories';
 import { useLanguage } from '../LanguageContext';
 import { primaryActionButtonBorderedClass, utilityNavButtonClass } from '../styles/actionButtonStyles';
+import {
+  computeFloatingAnchorPosition,
+  surfaceModalClass,
+  themeFloatingOverlayClass,
+} from '../styles/themeSurfaceStyles';
 
 interface AdvancedColorPickerPopoverProps {
   open: boolean;
@@ -30,13 +36,14 @@ export default function AdvancedColorPickerPopover({
   onCancel,
   anchorRef,
 }: AdvancedColorPickerPopoverProps) {
-  const { tr, savedColors, saveSavedColor } = useLanguage();
+  const { tr, dir, savedColors, saveSavedColor } = useLanguage();
   const popoverRef = useRef<HTMLDivElement>(null);
   const sbRef = useRef<HTMLDivElement>(null);
 
   const [hsv, setHsv] = useState(() => hexToHsv(resolvePickerHex(color)));
   const [draftHex, setDraftHex] = useState(() => resolvePickerHex(color));
   const [savedColorsLocal, setSavedColorsLocal] = useState<string[]>(savedColors);
+  const [anchorPosition, setAnchorPosition] = useState({ top: 0, left: 0, width: 312 });
 
   useEffect(() => {
     if (!open) return;
@@ -46,6 +53,25 @@ export default function AdvancedColorPickerPopover({
     setHsv(nextHsv);
     setDraftHex(startHex);
   }, [open, color, savedColors]);
+
+  const updateAnchorPosition = useCallback(() => {
+    const anchor = anchorRef.current;
+    if (!anchor) return;
+    setAnchorPosition(computeFloatingAnchorPosition(anchor, { dir }));
+  }, [anchorRef, dir]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    updateAnchorPosition();
+
+    const handleReposition = () => updateAnchorPosition();
+    window.addEventListener('resize', handleReposition);
+    window.addEventListener('scroll', handleReposition, true);
+    return () => {
+      window.removeEventListener('resize', handleReposition);
+      window.removeEventListener('scroll', handleReposition, true);
+    };
+  }, [open, updateAnchorPosition]);
 
   const hue = Math.round(hsv.h);
   const pureHueCss = `hsl(${hue} 100% 50%)`;
@@ -133,7 +159,7 @@ export default function AdvancedColorPickerPopover({
     window.addEventListener('pointerup', handleUp);
   };
 
-  return (
+  const popover = (
     <AnimatePresence>
       {open && (
         <motion.div
@@ -142,7 +168,12 @@ export default function AdvancedColorPickerPopover({
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: -4, scale: 0.98 }}
           transition={{ duration: 0.18, ease: 'easeOut' }}
-          className="absolute top-full mt-2 start-0 z-50 w-[min(100%,19.5rem)] rounded-2xl border border-gray-700/80 bg-gray-900/95 backdrop-blur-xl shadow-2xl shadow-black/50 p-4"
+          className={`${themeFloatingOverlayClass} p-4 backdrop-blur-xl ${surfaceModalClass}`}
+          style={{
+            top: anchorPosition.top,
+            left: anchorPosition.left,
+            width: anchorPosition.width,
+          }}
           role="dialog"
           aria-modal="true"
           aria-label={tr('customColorAdvanced')}
@@ -257,4 +288,6 @@ export default function AdvancedColorPickerPopover({
       )}
     </AnimatePresence>
   );
+
+  return createPortal(popover, document.body);
 }

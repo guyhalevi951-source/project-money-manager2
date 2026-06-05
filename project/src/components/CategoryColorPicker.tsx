@@ -8,6 +8,7 @@ import {
 } from '../categories';
 import { useLanguage } from '../LanguageContext';
 import { localizeColorName } from '../translations';
+import { themeFloatingHostClass } from '../styles/themeSurfaceStyles';
 import AdvancedColorPickerPopover from './AdvancedColorPickerPopover';
 
 interface CategoryColorPickerProps {
@@ -28,7 +29,7 @@ export default function CategoryColorPicker({ value, onChange, label }: Category
   const customHex = customSelected ? normalizeCustomHex(value) : hexForColor(THEME_COLOR_PRESETS[0].class);
 
   return (
-    <div className="relative">
+    <div className={themeFloatingHostClass}>
       <label className="block text-xs font-medium text-neutral-300 mb-2">{resolvedLabel}</label>
       <div className="flex flex-wrap items-center gap-2">
         {THEME_COLOR_PRESETS.map((preset) => {

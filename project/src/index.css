@@ -6,17 +6,17 @@
   font-family: 'Heebo', sans-serif;
 }
 
-/* Theme CSS variables — defaults match premium dark mode (overridden by theme-boot.js + LanguageContext). */
+/* Theme CSS variables — premium monochrome depth ladder (theme/themeMonochromeDepthProtocol.ts). */
 :root {
-  --page-bg: #0a0a0a;
-  --page-surface: #171717;
-  --page-surface-muted: #262626;
-  --page-border: #262626;
-  --page-text: #f5f5f5;
-  --page-text-muted: #a3a3a3;
-  --page-text-subtle: #737373;
-  --page-input-bg: #0a0a0a;
-  --page-input-border: #404040;
+  --page-bg: #000000;
+  --page-surface: #0a0a0a;
+  --page-surface-muted: #171717;
+  --page-border: rgba(255, 255, 255, 0.1);
+  --page-text: #ffffff;
+  --page-text-muted: #ffffff;
+  --page-text-subtle: #ffffff;
+  --page-input-bg: #18181b;
+  --page-input-border: rgba(255, 255, 255, 0.1);
   --btn-primary-bg: #6366f1;
   --btn-primary-hover: #818cf8;
   --btn-primary-active: #4f46e5;
@@ -29,19 +29,82 @@
   --btn-nav-text: rgb(199 210 254);
   --btn-nav-text-hover: rgb(224 231 255);
   --btn-nav-border: rgb(49 46 129 / 0.5);
-  --btn-filter-bg: rgb(10 10 10 / 0.85);
-  --btn-filter-hover: rgb(38 38 38 / 0.75);
-  --btn-filter-active: rgb(64 64 64 / 0.9);
-  --btn-filter-text: rgb(163 163 163);
-  --btn-filter-text-hover: rgb(229 229 229);
-  --btn-filter-border: rgb(38 38 38 / 0.8);
-  --surface-input-bg: rgb(38 38 38 / 0.75);
-  --surface-input-border: rgb(38 38 38 / 0.8);
-  --surface-input-text: rgb(229 229 229);
-  --surface-input-placeholder: rgb(163 163 163);
-  --surface-panel-bg: rgb(10 10 10 / 0.85);
-  --surface-panel-border: rgb(38 38 38 / 0.8);
-  --surface-modal-bg: rgb(10 10 10 / 0.85);
+  --btn-filter-bg: #27272a;
+  --btn-filter-hover: #3f3f46;
+  --btn-filter-active: #52525b;
+  --btn-filter-text: #ffffff;
+  --btn-filter-text-hover: #ffffff;
+  --btn-filter-border: rgba(255, 255, 255, 0.1);
+  --surface-input-bg: #18181b;
+  --surface-input-border: rgba(255, 255, 255, 0.1);
+  --surface-input-text: #ffffff;
+  --surface-input-placeholder: #ffffff;
+  --surface-panel-bg: #27272a;
+  --surface-panel-border: rgba(255, 255, 255, 0.1);
+  --surface-modal-bg: #27272a;
+  --typography-primary: #ffffff;
+  --typography-secondary: #ffffff;
+  --typography-muted: #ffffff;
+  --dynamic-text-color: #ffffff;
+  --main-card-surface-bg: #0a0a0a;
+  --main-card-surface-border: rgba(255, 255, 255, 0.1);
+  --color-main-cards: var(--main-card-surface-bg);
+  --color-main-cards-border: var(--main-card-surface-border);
+  --color-sub-cards: #171717;
+  --color-sub-cards-border: rgba(255, 255, 255, 0.1);
+  --color-depth-inner: #27272a;
+  --color-depth-inner-border: rgba(255, 255, 255, 0.1);
+  --color-sub-cards-divider: rgba(255, 255, 255, 0.1);
+  --color-sub-cards-stripe: rgba(255, 255, 255, 0.04);
+  --color-sub-cards-hover: rgba(255, 255, 255, 0.06);
+  --theme-enclosure-border: rgba(255, 255, 255, 0.1);
+}
+
+/* Nested list separation protocol — theme/themeNestedListProtocol.ts */
+[data-nested-list-stack] > [data-nested-list-item]:not(:last-child) {
+  border-bottom-width: 1px;
+  border-bottom-style: solid;
+  border-bottom-color: var(--color-sub-cards-divider);
+}
+
+[data-nested-list-stack] > [data-nested-list-item]:nth-child(even) {
+  background-color: var(--color-sub-cards-stripe);
+}
+
+[data-nested-list-stack] > [data-nested-list-item]:hover {
+  background-color: var(--color-sub-cards-hover);
+}
+
+/* Configuration capsule stacks — isolated rounded section cards, no glued dividers */
+[data-nested-list-stack][data-nested-list-capsules] > [data-nested-list-item],
+[data-nested-list-stack][data-nested-list-capsules] > [data-sub-category-section] {
+  border-bottom: none;
+}
+
+[data-nested-list-stack][data-nested-list-capsules] > [data-nested-list-item]:nth-child(even),
+[data-nested-list-stack][data-nested-list-capsules] > [data-sub-category-section]:nth-child(even) {
+  background-color: var(--color-sub-cards);
+}
+
+[data-nested-list-stack][data-nested-list-capsules] > [data-nested-list-item]:hover,
+[data-nested-list-stack][data-nested-list-capsules] > [data-sub-category-section]:hover {
+  background-color: var(--color-sub-cards);
+}
+
+/* Master category panels (Level 1) — independent floating blocks on page canvas */
+[data-master-category-panel] {
+  border-color: var(--main-card-surface-border);
+}
+
+/* Cat 6 backing sheet — gap canvas between Cat 7 capsules */
+[data-main-card-canvas],
+[data-nested-list-stack][data-nested-list-capsules-on-main] {
+  background-color: var(--color-main-cards);
+}
+
+[data-nested-list-stack][data-nested-list-capsules-on-main] > [data-sub-category-section] {
+  background-color: var(--color-sub-cards);
+  border-color: var(--color-sub-cards-border);
 }
 
 html {

@@ -47,6 +47,11 @@ import AuthPage from './components/AuthPage';
 import UserProfileMenu from './components/UserProfileMenu';
 import SettingsPage from './components/SettingsPage';
 import ProfilePage from './components/ProfilePage';
+import { SettingsPersistenceProvider } from './context/SettingsPersistenceContext';
+import {
+  applyIsolatedCloudSessionSeed,
+  rehydrateIsolatedGuestSession,
+} from './services/settingsPersistenceEngine';
 import ExpenseAmountField from './components/ExpenseAmountField';
 import SelectedDaySummary from './components/SelectedDaySummary';
 import ExpenseAmountDisplay from './components/ExpenseAmountDisplay';
@@ -85,11 +90,27 @@ import {
   surfaceModalLgClass,
   surfacePanelClass,
   surfaceSearchInputClass,
+  subCardClass,
+  subCardNestedItemClass,
+  subCardNestedListStackClass,
+  subCardRowClass,
+  subCardSmClass,
+  subCardTableHeadClass,
   themeCardClass,
   themeFooterClass,
   themeHeaderClass,
   themePageLoadingClass,
   themePageRootClass,
+  typographyBodyClass,
+  typographyLabelClass,
+  typographyMutedClass,
+  typographyTitleClass,
+  APP_THEME_SCOPE,
+  themeAntiClipVisibleClass,
+  themeScrollRoutePageClass,
+  themeScrollRouteShellClass,
+  themeScrollSafeContentClass,
+  themeScrollViewportClass,
 } from './styles/themeSurfaceStyles';
 import {
   clearAllManualExchangeOverridesLocal,
@@ -123,12 +144,12 @@ import {
   sanitizeAvatarUrl,
 } from './services/avatarService';
 import {
-  clearLegacyLocalStorage,
+  clearRegisteredSessionLocalStorage,
+  EMPTY_USER_SETTINGS,
   ensureCloudDataMigrated,
   pruneExpiredCloudExchangeFees,
   saveCategoriesToCloud,
   saveExpensesToCloud,
-  saveSettingsToCloud,
   subscribeCurrencyCommissions,
   subscribeManualExchangeOverrides,
   subscribeCategories,
@@ -1179,7 +1200,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
   }));
 
   return (
-    <div className="max-w-2xl mx-auto">
+    <div className={`mx-auto max-w-2xl ${themeCardClass} p-4 sm:p-6`}>
       <div>
         <div className="mb-4">
           <div className="flex items-center gap-2 text-neutral-100">
@@ -1290,7 +1311,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                   opacity: { duration: 0.2 },
                 }}
               >
-                <h3 className="mb-3 shrink-0 text-center text-lg font-bold text-neutral-100 md:text-xl">
+                <h3 className={`mb-3 shrink-0 text-center text-lg font-bold md:text-xl ${typographyTitleClass}`}>
                   {tr('chartCategorySplit')}
                 </h3>
                 <div className="flex min-h-0 flex-1 items-center">
@@ -1320,7 +1341,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                   opacity: { duration: 0.2 },
                 }}
               >
-                <h3 className="mb-3 shrink-0 text-center text-lg font-bold text-neutral-100 md:text-xl">
+                <h3 className={`mb-3 shrink-0 text-center text-lg font-bold md:text-xl ${typographyTitleClass}`}>
                   {tr('chartDailySplit')}
                 </h3>
                 <div className="flex min-h-0 flex-1 items-center">
@@ -1357,18 +1378,18 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                   opacity: { duration: 0.2 },
                 }}
               >
-                <h3 className="mb-3 shrink-0 text-center text-lg font-bold text-neutral-100 md:text-xl">
+                <h3 className={`mb-3 shrink-0 text-center text-lg font-bold md:text-xl ${typographyTitleClass}`}>
                   {tr('chartSpendingOverTime')}
                 </h3>
                 <div className="mb-2 flex shrink-0 items-start justify-between gap-3">
-                  <div className="space-y-0.5 text-sm text-neutral-300">
+                  <div className={`space-y-0.5 text-sm ${typographyLabelClass}`}>
                     <p>
                       <span className="text-neutral-500">{tr('totalShort')}: </span>
-                      <DisplayMoney amount={total} className="font-semibold text-neutral-100 inline-block" />
+                      <DisplayMoney amount={total} className={`font-semibold inline-block ${typographyBodyClass}`} />
                     </p>
                     <p>
                       <span className="text-neutral-500">{tr('average')}: </span>
-                      <DisplayMoney amount={average} className="font-semibold text-neutral-100 inline-block" />
+                      <DisplayMoney amount={average} className={`font-semibold inline-block ${typographyBodyClass}`} />
                     </p>
                   </div>
                 </div>
@@ -1671,7 +1692,7 @@ function SpendingDonut({
 
   return (
     <div className={`${themeCardClass} p-4 sm:p-6 mb-6 sm:mb-8`}>
-      <h2 className="mb-3 flex items-center gap-2 text-base font-semibold text-neutral-100 sm:text-lg">
+      <h2 className={`mb-3 flex items-center gap-2 text-base font-semibold sm:text-lg ${typographyTitleClass}`}>
         <PieChartIcon className="h-5 w-5 shrink-0 text-emerald-400" />
         {tr('expenseByCategory')}
       </h2>
@@ -1891,7 +1912,7 @@ function BudgetChartLegend({
   items: ReadonlyArray<{ color: string; label: string }>;
 }) {
   return (
-    <div className="w-full space-y-1 px-0.5 text-[11px] text-neutral-300">
+    <div className={`w-full space-y-1 px-0.5 text-[11px] ${typographyMutedClass}`}>
       <p className="font-semibold text-neutral-200">{title}</p>
       {items.map((item) => (
         <div key={item.label} className="flex items-center gap-2">
@@ -2067,7 +2088,7 @@ function SubBudgetTracker({
   return (
     <div className={`${themeCardClass} p-4 sm:p-6 mb-6 sm:mb-8`}>
       <div className="mb-4">
-        <h2 className="text-base sm:text-lg font-semibold text-neutral-100 flex items-center gap-2">
+        <h2 className={`text-base sm:text-lg font-semibold flex items-center gap-2 ${typographyTitleClass}`}>
           <PieChartIcon className="w-5 h-5 text-violet-400" />
           {tr('subBudgetsTitle')}
         </h2>
@@ -2079,14 +2100,14 @@ function SubBudgetTracker({
           <div className="bg-neutral-800 w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3">
             <Wallet className="w-7 h-7 text-neutral-500" />
           </div>
-          <p className="text-neutral-300">{tr('setMonthlyBudgetFirst')}</p>
+          <p className={typographyBodyClass}>{tr('setMonthlyBudgetFirst')}</p>
           <p className="text-neutral-500 text-sm mt-1">{tr('thenSplitSubBudgets')}</p>
         </div>
       ) : (
         <>
           {/* Main budget chart: used vs remaining */}
-          <div className="rounded-2xl border border-neutral-800 p-3 sm:p-5">
-            <h3 className="mb-4 text-center text-sm font-semibold text-neutral-200 sm:text-base">
+          <div className={`p-3 sm:p-5 ${subCardClass}`}>
+            <h3 className={`mb-4 text-center text-sm font-semibold sm:text-base ${typographyTitleClass}`}>
               {tr('budgetStatus')}
             </h3>
             <div className="grid min-h-[18rem] w-full grid-cols-1 items-center gap-4 sm:min-h-[19rem] sm:grid-cols-[1fr_minmax(11rem,12rem)] sm:gap-6">
@@ -2114,7 +2135,7 @@ function SubBudgetTracker({
                     </PieChart>
                   </ResponsiveContainer>
                   <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                    <DisplayMoney amount={usedOverviewAmount} className="text-xl font-bold text-neutral-100" />
+                    <DisplayMoney amount={usedOverviewAmount} className={`text-xl font-bold ${typographyTitleClass}`} />
                     <span className="mt-1 text-[11px] text-neutral-500">
                       <LtrNumeric>{tr('outOf')} {formatMoney(budget)}</LtrNumeric>
                     </span>
@@ -2194,7 +2215,7 @@ function SubBudgetTracker({
                   })}
                 </div>
 
-                <div className="relative w-full overflow-hidden rounded-2xl border border-neutral-800 p-3 sm:p-4">
+                <div className={`relative w-full overflow-hidden p-3 sm:p-4 ${subCardClass}`}>
                   {subCategoryCharts[subChartSlide] && (
                     <button
                       type="button"
@@ -2279,7 +2300,7 @@ function SubBudgetTracker({
                             dir === 'rtl' ? 'sm:items-end sm:text-right' : 'sm:items-start sm:text-left',
                           ].join(' ')}
                         >
-                          <p className="text-sm font-semibold text-neutral-100 sm:text-base">
+                          <p className={`text-sm font-semibold sm:text-base ${typographyBodyClass}`}>
                             <LocalizedUserText text={activeSubChart.key} />
                           </p>
                           <BudgetStatsLegendPanel
@@ -2399,7 +2420,7 @@ function SubBudgetTracker({
                         className="w-2.5 h-2.5 rounded-full shrink-0 ring-1 ring-white/20"
                         style={{ backgroundColor: catHex }}
                       />
-                      <span className="text-sm text-neutral-300 flex-1 truncate">
+                      <span className={`text-sm flex-1 truncate ${typographyLabelClass}`}>
                         {v === GENERAL_KEY ? (
                           tr('generalUnallocated')
                         ) : (
@@ -2533,7 +2554,7 @@ function BudgetChangeModal({
             <Layers className="w-5 h-5 text-white" />
           </div>
           <div className="min-w-0">
-            <h2 id="budget-modal-title" className="text-base sm:text-lg font-bold text-neutral-100 leading-snug">
+            <h2 id="budget-modal-title" className={`text-base sm:text-lg font-bold leading-snug ${typographyTitleClass}`}>
               {tr('budgetChangeTitle')}
             </h2>
           </div>
@@ -2576,7 +2597,7 @@ function BudgetChangeModal({
                   <Icon className="w-5 h-5" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="font-semibold text-neutral-100 text-sm leading-snug">{opt.title}</p>
+                  <p className={`font-semibold text-sm leading-snug ${typographyTitleClass}`}>{opt.title}</p>
                   <p className="text-xs text-neutral-500 mt-1 leading-relaxed">{opt.desc}</p>
                 </div>
                 <ChevronLeft className="w-5 h-5 text-neutral-600 shrink-0" />
@@ -2612,6 +2633,7 @@ function App() {
     customCurrencies,
     currencyLayout,
     themePreferences,
+    settingsPersistence,
     setSettingsPersistence,
     applySettingsFromCloud,
   } = useLanguage();
@@ -2625,24 +2647,6 @@ function App() {
   const skipNextSettingsSaveRef = useRef(false);
   const pendingAuthLangRef = useRef<'he' | 'en' | null>(null);
   const hadAuthenticatedUserRef = useRef(false);
-  const settingsMergeRef = useRef({
-    keepOriginalValues,
-    displayCurrency,
-    savedColors,
-    customCurrencies,
-    currencyLayout,
-    themePreferences,
-  });
-
-  settingsMergeRef.current = {
-    keepOriginalValues,
-    displayCurrency,
-    savedColors,
-    customCurrencies,
-    currencyLayout,
-    themePreferences,
-  };
-
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser);
@@ -2706,6 +2710,7 @@ function App() {
   const [navOpen, setNavOpen] = useState(false);
   const chartDateSetterRef = useRef<((iso: string) => void) | null>(null);
   const isHomeView = activeTab === 'dashboard' && !settingsOpen;
+  const isScrollRoute = profileOpen || settingsOpen;
   const wasHomeViewRef = useRef(isHomeView);
 
   useEffect(() => {
@@ -2796,11 +2801,13 @@ function App() {
       clearAllManualExchangeOverridesLocal();
       clearCloudCurrencyCommissions();
       clearCloudManualExchangeOverrides();
-      clearLegacyLocalStorage();
+      clearRegisteredSessionLocalStorage();
       saveToLocalStorage(EMPTY_USER_APP_DATA);
-      window.localStorage.removeItem(GUEST_AVATAR_STORAGE_KEY);
       resetAppData();
-      setAvatarUrl(DEFAULT_GUEST_AVATAR_URL);
+      skipNextSettingsSaveRef.current = true;
+      setSettingsPersistence('local');
+      rehydrateIsolatedGuestSession(applySettingsFromCloud);
+      setAvatarUrl(getGuestAvatarFromStorage());
       setNavOpen(false);
       setActiveTab('dashboard');
       setProfileOpen(false);
@@ -3150,6 +3157,8 @@ function App() {
         clearCloudCurrencyCommissions();
         void listActiveCurrencyCommissions();
         void listActiveManualExchangeOverrides();
+        skipNextSettingsSaveRef.current = true;
+        rehydrateIsolatedGuestSession(applySettingsFromCloud);
         setDataReady(true);
         return;
       }
@@ -3177,6 +3186,8 @@ function App() {
       setGuestLangActive(false);
       pendingAuthLangRef.current = consumePendingAuthLang();
       setSettingsPersistence('cloud');
+      skipNextSettingsSaveRef.current = true;
+      applyIsolatedCloudSessionSeed(applySettingsFromCloud);
       const uid = user.uid;
 
       try {
@@ -3270,22 +3281,17 @@ function App() {
             if (pendingLang) {
               pendingAuthLangRef.current = null;
               skipNextSettingsSaveRef.current = true;
-              const mergeBase = settingsMergeRef.current;
-              const merged = meta.exists
-                ? { ...settings, lang: pendingLang }
-                : {
-                    lang: pendingLang,
-                    keepOriginalValues: mergeBase.keepOriginalValues,
-                    displayCurrency: mergeBase.displayCurrency,
-                    saved_colors: mergeBase.savedColors,
-                    custom_currencies: mergeBase.customCurrencies,
-                    currency_layout: mergeBase.currencyLayout,
-                    themePreferences: mergeBase.themePreferences,
-                  };
-              applySettingsFromCloud(merged);
+              if (meta.exists) {
+                applySettingsFromCloud({ ...settings, lang: pendingLang });
+              } else {
+                applySettingsFromCloud({ ...EMPTY_USER_SETTINGS, lang: pendingLang });
+              }
             } else if (meta.exists) {
               skipNextSettingsSaveRef.current = true;
               applySettingsFromCloud(settings);
+            } else {
+              skipNextSettingsSaveRef.current = true;
+              applySettingsFromCloud({ ...EMPTY_USER_SETTINGS });
             }
             if (!initialSettings) {
               initialSettings = true;
@@ -3424,46 +3430,6 @@ function App() {
     subBudgetsByMonth,
     dataReady,
     user,
-  ]);
-
-  // Persist settings to Firestore for signed-in accounts.
-  useEffect(() => {
-    if (!dataReady || !user || user.isAnonymous || !settingsCloudReady) return;
-
-    if (skipNextSettingsSaveRef.current) {
-      skipNextSettingsSaveRef.current = false;
-      return;
-    }
-
-    const uid = user.uid;
-    const timer = window.setTimeout(() => {
-      const currentUser = auth.currentUser;
-      if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) return;
-      void saveSettingsToCloud(uid, {
-        lang,
-        keepOriginalValues,
-        displayCurrency,
-        saved_colors: savedColors,
-        custom_currencies: customCurrencies,
-        currency_layout: currencyLayout,
-        themePreferences,
-      }).catch(() => {
-        // Non-blocking; next change will retry.
-      });
-    }, 400);
-
-    return () => window.clearTimeout(timer);
-  }, [
-    lang,
-    keepOriginalValues,
-    displayCurrency,
-    savedColors,
-    customCurrencies,
-    currencyLayout,
-    themePreferences,
-    dataReady,
-    user,
-    settingsCloudReady,
   ]);
 
   // Budget update entry point. If the active month already has sub-budget
@@ -3972,12 +3938,29 @@ function App() {
   const currentAvatarUrl = sanitizeAvatarUrl(avatarUrl || user.photoURL, defaultUserAvatarUrl);
 
   return (
+    <SettingsPersistenceProvider
+      user={user}
+      authReady={authReady}
+      dataReady={dataReady}
+      settingsCloudReady={settingsCloudReady}
+      settingsPersistence={settingsPersistence}
+      skipNextSaveRef={skipNextSettingsSaveRef}
+      applySettingsFromCloud={applySettingsFromCloud}
+      lang={lang}
+      keepOriginalValues={keepOriginalValues}
+      displayCurrency={displayCurrency}
+      saved_colors={savedColors}
+      custom_currencies={customCurrencies}
+      currency_layout={currencyLayout}
+      themePreferences={themePreferences}
+    >
     <motion.div
       dir={dir}
+      data-theme-scope={APP_THEME_SCOPE}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.45, ease: 'easeOut' }}
-      className={themePageRootClass}
+      className={[themePageRootClass, isScrollRoute ? themeScrollRoutePageClass : ''].filter(Boolean).join(' ')}
     >
       {/* Header + desktop nav */}
       <header
@@ -4001,7 +3984,7 @@ function App() {
                 fetchPriority="high"
               />
               <div className="min-w-0">
-                <h1 className="truncate text-lg font-bold text-neutral-100 sm:text-2xl">{tr('appName')}</h1>
+                <h1 className={`truncate text-lg font-bold sm:text-2xl ${typographyTitleClass}`}>{tr('appName')}</h1>
                 <p className="hidden truncate text-xs text-neutral-400 sm:block">{tr('appTagline')}</p>
               </div>
             </button>
@@ -4054,11 +4037,14 @@ function App() {
         />
       )}
 
-      <div className="relative flex min-h-0 flex-1 flex-col">
+      <div className={isScrollRoute ? themeScrollRouteShellClass : 'relative flex min-h-0 flex-1 flex-col'}>
       <main
-        className={`relative z-0 mx-auto w-full max-w-5xl min-h-0 flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8 ${
-          profileOpen || settingsOpen ? 'overflow-hidden pb-4 md:pb-6' : 'pb-24 md:pb-10'
-        }`}
+        className={[
+          'relative z-0 mx-auto w-full max-w-5xl min-h-0 flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8',
+          isScrollRoute
+            ? `${themeScrollViewportClass} ${themeScrollSafeContentClass}`
+            : `${themeAntiClipVisibleClass} pb-24 md:pb-10`,
+        ].join(' ')}
       >
         {profileOpen ? (
           <ProfilePage
@@ -4084,47 +4070,48 @@ function App() {
 
             {/* Financial summary — row 2 uses a fixed height so all three amount cells share one baseline */}
             <div className={`mb-6 ${themeCardClass} p-4 shadow-sm sm:mb-8 sm:p-6`}>
-              <h2 className="mb-4 text-lg font-bold text-white md:text-xl">{tr('financialSummaryTitle')}</h2>
+              <h2 className={`mb-4 text-lg font-bold md:text-xl ${typographyTitleClass}`}>{tr('financialSummaryTitle')}</h2>
+              <div className={`rounded-xl p-3 sm:p-4 ${subCardSmClass}`}>
               <table className="w-full table-fixed border-collapse">
                 <tbody>
                   <tr>
-                    <td className="w-1/3 border-x border-gray-700/80 px-2 pb-2 text-center align-bottom">
+                    <td className="w-1/3 border-x border-[var(--color-sub-cards-border)] px-2 pb-2 text-center align-bottom">
                       <span className="flex min-h-[2.5rem] items-end justify-center text-xs leading-snug text-gray-400 md:text-sm">
                         {tr('monthlyBudget')}
                       </span>
                     </td>
-                    <td className="w-1/3 border-x border-gray-700/80 px-2 pb-2 text-center align-bottom">
+                    <td className="w-1/3 border-x border-[var(--color-sub-cards-border)] px-2 pb-2 text-center align-bottom">
                       <span className="flex min-h-[2.5rem] items-end justify-center text-xs leading-snug text-gray-400 md:text-sm">
                         {tr('totalExpenses')}
                       </span>
                     </td>
-                    <td className="w-1/3 border-x border-gray-700/80 px-2 pb-2 text-center align-bottom">
+                    <td className="w-1/3 border-x border-[var(--color-sub-cards-border)] px-2 pb-2 text-center align-bottom">
                       <span className="flex min-h-[2.5rem] items-end justify-center text-xs leading-snug text-gray-400 md:text-sm">
                         {tr('budgetStatus')}
                       </span>
                     </td>
                   </tr>
                   <tr>
-                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-gray-700/80 px-2 text-center align-middle">
+                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-[var(--color-sub-cards-border)] px-2 text-center align-middle">
                       <div className="flex h-full min-h-0 items-center justify-center">
-                        <LtrNumeric className="block w-full truncate text-center text-sm font-bold leading-tight text-neutral-100 sm:text-base md:text-2xl">
+                        <LtrNumeric className={`block w-full truncate text-center text-sm font-bold leading-tight sm:text-base md:text-2xl ${typographyBodyClass}`}>
                           {selectedBudgetDisplayLabel}
                         </LtrNumeric>
                       </div>
                     </td>
-                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-gray-700/80 px-2 text-center align-middle">
+                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-[var(--color-sub-cards-border)] px-2 text-center align-middle">
                       <div className="flex h-full min-h-0 items-center justify-center">
                         <LtrNumeric
-                          className={`block w-full truncate text-center text-sm font-bold leading-tight sm:text-base md:text-2xl ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}
+                          className={`block w-full truncate text-center text-sm font-bold leading-tight sm:text-base md:text-2xl ${isOverBudget ? 'text-rose-400' : typographyBodyClass}`}
                         >
                           {totalExpensesStatusDisplayLabel}
                         </LtrNumeric>
                       </div>
                     </td>
-                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-gray-700/80 px-2 text-center align-middle">
+                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-[var(--color-sub-cards-border)] px-2 text-center align-middle">
                       <div className="flex h-full min-h-0 items-center justify-center">
                         <LtrNumeric
-                          className={`block w-full truncate text-center text-sm font-bold leading-tight sm:text-base md:text-2xl ${isOverBudget ? 'text-rose-400' : 'text-neutral-100'}`}
+                          className={`block w-full truncate text-center text-sm font-bold leading-tight sm:text-base md:text-2xl ${isOverBudget ? 'text-rose-400' : typographyBodyClass}`}
                         >
                           {remainingStatusDisplayLabel}
                         </LtrNumeric>
@@ -4132,25 +4119,26 @@ function App() {
                     </td>
                   </tr>
                   <tr>
-                    <td className="h-8 border-x border-gray-700/80 px-2 align-top" aria-hidden />
-                    <td className="h-8 border-x border-gray-700/80 px-2 align-top" aria-hidden />
-                    <td className="h-8 border-x border-gray-700/80 px-2 pt-1 text-center align-top text-[10px] leading-snug text-gray-400 md:text-xs">
+                    <td className="h-8 border-x border-[var(--color-sub-cards-border)] px-2 align-top" aria-hidden />
+                    <td className="h-8 border-x border-[var(--color-sub-cards-border)] px-2 align-top" aria-hidden />
+                    <td className="h-8 border-x border-[var(--color-sub-cards-border)] px-2 pt-1 text-center align-top text-[10px] leading-snug text-gray-400 md:text-xs">
                       {remaining >= 0 ? tr('remainingInBudget') : tr('overBudget')}
                     </td>
                   </tr>
                 </tbody>
               </table>
+              </div>
             </div>
 
             {/* Monthly budget setter */}
             <div className={`mb-4 w-full ${themeCardClass} p-4 sm:mb-6 sm:p-6`}>
-              <h2 className="mb-4 flex items-center gap-2 text-base font-semibold text-neutral-100 sm:text-lg">
+              <h2 className={`mb-4 flex items-center gap-2 text-base font-semibold sm:text-lg ${typographyTitleClass}`}>
                 <Wallet className="h-5 w-5 shrink-0 text-emerald-400" />
                 {tr('addMonthlyBudget')}
               </h2>
               <div className="w-full">
                 <div className="min-w-0 w-full">
-                  <label className="mb-2 block text-sm font-medium text-neutral-300">
+                  <label className={`mb-2 block text-sm font-medium ${typographyLabelClass}`}>
                     {tr('budgetAmountLabel')} ({currencySymbol(displayCurrency)})
                   </label>
                   <div className="flex w-full items-center gap-1.5 overflow-hidden sm:gap-2">
@@ -4246,7 +4234,7 @@ function App() {
 
         {/* Add Expense Form */}
         <div className={`relative isolate z-10 ${themeCardClass} p-4 sm:p-6 mb-6 sm:mb-8`}>
-          <h2 className="text-base sm:text-lg font-semibold text-neutral-100 mb-4 sm:mb-6 flex items-center gap-2">
+          <h2 className={`text-base sm:text-lg font-semibold mb-4 sm:mb-6 flex items-center gap-2 ${typographyTitleClass}`}>
             <Plus className={`w-5 h-5 ${primaryActionAccentIconClass}`} />
             {tr('addExpenseTitle')}
           </h2>
@@ -4255,7 +4243,7 @@ function App() {
             {/* Row 1: Description + Amount */}
             <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
               <div className="min-w-0 flex-1">
-                <label className="block text-sm font-medium text-neutral-300 mb-2">
+                <label className={`block text-sm font-medium mb-2 ${typographyLabelClass}`}>
                   {tr('descriptionOptional')}
                 </label>
                 <input
@@ -4280,7 +4268,7 @@ function App() {
             {/* Row 2: Category + Date + Submit */}
             <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
               <div className="min-w-0 flex-1">
-                <label className="block text-sm font-medium text-neutral-300 mb-2">{tr('category')}</label>
+                <label className={`block text-sm font-medium mb-2 ${typographyLabelClass}`}>{tr('category')}</label>
                 <select
                   value={isAddingCategory ? ADD_CUSTOM_VALUE : newExpense.category}
                   onChange={(e) => handleCategoryChange(e.target.value)}
@@ -4296,7 +4284,7 @@ function App() {
               </div>
 
               <div className="w-full shrink-0 sm:w-44">
-                <label className="block text-sm font-medium text-neutral-300 mb-2">{tr('date')}</label>
+                <label className={`block text-sm font-medium mb-2 ${typographyLabelClass}`}>{tr('date')}</label>
                 <input
                   type="date"
                   value={newExpense.date}
@@ -4384,8 +4372,8 @@ function App() {
         {/* ============================ EXPENSES ============================ */}
         {activeTab === 'expenses' && (
         <div className={`${themeCardClass} overflow-hidden`}>
-          <div className="p-4 sm:p-6 border-b border-neutral-800">
-            <h2 className="text-base sm:text-lg font-semibold text-neutral-100">{tr('expenseHistoryTitle')}</h2>
+          <div className="border-b border-[var(--main-card-surface-border)] p-4 sm:p-6">
+            <h2 className={`text-base sm:text-lg font-semibold ${typographyTitleClass}`}>{tr('expenseHistoryTitle')}</h2>
             <p className="text-sm text-neutral-500 mt-1">
               {historyExpenses.length} • {tr('totalShort')}{' '}
               <DisplayMoney amount={historyTotal} className="inline-block font-medium" />
@@ -4454,7 +4442,7 @@ function App() {
               <div className="bg-neutral-800 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
                 <TrendingDown className="w-8 h-8 text-neutral-500" />
               </div>
-              <p className="text-neutral-300 text-base sm:text-lg">
+              <p className={`text-base sm:text-lg ${typographyBodyClass}`}>
                 {search ? tr('noResults') : expenses.length === 0 ? tr('noExpensesYet') : tr('noExpensesForPeriod')}
               </p>
               <p className="text-neutral-500 text-sm mt-1">
@@ -4468,13 +4456,13 @@ function App() {
           ) : (
             <>
               {/* Mobile: card list (native-app feel) */}
-              <ul className="md:hidden divide-y divide-neutral-800">
+              <ul className={`md:hidden ${subCardNestedListStackClass}`} data-nested-list-stack>
                 {historyExpenses.map((expense) => {
                   const categoryInfo = getCategoryInfo(expense.category);
                   const IconComponent = categoryInfo.icon;
 
                   return (
-                    <li key={expense.id} className="p-4 active:bg-neutral-800/60 transition-colors">
+                    <li key={expense.id} className={`${subCardNestedItemClass} ${subCardRowClass}`} data-nested-list-item>
                       <div className="flex items-center gap-3">
                         <CategoryIconBadge
                           icon={IconComponent}
@@ -4484,7 +4472,7 @@ function App() {
                           <LocalizedUserText
                             text={expenseDescriptionLabel(expense.description)}
                             className={`font-medium truncate block ${
-                              expense.description.trim() ? 'text-neutral-100' : 'text-neutral-500 italic'
+                              expense.description.trim() ? typographyBodyClass : `${typographyMutedClass} italic`
                             }`}
                           />
                           <div className="flex items-center gap-2 mt-0.5 text-xs text-neutral-500">
@@ -4533,7 +4521,7 @@ function App() {
               {/* Desktop: table */}
               <div className="hidden md:block overflow-x-auto">
                 <table className="w-full">
-                  <thead className="bg-neutral-800/50">
+                  <thead className={subCardTableHeadClass}>
                     <tr>
                       <th className="text-right px-6 py-4 text-sm font-semibold text-neutral-400">{tr('description')}</th>
                       <th className="text-right px-6 py-4 text-sm font-semibold text-neutral-400">
@@ -4544,18 +4532,18 @@ function App() {
                       <th className="px-6 py-4 text-sm font-semibold text-neutral-400">{tr('actions')}</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-neutral-800">
+                  <tbody className={subCardNestedListStackClass} data-nested-list-stack>
                     {historyExpenses.map((expense) => {
                       const categoryInfo = getCategoryInfo(expense.category);
                       const IconComponent = categoryInfo.icon;
 
                       return (
-                        <tr key={expense.id} className="hover:bg-neutral-800/40 transition-colors">
+                        <tr key={expense.id} className={subCardRowClass} data-nested-list-item>
                           <td className="px-6 py-4">
                             <LocalizedUserText
                               text={expenseDescriptionLabel(expense.description)}
                               className={`font-medium ${
-                                expense.description.trim() ? 'text-neutral-100' : 'text-neutral-500 italic'
+                                expense.description.trim() ? typographyBodyClass : `${typographyMutedClass} italic`
                               }`}
                             />
                           </td>
@@ -4630,7 +4618,7 @@ function App() {
           <div className={`relative z-10 w-full max-w-2xl p-4 sm:p-6 ${surfaceModalClass}`}>
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
-                <h3 id="edit-expense-title" className="text-base font-semibold text-neutral-100 sm:text-lg">
+                <h3 id="edit-expense-title" className={`text-base font-semibold sm:text-lg ${typographyTitleClass}`}>
                   {tr('editExpense')}
                 </h3>
                 <p className="mt-1 text-xs text-neutral-500 sm:text-sm">{tr('expenseHistoryTitle')}</p>
@@ -4647,7 +4635,7 @@ function App() {
 
             <div className="space-y-4">
               <div>
-                <label className="mb-2 block text-sm font-medium text-neutral-300">{tr('description')}</label>
+                <label className={`mb-2 block text-sm font-medium ${typographyLabelClass}`}>{tr('description')}</label>
                 <input
                   type="text"
                   value={editExpenseDraft.description}
@@ -4693,7 +4681,7 @@ function App() {
                   onRatesReadyChange={setEditExpenseRatesReady}
                 />
                 <div className="min-w-0 flex-1">
-                  <label className="mb-2 block text-sm font-medium text-neutral-300">{tr('category')}</label>
+                  <label className={`mb-2 block text-sm font-medium ${typographyLabelClass}`}>{tr('category')}</label>
                   <select
                     value={editExpenseDraft.category}
                     onChange={(e) =>
@@ -4716,7 +4704,7 @@ function App() {
                   </select>
                 </div>
                 <div className="min-w-0 sm:w-[11rem]">
-                  <label className="mb-2 block text-sm font-medium text-neutral-300">{tr('date')}</label>
+                  <label className={`mb-2 block text-sm font-medium ${typographyLabelClass}`}>{tr('date')}</label>
                   <input
                     type="date"
                     value={editExpenseDraft.date}
@@ -4787,6 +4775,7 @@ function App() {
         onClose={handleCloseBudgetModal}
       />
     </motion.div>
+    </SettingsPersistenceProvider>
   );
 }
 

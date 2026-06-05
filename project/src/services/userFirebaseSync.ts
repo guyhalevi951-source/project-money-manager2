@@ -121,6 +121,12 @@ function normalizeSavedColors(raw: unknown): string[] {
     .map(normalizeCustomHex);
 }
 
+/** Parse a raw settings record (Firestore doc or guest JSON blob). */
+export function parseUserSettingsRecord(raw: unknown): UserSettings {
+  if (!raw || typeof raw !== 'object') return { ...EMPTY_USER_SETTINGS };
+  return parseSettings(raw as Record<string, unknown>);
+}
+
 function parseSettings(raw: Record<string, unknown> | undefined): UserSettings {
   if (!raw) return { ...EMPTY_USER_SETTINGS };
 
@@ -256,16 +262,6 @@ function hasFinancialLocalData(data: UserAppData): boolean {
   );
 }
 
-function hasSettingsLocalData(settings: UserSettings): boolean {
-  return (
-    settings.lang !== EMPTY_USER_SETTINGS.lang ||
-    settings.keepOriginalValues !== EMPTY_USER_SETTINGS.keepOriginalValues ||
-    settings.displayCurrency !== EMPTY_USER_SETTINGS.displayCurrency ||
-    settings.saved_colors.length > 0 ||
-    settings.custom_currencies.length > 0
-  );
-}
-
 export function loadLegacySettingsFromLocalStorage(): UserSettings {
   const langRaw = window.localStorage.getItem(SETTINGS_LS_KEYS.lang);
   const lang: UserSettings['lang'] =
@@ -334,8 +330,8 @@ const EXCHANGE_FEE_LS_KEYS = [
   'money_manager_manual_exchange_overrides_v1',
 ] as const;
 
-export function clearLegacyLocalStorage(): void {
-  // Intentionally preserves `preferred_language` for login-screen language sync after logout.
+/** Clears registered-session financial cache; preserves guest preference namespace keys. */
+export function clearRegisteredSessionLocalStorage(): void {
   for (const key of EXCHANGE_FEE_LS_KEYS) {
     window.localStorage.removeItem(key);
   }
@@ -356,6 +352,11 @@ export function clearLegacyLocalStorage(): void {
   window.localStorage.removeItem(SETTINGS_LS_KEYS.currencyLayout);
   window.localStorage.removeItem('auto_transfer_start_month');
   window.localStorage.removeItem('auto_transfer_budget');
+}
+
+/** Post-migration financial wipe — guest preference namespace keys are preserved. */
+export function clearLegacyLocalStorage(): void {
+  clearRegisteredSessionLocalStorage();
 }
 
 async function readLegacyFirestoreApp(uid: string): Promise<UserAppData | null> {
@@ -403,19 +404,17 @@ export async function ensureCloudDataMigrated(uid: string): Promise<void> {
   if (newStructureExists) return;
 
   const localFinancial = loadFromLocalStorage();
-  const localSettings = loadLegacySettingsFromLocalStorage();
-  const hasLocal =
-    hasFinancialLocalData(localFinancial) || hasSettingsLocalData(localSettings);
+  const hasLocalFinancial = hasFinancialLocalData(localFinancial);
   const hasLegacyRemote = legacySnap.exists();
 
-  if (!hasLocal && !hasLegacyRemote) return;
+  // Device guest preferences must never trigger cloud settings migration.
+  if (!hasLocalFinancial && !hasLegacyRemote) return;
 
   await migrateLegacyDataToCloud(uid);
 }
 
 export async function migrateLegacyDataToCloud(uid: string): Promise<void> {
   const localFinancial = loadFromLocalStorage();
-  const localSettings = loadLegacySettingsFromLocalStorage();
   const legacyRemote = await readLegacyFirestoreApp(uid);
 
   const expenses =
@@ -440,14 +439,12 @@ export async function migrateLegacyDataToCloud(uid: string): Promise<void> {
     autoTransferByMonth: localFinancial.autoTransferByMonth ?? {},
   };
 
-  const settings = hasSettingsLocalData(localSettings)
-    ? localSettings
-    : { ...EMPTY_USER_SETTINGS };
+  // SECURITY: never upload device guest preferences into a registered Firebase profile.
+  const settings: UserSettings = { ...EMPTY_USER_SETTINGS };
 
   const hasAnythingToUpload =
     !isExpensesEmpty(expenses) ||
     !isCategoriesEmpty(categories) ||
-    hasSettingsLocalData(settings) ||
     legacyRemote !== null;
 
   if (!hasAnythingToUpload) return;

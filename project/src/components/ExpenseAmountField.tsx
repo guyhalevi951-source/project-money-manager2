@@ -30,6 +30,7 @@ import {
   filterFormControlClass,
   primaryActionSelectedChipClass,
 } from '../styles/actionButtonStyles';
+import { typographyLabelClass } from '../styles/themeSurfaceStyles';
 import {
   detectLocalCurrency,
   isDetectedCurrencyAccepted,
@@ -339,7 +340,7 @@ export default function ExpenseAmountField({
 
   return (
     <div className="flex w-full shrink-0 flex-col sm:w-auto">
-      <label className="block text-sm font-medium text-neutral-300 mb-2">{tr('amountLabel')}</label>
+      <label className={`block text-sm font-medium mb-2 ${typographyLabelClass}`}>{tr('amountLabel')}</label>
 
       <div dir="ltr" className="relative z-10 w-full sm:w-auto">
         <div className="relative z-10 flex w-full items-center gap-2 sm:w-auto">

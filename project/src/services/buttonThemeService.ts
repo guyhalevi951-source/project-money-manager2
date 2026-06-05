@@ -1,12 +1,103 @@
 /**
- * Unified theme system — page canvas + three button groups.
+ * Unified theme system — page canvas + seven functional categories.
+ *
+ * Classification & binding rules: see theme/themeCategoryMapping.ts (v1.1.0).
+ * Layout / anti-clipping protocol: see theme/themeLayoutProtocol.ts (v1.0.0).
+ * Nested list separation: see theme/themeNestedListProtocol.ts (v1.0.0).
+ * Thin border enclosure: see theme/themeThinBorderProtocol.ts (v1.0.0).
+ * Monochrome depth hierarchy: see theme/themeMonochromeDepthProtocol.ts (v2.0.0).
+ * Cursor rules: .cursor/rules/theme-category-mapping.mdc,
+ *               .cursor/rules/theme-layout-protocol.mdc
  *
  * CSS variables are written to document.documentElement so the entire UI
  * (buttons via actionButtonStyles, surfaces via themeSurfaceStyles) updates
  * without per-component re-renders.
+ *
+ * Whenever creating accordions or color pickers: master frames MUST use
+ * overflow-visible and themeScrollSafeContentClass (see themeLayoutProtocol).
+ * Configuration sub-rows MUST use SubCardNestedStack variant="capsule" on
+ * subCardAccordionContentClass (transparent — no outer square shell box).
  */
 
+export {
+  THEME_LAYOUT_PROTOCOL_VERSION,
+  THEME_Z_INDEX,
+  themeZIndexClass,
+  themeAntiClipVisibleClass,
+  themeFloatingHostClass,
+  themeFloatingOverlayClass,
+  themeAccordionHeaderLayerClass,
+  themeScrollViewportClass,
+  themeScrollSafeContentClass,
+  themeScrollSafeContentStyle,
+  computeFloatingAnchorPosition,
+} from '../theme/themeLayoutProtocol';
+
+export {
+  THEME_NESTED_LIST_PROTOCOL_VERSION,
+  NESTED_LIST_STACK_ATTR,
+  NESTED_LIST_ITEM_ATTR,
+  resolveSubCardNestedListOverlays,
+  type SubCardNestedListOverlays,
+} from '../theme/themeNestedListProtocol';
+
+export {
+  THEME_THIN_BORDER_PROTOCOL_VERSION,
+  THEME_ENCLOSURE_BORDER_VAR,
+  THEME_ENCLOSURE_BORDER_WIDTH,
+  resolveThinEnclosureBorder,
+} from '../theme/themeThinBorderProtocol';
+
+export {
+  THEME_CATEGORY_RULES,
+  THEME_CLASSIFICATION_PRIORITY,
+  THEME_MAPPING_STANDARD_VERSION,
+  THEME_CATEGORY_DATA_ATTR,
+  classifyThemeCategory,
+  getThemeCategoryRule,
+  getThemeStyleTokens,
+  getThemeCssVariables,
+  getThemePreferenceField,
+  themeCategoryProps,
+  mainCardSurfaceInlineStyle,
+  subCardSurfaceInlineStyle,
+  assertStyleTokenMatchesCategory,
+  type ThemeCategoryId,
+  type ThemeCategoryRule,
+  type ThemeClassificationHint,
+  type ThemeElementRole,
+} from '../theme/themeCategoryMapping';
+
 import { isCustomHexColor, normalizeCustomHex } from '../categories';
+import {
+  MONO_DEPTH_BORDER_DARK,
+  MONO_DEPTH_CAT4_INPUT_BG,
+  MONO_DEPTH_CAT4_INPUT_BORDER,
+  MONO_DEPTH_CAT5_TEXT,
+  MONO_DEPTH_LEVEL_1,
+  MONO_DEPTH_LEVEL_2,
+  MONO_DEPTH_LEVEL_3,
+  MONO_DEPTH_PAGE_BG,
+  deriveMonochromeLevel3FromLevel2,
+  isMonochromeDepthSystemDefault,
+  resolveMonochromeDepthBorder,
+} from '../theme/themeMonochromeDepthProtocol';
+import { resolveSubCardNestedListOverlays } from '../theme/themeNestedListProtocol';
+import { resolveThinEnclosureBorder } from '../theme/themeThinBorderProtocol';
+
+export {
+  THEME_MONOCHROME_DEPTH_PROTOCOL_VERSION,
+  MONO_DEPTH_PAGE_BG,
+  MONO_DEPTH_LEVEL_1,
+  MONO_DEPTH_LEVEL_2,
+  MONO_DEPTH_LEVEL_3,
+  MONO_DEPTH_CAT4_INPUT_BG,
+  MONO_DEPTH_CAT4_INPUT_BORDER,
+  MONO_DEPTH_CAT5_TEXT,
+  MONO_DEPTH_BORDER_DARK,
+  isMonochromeDepthSystemDefault,
+  resolveDefaultMonochromeDepthHierarchy,
+} from '../theme/themeMonochromeDepthProtocol';
 import {
   darkenHex,
   hexToRgba,
@@ -15,7 +106,14 @@ import {
   relativeLuminance,
 } from '../utils/colorUtils';
 
-export type ButtonGroupKey = 'primary' | 'currency' | 'nav' | 'filter';
+export type ButtonGroupKey =
+  | 'primary'
+  | 'currency'
+  | 'nav'
+  | 'filter'
+  | 'text'
+  | 'mainCard'
+  | 'subCard';
 export type PageThemeMode = 'dark' | 'light' | 'custom';
 
 export interface ButtonGroupTheme {
@@ -30,6 +128,28 @@ export interface ThemePreferences {
   buttons: ButtonGroupTheme;
   /** 4th group — inputs, filters, dark panels & modals. */
   filterGroupColor: string;
+  /** 5th group — typography & foreground text colors. */
+  textColor: string;
+  /** 6th group — large dashboard cards & main surface panels. */
+  mainCardSurfaceColor: string;
+  /** 7th group — nested sub-cards, accordion bodies & inner sections. */
+  subCardColor: string;
+}
+
+export interface TextTypographyPalette {
+  primary: string;
+  secondary: string;
+  muted: string;
+}
+
+export interface TextThemePreset {
+  id: string;
+  labelHe: string;
+  labelEn: string;
+  swatch: string;
+  primary: string;
+  secondary: string;
+  muted: string;
 }
 
 export interface ButtonThemePreset {
@@ -174,13 +294,13 @@ export const NAV_PRESETS: Record<string, ButtonThemePreset> = {
 
 export const FILTER_PRESETS: Record<string, ButtonThemePreset> = {
   charcoal: {
-    id: 'charcoal', labelHe: 'פחם', labelEn: 'Charcoal', swatch: '#0A0A0A',
-    bg: 'rgb(10 10 10 / 0.85)',
-    bgHover: 'rgb(38 38 38 / 0.75)',
-    bgActive: 'rgb(64 64 64 / 0.9)',
-    textColor: 'rgb(163 163 163)',
-    textColorHover: 'rgb(229 229 229)',
-    borderColor: 'rgb(38 38 38 / 0.8)',
+    id: 'charcoal', labelHe: 'פחם כהה', labelEn: 'Dark Charcoal', swatch: '#27272A',
+    bg: '#27272A',
+    bgHover: '#3F3F46',
+    bgActive: '#52525B',
+    textColor: '#FFFFFF',
+    textColorHover: '#FFFFFF',
+    borderColor: 'rgba(255, 255, 255, 0.10)',
   },
   slate: {
     id: 'slate', labelHe: 'צפחה', labelEn: 'Slate', swatch: '#1E293B',
@@ -229,14 +349,192 @@ export const FILTER_PRESETS: Record<string, ButtonThemePreset> = {
   },
 };
 
+// ─── TEXT / TYPOGRAPHY presets (group 5) ───────────────────────────────────────
+
+export const TEXT_PRESETS: Record<string, TextThemePreset> = {
+  white: {
+    id: 'white', labelHe: 'לבן', labelEn: 'White', swatch: '#FFFFFF',
+    primary: '#FFFFFF', secondary: '#FFFFFF', muted: '#FFFFFF',
+  },
+  silver: {
+    id: 'silver', labelHe: 'כסף', labelEn: 'Silver', swatch: '#E5E5E5',
+    primary: '#F5F5F5', secondary: '#D4D4D4', muted: '#A3A3A3',
+  },
+  zinc: {
+    id: 'zinc', labelHe: 'אבץ בהיר', labelEn: 'Light Zinc', swatch: '#E4E4E7',
+    primary: '#F4F4F5', secondary: '#D4D4D8', muted: '#A1A1AA',
+  },
+  slate: {
+    id: 'slate', labelHe: 'צפחה בהיר', labelEn: 'Light Slate', swatch: '#CBD5E1',
+    primary: '#F1F5F9', secondary: '#CBD5E1', muted: '#94A3B8',
+  },
+  stone: {
+    id: 'stone', labelHe: 'אבן בהיר', labelEn: 'Light Stone', swatch: '#D6D3D1',
+    primary: '#FAFAF9', secondary: '#D6D3D1', muted: '#A8A29E',
+  },
+  neutral: {
+    id: 'neutral', labelHe: 'נייטרל בהיר', labelEn: 'Light Neutral', swatch: '#D4D4D4',
+    primary: '#FAFAFA', secondary: '#D4D4D4', muted: '#A3A3A3',
+  },
+};
+
+function textPresetAsButtonPreset(preset: TextThemePreset): ButtonThemePreset {
+  return {
+    id: preset.id,
+    labelHe: preset.labelHe,
+    labelEn: preset.labelEn,
+    swatch: preset.swatch,
+    bg: preset.swatch,
+    bgHover: preset.swatch,
+    bgActive: preset.swatch,
+  };
+}
+
+const TEXT_BUTTON_PRESETS = Object.fromEntries(
+  Object.entries(TEXT_PRESETS).map(([key, preset]) => [key, textPresetAsButtonPreset(preset)]),
+);
+
+// ─── MAIN CARD / SURFACE presets (group 6) ───────────────────────────────────
+
+export const MAIN_CARD_PRESETS: Record<string, ButtonThemePreset> = {
+  default: {
+    id: 'default', labelHe: 'שחור עמוק', labelEn: 'Deep Black', swatch: '#0A0A0A',
+    bg: '#0A0A0A', bgHover: '#0A0A0A', bgActive: '#0A0A0A',
+    borderColor: 'rgba(255, 255, 255, 0.10)',
+  },
+  white: {
+    id: 'white', labelHe: 'לבן', labelEn: 'White', swatch: '#FFFFFF',
+    bg: '#FFFFFF', bgHover: '#FFFFFF', bgActive: '#FFFFFF',
+    borderColor: '#E2E8F0',
+  },
+  zinc: {
+    id: 'zinc', labelHe: 'אבץ', labelEn: 'Zinc', swatch: '#18181B',
+    bg: '#18181B', bgHover: '#18181B', bgActive: '#18181B',
+    borderColor: '#27272A',
+  },
+  charcoal: {
+    id: 'charcoal', labelHe: 'פחם', labelEn: 'Charcoal', swatch: '#171717',
+    bg: '#171717', bgHover: '#171717', bgActive: '#171717',
+    borderColor: '#262626',
+  },
+  slate: {
+    id: 'slate', labelHe: 'צפחה', labelEn: 'Slate', swatch: '#1E293B',
+    bg: '#1E293B', bgHover: '#1E293B', bgActive: '#1E293B',
+    borderColor: '#334155',
+  },
+  stone: {
+    id: 'stone', labelHe: 'אבן', labelEn: 'Stone', swatch: '#1C1917',
+    bg: '#1C1917', bgHover: '#1C1917', bgActive: '#1C1917',
+    borderColor: '#292524',
+  },
+  neutral: {
+    id: 'neutral', labelHe: 'נייטרל', labelEn: 'Neutral', swatch: '#171717',
+    bg: '#171717', bgHover: '#171717', bgActive: '#171717',
+    borderColor: '#262626',
+  },
+};
+
+// ─── SUB-CARD / INNER SECTION presets (group 7) ───────────────────────────────
+
+export const SUB_CARD_PRESETS: Record<string, ButtonThemePreset> = {
+  default: {
+    id: 'default', labelHe: 'פחם', labelEn: 'Charcoal', swatch: '#171717',
+    bg: '#171717', bgHover: '#171717', bgActive: '#171717',
+    borderColor: 'rgba(255, 255, 255, 0.10)',
+  },
+  slate: {
+    id: 'slate', labelHe: 'צפחה שקופה', labelEn: 'Slate Tint', swatch: '#1E293B',
+    bg: 'rgb(30 41 59 / 0.5)', bgHover: 'rgb(30 41 59 / 0.5)', bgActive: 'rgb(30 41 59 / 0.5)',
+    borderColor: 'rgb(51 65 85 / 0.6)',
+  },
+  zinc: {
+    id: 'zinc', labelHe: 'אבץ', labelEn: 'Zinc', swatch: '#27272A',
+    bg: '#27272A', bgHover: '#27272A', bgActive: '#27272A',
+    borderColor: '#3F3F46',
+  },
+  charcoal: {
+    id: 'charcoal', labelHe: 'פחם', labelEn: 'Charcoal', swatch: '#262626',
+    bg: '#262626', bgHover: '#262626', bgActive: '#262626',
+    borderColor: '#404040',
+  },
+  stone: {
+    id: 'stone', labelHe: 'אבן', labelEn: 'Stone', swatch: '#292524',
+    bg: '#292524', bgHover: '#292524', bgActive: '#292524',
+    borderColor: '#44403C',
+  },
+  neutral: {
+    id: 'neutral', labelHe: 'נייטרל', labelEn: 'Neutral', swatch: '#262626',
+    bg: '#262626', bgHover: '#262626', bgActive: '#262626',
+    borderColor: '#404040',
+  },
+  mist: {
+    id: 'mist', labelHe: 'ערפל בהיר', labelEn: 'Light Mist', swatch: '#F1F5F9',
+    bg: '#F1F5F9', bgHover: '#F1F5F9', bgActive: '#F1F5F9',
+    borderColor: '#E2E8F0',
+  },
+};
+
 export const ALL_PRESETS: Record<ButtonGroupKey, Record<string, ButtonThemePreset>> = {
   primary: PRIMARY_PRESETS,
   currency: CURRENCY_PRESETS,
   nav: NAV_PRESETS,
   filter: FILTER_PRESETS,
+  text: TEXT_BUTTON_PRESETS,
+  mainCard: MAIN_CARD_PRESETS,
+  subCard: SUB_CARD_PRESETS,
 };
 
 export const DEFAULT_FILTER_GROUP_COLOR = 'charcoal';
+export const DEFAULT_TEXT_COLOR = 'white';
+export const DEFAULT_MAIN_CARD_SURFACE_COLOR = 'default';
+export const DEFAULT_SUB_CARD_COLOR = 'default';
+export const GUEST_TEXT_THEME_LS_KEY = 'guest_text_theme';
+
+export type TypographyMode = 'default' | 'preset' | 'custom';
+
+const TEXT_COLOR_CSS_VARS = [
+  '--dynamic-text-color',
+  '--typography-primary',
+  '--typography-secondary',
+  '--typography-muted',
+  '--page-text',
+  '--page-text-muted',
+  '--page-text-subtle',
+  '--surface-input-text',
+  '--surface-input-placeholder',
+  '--btn-primary-fg',
+  '--btn-currency-fg',
+  '--btn-nav-text',
+  '--btn-nav-text-hover',
+  '--btn-filter-text',
+  '--btn-filter-text-hover',
+] as const;
+
+export function isTypographyCustomOverride(textColor: string): boolean {
+  return isCustomColorChoice(textColor);
+}
+
+export function isTypographySystemDefault(textColor: string): boolean {
+  return !isCustomColorChoice(textColor) && textColor === DEFAULT_TEXT_COLOR;
+}
+
+export function resolveTypographyMode(textColor: string): TypographyMode {
+  if (isTypographyCustomOverride(textColor)) return 'custom';
+  if (isTypographySystemDefault(textColor)) return 'default';
+  return 'preset';
+}
+
+function setTextColorCssVars(root: HTMLElement, color: string): void {
+  for (const cssVar of TEXT_COLOR_CSS_VARS) {
+    root.style.setProperty(cssVar, color);
+  }
+}
+
+function clearTextColorCssVars(root: HTMLElement): void {
+  for (const cssVar of TEXT_COLOR_CSS_VARS) {
+    root.style.removeProperty(cssVar);
+  }
+}
 
 export const DEFAULT_BUTTON_THEME: ButtonGroupTheme = {
   primary: 'indigo',
@@ -246,9 +544,12 @@ export const DEFAULT_BUTTON_THEME: ButtonGroupTheme = {
 
 export const DEFAULT_THEME_PREFERENCES: ThemePreferences = {
   pageMode: 'dark',
-  pageCustomHex: '#0A0A0A',
+  pageCustomHex: MONO_DEPTH_PAGE_BG,
   buttons: { ...DEFAULT_BUTTON_THEME },
   filterGroupColor: DEFAULT_FILTER_GROUP_COLOR,
+  textColor: DEFAULT_TEXT_COLOR,
+  mainCardSurfaceColor: DEFAULT_MAIN_CARD_SURFACE_COLOR,
+  subCardColor: DEFAULT_SUB_CARD_COLOR,
 };
 
 /** @deprecated Use DEFAULT_THEME_PREFERENCES */
@@ -282,10 +583,31 @@ export const BUTTON_GROUP_META: Record<
     descHe: 'שדות טקסט, חיפוש, תפריטי מטבע, לשוניות סינון, כרטיסי מודל ופאנלים כהים',
     descEn: 'Text inputs, search bars, currency selectors, filter tabs, modal cards, and dark panels',
   },
+  text: {
+    labelHe: 'צבעי כיתוב וכותרות',
+    labelEn: 'Typography & Text Colors',
+    descHe: 'כותרות, כפתורים, שדות קלט, תוויות, מקרא וגרפים — צבע מותאם מאחד הכל',
+    descEn: 'Titles, buttons, inputs, labels, legends, and charts — custom color unifies all text',
+  },
+  mainCard: {
+    labelHe: 'כרטיסים ומשטחים מרכזיים',
+    labelEn: 'Main Cards & Surfaces',
+    descHe: 'צבע לכלל הריבועים והכרטיסים החיצוניים המרכזיים באתר',
+    descEn: 'Color for all major outer cards and layout wrappers across the app',
+  },
+  subCard: {
+    labelHe: 'כרטיסי משנה ותתי-קטגוריות',
+    labelEn: 'Sub-Cards & Inner Sections',
+    descHe: 'מסגרות אקורדיון חיצוניות/פנימיות, פאנלים מורחבים, שורות משנה וכרטיסים מקוננים בתוך כרטיס ראשי',
+    descEn: 'Outer/inner accordion frames, expanded panels, nested rows, and child cards inside masters',
+  },
 };
 
 export function getGroupColorChoice(prefs: ThemePreferences, group: ButtonGroupKey): string {
   if (group === 'filter') return prefs.filterGroupColor;
+  if (group === 'text') return prefs.textColor;
+  if (group === 'mainCard') return prefs.mainCardSurfaceColor;
+  if (group === 'subCard') return prefs.subCardColor;
   return prefs.buttons[group];
 }
 
@@ -293,7 +615,7 @@ export const PAGE_THEME_META: Record<
   PageThemeMode,
   { labelHe: string; labelEn: string; swatch: string }
 > = {
-  dark: { labelHe: 'מצב כהה', labelEn: 'Dark Mode', swatch: '#0A0A0A' },
+  dark: { labelHe: 'מצב כהה', labelEn: 'Dark Mode', swatch: MONO_DEPTH_PAGE_BG },
   light: { labelHe: 'מצב בהיר', labelEn: 'Light Mode', swatch: '#F8FAFC' },
   custom: { labelHe: 'צבע מותאם', labelEn: 'Custom Color', swatch: '#6366F1' },
 };
@@ -301,15 +623,15 @@ export const PAGE_THEME_META: Record<
 // ─── Page palettes ────────────────────────────────────────────────────────────
 
 const DARK_PAGE_PALETTE: PagePalette = {
-  bg: '#0A0A0A',
-  surface: '#171717',
-  surfaceMuted: '#262626',
-  border: '#262626',
-  text: '#F5F5F5',
-  textMuted: '#A3A3A3',
-  textSubtle: '#737373',
-  inputBg: '#0A0A0A',
-  inputBorder: '#404040',
+  bg: MONO_DEPTH_PAGE_BG,
+  surface: MONO_DEPTH_LEVEL_1,
+  surfaceMuted: MONO_DEPTH_LEVEL_2,
+  border: MONO_DEPTH_BORDER_DARK,
+  text: MONO_DEPTH_CAT5_TEXT,
+  textMuted: MONO_DEPTH_CAT5_TEXT,
+  textSubtle: MONO_DEPTH_CAT5_TEXT,
+  inputBg: MONO_DEPTH_CAT4_INPUT_BG,
+  inputBorder: MONO_DEPTH_CAT4_INPUT_BORDER,
 };
 
 const LIGHT_PAGE_PALETTE: PagePalette = {
@@ -400,10 +722,130 @@ export function isCustomColorChoice(value: string): boolean {
   return isCustomHexColor(value);
 }
 
+function deriveTypographyFromHex(hex: string): TextTypographyPalette {
+  const normalized = normalizeCustomHex(hex);
+  const light = isLightColor(normalized);
+  return {
+    primary: normalized,
+    secondary: light ? darkenHex(normalized, 0.22) : lightenHex(normalized, 0.14),
+    muted: light ? darkenHex(normalized, 0.42) : lightenHex(normalized, 0.32),
+  };
+}
+
+export function resolveTypographyColors(choice: string): TextTypographyPalette {
+  if (isCustomColorChoice(choice)) {
+    return deriveTypographyFromHex(choice);
+  }
+  const preset = TEXT_PRESETS[choice] ?? TEXT_PRESETS[DEFAULT_TEXT_COLOR];
+  return {
+    primary: preset.primary,
+    secondary: preset.secondary,
+    muted: preset.muted,
+  };
+}
+
+function deriveMainCardBorderColor(bg: string): string {
+  const normalized = normalizeCustomHex(bg);
+  return isLightColor(normalized) ? darkenHex(normalized, 0.1) : lightenHex(normalized, 0.12);
+}
+
+function deriveSubCardBorderColor(bg: string): string {
+  if (bg.includes('/')) return bg;
+  const normalized = normalizeCustomHex(bg.startsWith('#') ? bg : '#262626');
+  return isLightColor(normalized) ? darkenHex(normalized, 0.08) : lightenHex(normalized, 0.1);
+}
+
+export function resolveSubCardColors(prefs: ThemePreferences): { bg: string; border: string } {
+  const choice = prefs.subCardColor;
+  const pagePalette = resolvePagePalette(prefs);
+
+  if (!isCustomColorChoice(choice) && choice === DEFAULT_SUB_CARD_COLOR) {
+    if (prefs.pageMode === 'dark') {
+      return { bg: MONO_DEPTH_LEVEL_2, border: MONO_DEPTH_BORDER_DARK };
+    }
+    return { bg: pagePalette.surfaceMuted, border: pagePalette.border };
+  }
+
+  const resolved = resolveButtonColors('subCard', choice);
+  const bg = resolved.bg;
+  return {
+    bg,
+    border: resolved.borderColor ?? deriveSubCardBorderColor(bg),
+  };
+}
+
+export function resolveMainCardSurfaceColors(
+  prefs: ThemePreferences,
+): { bg: string; border: string } {
+  const choice = prefs.mainCardSurfaceColor;
+  const pagePalette = resolvePagePalette(prefs);
+
+  if (!isCustomColorChoice(choice) && choice === DEFAULT_MAIN_CARD_SURFACE_COLOR) {
+    if (prefs.pageMode === 'dark') {
+      return { bg: MONO_DEPTH_LEVEL_1, border: MONO_DEPTH_BORDER_DARK };
+    }
+    return { bg: pagePalette.surface, border: pagePalette.border };
+  }
+
+  const resolved = resolveButtonColors('mainCard', choice);
+  const bg = resolved.bg;
+  return {
+    bg,
+    border: resolved.borderColor ?? deriveMainCardBorderColor(bg),
+  };
+}
+
 export function resolveButtonColors(
   group: ButtonGroupKey,
   choice: string,
 ): ButtonThemePreset {
+  if (group === 'mainCard') {
+    if (isCustomColorChoice(choice)) {
+      const hex = normalizeCustomHex(choice);
+      return {
+        id: 'custom',
+        labelHe: 'צבע מותאם',
+        labelEn: 'Custom',
+        swatch: hex,
+        bg: hex,
+        bgHover: hex,
+        bgActive: hex,
+        borderColor: deriveMainCardBorderColor(hex),
+      };
+    }
+    return MAIN_CARD_PRESETS[choice] ?? MAIN_CARD_PRESETS[DEFAULT_MAIN_CARD_SURFACE_COLOR];
+  }
+  if (group === 'subCard') {
+    if (isCustomColorChoice(choice)) {
+      const hex = normalizeCustomHex(choice);
+      return {
+        id: 'custom',
+        labelHe: 'צבע מותאם',
+        labelEn: 'Custom',
+        swatch: hex,
+        bg: hex,
+        bgHover: hex,
+        bgActive: hex,
+        borderColor: deriveSubCardBorderColor(hex),
+      };
+    }
+    return SUB_CARD_PRESETS[choice] ?? SUB_CARD_PRESETS[DEFAULT_SUB_CARD_COLOR];
+  }
+  if (group === 'text') {
+    if (isCustomColorChoice(choice)) {
+      const hex = normalizeCustomHex(choice);
+      return {
+        id: 'custom',
+        labelHe: 'צבע מותאם',
+        labelEn: 'Custom',
+        swatch: hex,
+        bg: hex,
+        bgHover: hex,
+        bgActive: hex,
+      };
+    }
+    return textPresetAsButtonPreset(TEXT_PRESETS[choice] ?? TEXT_PRESETS[DEFAULT_TEXT_COLOR]);
+  }
   if (isCustomColorChoice(choice)) {
     const hex = normalizeCustomHex(choice);
     if (group === 'nav' || group === 'filter') return deriveNavButtonColors(hex);
@@ -452,6 +894,7 @@ function applyPagePaletteCSS(palette: PagePalette): void {
   root.style.setProperty('--page-input-bg', palette.inputBg);
   root.style.setProperty('--page-input-border', palette.inputBorder);
   root.dataset.pageTheme = relativeLuminance(palette.bg) > 0.45 ? 'light' : 'dark';
+  root.style.setProperty('--theme-enclosure-border', resolveThinEnclosureBorder(palette.surface));
 
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute('content', palette.bg);
@@ -484,20 +927,121 @@ function applyButtonGroupCSS(prefs: ThemePreferences): void {
   root.style.setProperty('--btn-filter-active', filter.bgActive);
   root.style.setProperty('--btn-filter-text', filter.textColor ?? 'rgb(163 163 163)');
   root.style.setProperty('--btn-filter-text-hover', filter.textColorHover ?? 'rgb(229 229 229)');
-  root.style.setProperty('--btn-filter-border', filter.borderColor ?? 'rgb(38 38 38 / 0.8)');
+  const filterEnclosure = resolveThinEnclosureBorder(filter.bg);
+  root.style.setProperty('--btn-filter-border', filterEnclosure);
 
-  root.style.setProperty('--surface-input-bg', filter.bgHover);
-  root.style.setProperty('--surface-input-border', filter.borderColor ?? 'rgb(38 38 38 / 0.8)');
-  root.style.setProperty('--surface-input-text', filter.textColorHover ?? 'rgb(229 229 229)');
-  root.style.setProperty('--surface-input-placeholder', filter.textColor ?? 'rgb(163 163 163)');
+  const inputSurface = resolveCategory4InputSurface(prefs, filter);
+  root.style.setProperty('--surface-input-bg', inputSurface.bg);
+  root.style.setProperty('--surface-input-border', inputSurface.border);
+  root.style.setProperty('--surface-input-text', filter.textColorHover ?? 'rgb(250 250 250)');
+  root.style.setProperty('--surface-input-placeholder', filter.textColor ?? 'rgb(161 161 170)');
   root.style.setProperty('--surface-panel-bg', filter.bg);
-  root.style.setProperty('--surface-panel-border', filter.borderColor ?? 'rgb(38 38 38 / 0.8)');
+  root.style.setProperty('--surface-panel-border', filter.borderColor ?? filterEnclosure);
   root.style.setProperty('--surface-modal-bg', filter.bg);
+}
+
+/** Cat 4 inputs — solid dark gray on default; decoupled from Level 3 panel blue. */
+function resolveCategory4InputSurface(
+  prefs: ThemePreferences,
+  filter: ButtonThemePreset,
+): { bg: string; border: string } {
+  const isDefaultFilter =
+    !isCustomColorChoice(prefs.filterGroupColor) &&
+    prefs.filterGroupColor === DEFAULT_FILTER_GROUP_COLOR;
+
+  if (isDefaultFilter && prefs.pageMode === 'dark') {
+    return { bg: MONO_DEPTH_CAT4_INPUT_BG, border: MONO_DEPTH_CAT4_INPUT_BORDER };
+  }
+
+  const bg = filter.bgHover;
+  return { bg, border: resolveThinEnclosureBorder(bg) };
+}
+
+function applyMainCardSurfaceCSS(prefs: ThemePreferences): void {
+  const root = document.documentElement;
+  const { bg } = resolveMainCardSurfaceColors(prefs);
+  const border = resolveThinEnclosureBorder(bg);
+  root.style.setProperty('--main-card-surface-bg', bg);
+  root.style.setProperty('--main-card-surface-border', border);
+  root.style.setProperty('--color-main-cards', bg);
+  root.style.setProperty('--color-main-cards-border', border);
+  root.dataset.mainCardMode =
+    !isCustomColorChoice(prefs.mainCardSurfaceColor) &&
+    prefs.mainCardSurfaceColor === DEFAULT_MAIN_CARD_SURFACE_COLOR
+      ? 'default'
+      : isCustomColorChoice(prefs.mainCardSurfaceColor)
+        ? 'custom'
+        : 'preset';
+}
+
+function applySubCardCSS(prefs: ThemePreferences): void {
+  const root = document.documentElement;
+  const { bg } = resolveSubCardColors(prefs);
+  const border = resolveThinEnclosureBorder(bg);
+  const overlays = resolveSubCardNestedListOverlays(bg);
+  root.style.setProperty('--color-sub-cards', bg);
+  root.style.setProperty('--color-sub-cards-border', border);
+  root.style.setProperty('--color-sub-cards-divider', overlays.divider);
+  root.style.setProperty('--color-sub-cards-stripe', overlays.stripe);
+  root.style.setProperty('--color-sub-cards-hover', overlays.hover);
+  root.dataset.subCardMode =
+    !isCustomColorChoice(prefs.subCardColor) && prefs.subCardColor === DEFAULT_SUB_CARD_COLOR
+      ? 'default'
+      : isCustomColorChoice(prefs.subCardColor)
+        ? 'custom'
+        : 'preset';
+}
+
+/** Level 3 inner panels — derives from Level 2 when users customize Cat 7. */
+function applyMonochromeDepthCSS(prefs: ThemePreferences): void {
+  const root = document.documentElement;
+  const { bg: level2Bg } = resolveSubCardColors(prefs);
+  const level3Bg = isMonochromeDepthSystemDefault(prefs)
+    ? MONO_DEPTH_LEVEL_3
+    : deriveMonochromeLevel3FromLevel2(level2Bg);
+  const level3Border = resolveMonochromeDepthBorder(level3Bg);
+  root.style.setProperty('--color-depth-inner', level3Bg);
+  root.style.setProperty('--color-depth-inner-border', level3Border);
+  root.dataset.monochromeDepthMode = isMonochromeDepthSystemDefault(prefs) ? 'default' : 'derived';
+}
+
+function applyTypographyCSS(prefs: ThemePreferences): void {
+  const root = document.documentElement;
+  const mode = resolveTypographyMode(prefs.textColor);
+  root.dataset.typographyMode = mode;
+
+  if (mode === 'custom') {
+    const hex = normalizeCustomHex(prefs.textColor);
+    setTextColorCssVars(root, hex);
+    return;
+  }
+
+  clearTextColorCssVars(root);
+
+  const typography = resolveTypographyColors(
+    mode === 'default' ? DEFAULT_TEXT_COLOR : prefs.textColor,
+  );
+  root.style.setProperty('--typography-primary', typography.primary);
+  root.style.setProperty('--typography-secondary', typography.secondary);
+  root.style.setProperty('--typography-muted', typography.muted);
+
+  if (mode === 'preset') {
+    root.style.setProperty('--surface-input-text', typography.primary);
+    root.style.setProperty('--surface-input-placeholder', typography.muted);
+    root.style.setProperty('--btn-nav-text', typography.secondary);
+    root.style.setProperty('--btn-nav-text-hover', typography.primary);
+    root.style.setProperty('--btn-filter-text', typography.muted);
+    root.style.setProperty('--btn-filter-text-hover', typography.secondary);
+  }
 }
 
 export function applyThemeCSS(prefs: ThemePreferences): void {
   applyPagePaletteCSS(resolvePagePalette(prefs));
   applyButtonGroupCSS(prefs);
+  applyMainCardSurfaceCSS(prefs);
+  applySubCardCSS(prefs);
+  applyMonochromeDepthCSS(prefs);
+  applyTypographyCSS(prefs);
 }
 
 /** @deprecated Use applyThemeCSS */
@@ -506,6 +1050,9 @@ export function applyButtonThemeCSS(theme: ButtonGroupTheme): void {
     ...DEFAULT_THEME_PREFERENCES,
     buttons: theme,
     filterGroupColor: DEFAULT_FILTER_GROUP_COLOR,
+    textColor: DEFAULT_TEXT_COLOR,
+    mainCardSurfaceColor: DEFAULT_MAIN_CARD_SURFACE_COLOR,
+    subCardColor: DEFAULT_SUB_CARD_COLOR,
   });
 }
 
@@ -518,8 +1065,20 @@ function normalizeButtonChoice(group: ButtonGroupKey, value: string): string {
   if (isCustomColorChoice(value)) return normalizeCustomHex(value);
   const presets = ALL_PRESETS[group];
   const fallback =
-    group === 'filter' ? DEFAULT_FILTER_GROUP_COLOR : DEFAULT_BUTTON_THEME[group as keyof ButtonGroupTheme];
+    group === 'filter'
+      ? DEFAULT_FILTER_GROUP_COLOR
+      : group === 'text'
+        ? DEFAULT_TEXT_COLOR
+        : group === 'mainCard'
+          ? DEFAULT_MAIN_CARD_SURFACE_COLOR
+          : group === 'subCard'
+            ? DEFAULT_SUB_CARD_COLOR
+            : DEFAULT_BUTTON_THEME[group as keyof ButtonGroupTheme];
   return value in presets ? value : fallback;
+}
+
+function normalizeTextColorChoice(value: string | undefined): string {
+  return normalizeButtonChoice('text', value ?? DEFAULT_TEXT_COLOR);
 }
 
 function normalizeThemePreferences(raw: Partial<ThemePreferences> | null | undefined): ThemePreferences {
@@ -543,6 +1102,16 @@ function normalizeThemePreferences(raw: Partial<ThemePreferences> | null | undef
         ? buttonsExtra.filter
         : DEFAULT_FILTER_GROUP_COLOR;
 
+  let legacyText: string | undefined =
+    typeof rawRecord?.textColor === 'string' ? rawRecord.textColor : undefined;
+  if (!legacyText) {
+    try {
+      legacyText = window.localStorage.getItem(GUEST_TEXT_THEME_LS_KEY) ?? undefined;
+    } catch {
+      legacyText = undefined;
+    }
+  }
+
   return {
     pageMode,
     pageCustomHex,
@@ -552,6 +1121,19 @@ function normalizeThemePreferences(raw: Partial<ThemePreferences> | null | undef
       nav: normalizeButtonChoice('nav', buttonsRaw?.nav ?? DEFAULT_BUTTON_THEME.nav),
     },
     filterGroupColor: normalizeButtonChoice('filter', legacyFilter),
+    textColor: normalizeTextColorChoice(legacyText),
+    mainCardSurfaceColor: normalizeButtonChoice(
+      'mainCard',
+      typeof rawRecord?.mainCardSurfaceColor === 'string'
+        ? rawRecord.mainCardSurfaceColor
+        : DEFAULT_MAIN_CARD_SURFACE_COLOR,
+    ),
+    subCardColor: normalizeButtonChoice(
+      'subCard',
+      typeof rawRecord?.subCardColor === 'string'
+        ? rawRecord.subCardColor
+        : DEFAULT_SUB_CARD_COLOR,
+    ),
   };
 }
 
@@ -612,6 +1194,7 @@ export function loadButtonTheme(): ButtonGroupTheme {
 export function saveThemePreferencesToStorage(prefs: ThemePreferences): void {
   try {
     window.localStorage.setItem(GUEST_THEME_LS_KEY, JSON.stringify(prefs));
+    window.localStorage.setItem(GUEST_TEXT_THEME_LS_KEY, prefs.textColor);
     window.localStorage.removeItem(LEGACY_BUTTON_LS_KEY);
   } catch {
     // storage unavailable — non-fatal
@@ -630,6 +1213,9 @@ export function themePreferencesEqual(a: ThemePreferences, b: ThemePreferences):
     a.buttons.primary === b.buttons.primary &&
     a.buttons.currency === b.buttons.currency &&
     a.buttons.nav === b.buttons.nav &&
-    a.filterGroupColor === b.filterGroupColor
+    a.filterGroupColor === b.filterGroupColor &&
+    a.textColor === b.textColor &&
+    a.mainCardSurfaceColor === b.mainCardSurfaceColor &&
+    a.subCardColor === b.subCardColor
   );
 }

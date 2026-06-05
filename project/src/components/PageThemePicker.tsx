@@ -6,6 +6,7 @@ import {
   type PageThemeMode,
 } from '../services/buttonThemeService';
 import { normalizeCustomHex } from '../categories';
+import { themeFloatingHostClass } from '../styles/themeSurfaceStyles';
 import AdvancedColorPickerPopover from './AdvancedColorPickerPopover';
 
 interface PageThemePickerProps {
@@ -33,7 +34,7 @@ export default function PageThemePicker({
   const normalizedCustom = normalizeCustomHex(customHex);
 
   return (
-    <div className="relative">
+    <div className={themeFloatingHostClass}>
       <div
         className="flex flex-wrap gap-2.5"
         role="radiogroup"

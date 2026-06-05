@@ -1,0 +1,49 @@
+---
+description: Theme layout protocol — anti-clipping overflow, z-index hierarchy, and scroll-safe padding for pickers and accordions.
+globs: project/src/**/*.{tsx,ts}
+alwaysApply: true
+---
+
+# Theme layout protocol (v1.0.0)
+
+Source of truth: `project/src/theme/themeLayoutProtocol.ts`
+Re-exported via: `buttonThemeService.ts`, `themeSurfaceStyles.ts`
+
+## When this applies
+
+Any screen with **expandable accordions**, **color pickers**, **dropdown menus**, or **customization forms** inside Category 6/7 cards.
+
+## Anti-clipping rules (חוקי מניעת חיתוך)
+
+- Cat 6/7 card wrappers and accordion shells hosting interactive floating UI **MUST NOT** use `overflow-hidden`, `overflow-y-hidden`, or `overflow-clip`.
+- Use `themeAntiClipVisibleClass` (`overflow-visible`) on picker-hosting cards/accordions.
+- Wrap picker trigger groups in `themeFloatingHostClass` (`relative overflow-visible`).
+- Color pickers **MUST** portal to `document.body` via `AdvancedColorPickerPopover` + `themeFloatingOverlayClass` (`z-[9999]`).
+- Framer-motion accordion bodies: add `overflow-visible` on expanded panels.
+
+## Z-index hierarchy
+
+| Layer | Class / value | Use |
+|-------|---------------|-----|
+| Accordion headers | `z-10` (`themeAccordionHeaderLayerClass`) | Sticky section titles |
+| Inline controls | `z-20` | Toolbar chips inside scroll areas |
+| App chrome | `z-40` – `z-50` | Nav overlay, header, modals |
+| Floating overlays | `z-[9999]` | Portaled pickers, critical dropdowns |
+
+## Scroll safety (מרחב גלילה בטוח)
+
+- Profile and Settings share one scroll viewport on app `<main>` via `themeScrollViewportClass` + `themeScrollSafeContentClass` (`pb-32 sm:pb-36 md:pb-40`).
+- When either route is open, apply `themeScrollRoutePageClass` on the page root and `themeScrollRouteShellClass` on the header→main flex shell so `flex-1 min-h-0` main actually scrolls.
+- **Never** combine `themeAntiClipVisibleClass` (`overflow-visible`) with `themeScrollViewportClass` (`overflow-y-auto`) on the same element — Tailwind overflow utilities conflict and freeze wheel/touch scroll.
+- Accordion Cat 6/7 capsules stay `overflow-visible`; they must not trap scroll — wheel/touch events bubble to `<main>`.
+
+## Architecture reminder
+
+Whenever creating or modifying a feature with expandable accordions or custom color pickers, ensure picker-hosting **cards** allow visible overflow (portals handle popovers) while the **route scroll viewport** on `<main>` owns vertical scrolling.
+
+## Forbidden
+
+- `overflow-hidden` on `subCardAccordionShellClass`, `themeCardLgClass`, or accordion bodies that contain `ButtonGroupColorPicker` / `PageThemePicker`.
+- Absolute-positioned pickers at `z-50` inside nested cards (use portal + `z-[9999]`).
+- `themeAntiClipVisibleClass` on app `<main>` when Profile or Settings is open.
+- Nested `max-h-*` + inner `overflow-y-auto` scroll traps inside Profile/Settings (use single `<main>` scroll).

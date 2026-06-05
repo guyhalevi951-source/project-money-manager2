@@ -63,7 +63,7 @@ import {
   saveCurrencyCommissionToCloud,
   saveManualExchangeOverrideToCloud,
 } from '../services/userFirebaseSync';
-import { surfaceInputClass, surfacePanelClass } from '../styles/themeSurfaceStyles';
+import { surfaceInputClass, surfacePanelClass, subCardSmClass } from '../styles/themeSurfaceStyles';
 
 export type ExchangeRateSimulatorSection = 'exchange' | 'manual-rate' | 'commissions';
 
@@ -78,6 +78,9 @@ type SavePromptState = 'hidden' | 'shown' | 'saved';
 const controlBaseClass = `h-12 px-3 text-sm active:scale-[0.98] ${surfaceInputClass}`;
 
 const staticFormCardClass = `rounded-xl p-3.5 sm:p-4 space-y-4 ${surfacePanelClass}`;
+
+/** Exchange calculator — inner rounded enclosure (currency row, date, result). */
+const exchangeSimulatorInnerCardClass = `space-y-4 overflow-visible p-4 sm:p-5 ${subCardSmClass}`;
 
 const staticListCardClass = `rounded-xl p-3 sm:p-4 ${surfacePanelClass}`;
 
@@ -1690,13 +1693,11 @@ export default function ExchangeRateSimulator({
   }
 
   return (
-    <div
-      dir={dir}
-      className="max-w-full overflow-hidden rounded-2xl border border-blue-900/35 bg-gradient-to-b from-slate-950/80 to-slate-900/70 p-4 sm:p-5"
-    >
-      <h4 className="text-sm font-semibold text-blue-200">{tr('exchangeRateTitle')}</h4>
+    <div dir={dir} className="max-w-full overflow-visible">
+      <div className={exchangeSimulatorInnerCardClass}>
+        <h4 className="text-sm font-semibold text-blue-200">{tr('exchangeRateTitle')}</h4>
 
-      <div ref={selectorContainerRef} className="mt-3 space-y-3">
+        <div ref={selectorContainerRef} className="space-y-3">
         <div className="flex flex-col items-stretch gap-2.5 sm:flex-row sm:items-end">
           {renderSelector('main', mainCurrency, tr('exchangeRateMainCurrency'))}
 
@@ -1867,6 +1868,7 @@ export default function ExchangeRateSimulator({
             )}
             </div>
           </div>
+        </div>
         </div>
       </div>
 

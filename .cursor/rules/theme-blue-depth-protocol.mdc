@@ -1,0 +1,65 @@
+---
+description: Global Layered Depth System — premium monochrome black-to-gray hierarchy (darkest outer → lighter inner).
+globs: project/src/**/*.{tsx,ts,css}
+alwaysApply: true
+---
+
+# Monochrome Layered Depth (v2.0.0)
+
+Source of truth: `project/src/theme/themeMonochromeDepthProtocol.ts`
+Applied by: `applyThemeCSS()` in `buttonThemeService.ts`, `theme-boot.js`, `index.css` `:root`
+
+## CRITICAL COLOR PROTOCOL
+
+Default states must use an optimized monochromatic scale. The outermost layer begins pure black; nested child containers step up sequentially into lighter grays. Text (Category 5) must always remain white, and Inputs (Category 4) must stay dark gray to enforce beautiful, readable UI depth by default.
+
+## Default dark monochrome ladder
+
+| Level | Role | Hex | Tailwind ref | CSS variable | Radius | Gap |
+|-------|------|-----|--------------|--------------|--------|-----|
+| 0 | Page canvas | `#000000` | `bg-black` | `--page-bg` | — | — |
+| 1 | Master accordion / Cat 6 | `#0A0A0A` | `bg-neutral-950` | `--main-card-surface-bg` | `rounded-2xl` | `gap-5` between L1 blocks |
+| 2 | Sub-category wrapper / Cat 7 | `#171717` | `bg-neutral-900` | `--color-sub-cards` | `rounded-xl` | `gap-4` |
+| 3 | Inner panels, grids, forms | `#27272A` | `bg-zinc-800` | `--color-depth-inner` | `rounded-xl` | `gap-4` |
+| 4 | Inputs, dropdowns, selectors | `#18181B` | `bg-zinc-900` | `--surface-input-bg` | `rounded-xl` | — |
+| 5 | Typography (all text) | `#FFFFFF` | `text-white` | `--page-text`, `--typography-*` | — | — |
+
+**All depth levels (L1–L3):** 1px continuous `border` — `rgba(255, 255, 255, 0.10)` on dark (`border-white/10`).
+
+**Cat 4 contrast:** `--surface-input-bg` must stay solid dark gray (`#18181B`) on default dark theme — never Level 3 gray — so fields visually sink inside L3 containers (`surfaceInputClass`, `surfaceSelectPillClass`).
+
+**Cat 5 lock:** Default dark typography is pure white (`#FFFFFF`) at every depth level for maximum readability.
+
+## Accordion zone assignment (Cat 6 vs Cat 7)
+
+| Zone | Visual | Category | CSS variable | Component |
+|------|--------|----------|--------------|-----------|
+| **Cat 6 canvas** | Gaps/padding between capsules inside expanded master | Cat 6 | `--color-main-cards` | `MasterCategoryPanelBody`, `SubCardNestedStack variant="capsuleOnMain"` |
+| **Cat 7 capsules** | Individual floating sub-category cards | Cat 7 | `--color-sub-cards` | `SubCategorySectionCard` |
+
+Never nest a `capsuleOnMain` stack inside a `SubCategorySectionCard` body — sibling capsules must sit directly on the Cat 6 canvas.
+
+## Component mapping (mandatory)
+
+| UI element | Token / component | Category |
+|------------|-------------------|----------|
+| Settings/Profile page shell | `themeCardLgClass` | Cat 6 / L1 |
+| מטבעות, הגדרות כלליות master | `MasterCategoryPanel` + `themeCategoryProps('mainCard')` | L1 |
+| Gap canvas inside expanded master | `MasterCategoryPanelBody` + `capsuleOnMain` stack | Cat 6 |
+| מטבע תצוגה, פעולות ראשיות, theme rows | `SubCategorySectionCard` + `themeCategoryProps('subCard')` | Cat 7 |
+| Currency grid cells | `subCardGridCellClass` | L3 |
+| Exchange calculators, form cards | `surfacePanelClass` / `subCardSmClass` | L3 |
+| Chart/carousel insets | `filterInsetPanelClass` | L3 |
+
+## Custom user themes
+
+When users customize Cat 6/7 colors, Level 3 derives automatically via `deriveMonochromeLevel3FromLevel2()` (one lighten step from Cat 7). Never hardcode flat identical grays on nested L1 + L2 + L3 wrappers in default dark mode.
+
+## Forbidden
+
+- Same hex on nested L1 + L2 + L3 containers (visual bleed).
+- Sharp corners on depth-layer frames.
+- Skipping perimeter `border` on any depth layer.
+- `themeCategoryProps('subCard')` on `MasterCategoryPanel` (must be `mainCard`).
+- Non-white default typography on dark monochrome surfaces.
+- Level 3 gray on Category 4 inputs in default dark mode.

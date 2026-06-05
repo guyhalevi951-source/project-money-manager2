@@ -1,0 +1,65 @@
+---
+description: Nested list separation protocol — mandatory dividers, zebra striping, and padding for stacked sub-categories.
+globs: project/src/**/*.{tsx,ts}
+alwaysApply: true
+---
+
+# Nested list separation protocol (v1.0.0)
+
+Source of truth: `project/src/theme/themeNestedListProtocol.ts`
+Components: `MasterCategoryPanel`, `MasterCategoryPanelBody`, `SubCardNestedStack`, `SubCategorySectionCard`, `SubCategorySectionBody` in `components/SubCardNestedStack.tsx`
+
+## Mandatory rule
+
+Whenever building or refactoring a **nested list** of parameters, sub-menus, accordion rows, or inner settings groups inside any Category 6/7 surface, apply automatic visual separation so rows never blend together — especially when users pick flat or high-saturation Category 7 colors.
+
+## CRITICAL LAYOUT RULE
+
+Each expanded sub-category (e.g. מטבע תצוגה) must be a **single fully rounded enclosing card** (`rounded-xl`, `subCardNestedSectionCapsuleClass`) that wraps **both** the header trigger (החלק הראשי) and the expanded dynamic body (החלק התת). Sibling sections are separated by **16px gap** (`gap-4`).
+
+## Required implementation (settings/profile)
+
+### Master category level (מטבעות, הגדרות כלליות, theme master)
+
+1. Page stack: `subCardMasterCategoryStackClass` (`gap-5`) between top-level categories.
+2. Each outermost accordion: `<MasterCategoryPanel expanded={...}>` — collapsed `rounded-2xl`, expanded `rounded-2xl` + `p-5/p-6` + 1px border.
+3. Header trigger + `<MasterCategoryPanelBody>` (sub-capsules, footers) share **one** master frame when expanded.
+4. Master body motion: opacity-only (never height animation inside the master perimeter).
+
+### Cat 6 gap canvas (orange zone inside expanded master)
+
+1. `<MasterCategoryPanelBody>` — `data-main-card-canvas`, `--color-main-cards` backing.
+2. `<SubCardNestedStack variant="capsuleOnMain">` — gaps between capsules expose Cat 6, not page or Cat 7.
+
+### Sub-category level (charcoal zone — מטבע תצוגה, פעולות ראשיות)
+
+1. Sibling capsules on Cat 6 canvas: `<SubCategorySectionCard>` per row (`--color-sub-cards`).
+2. Only nest `variant="capsule"` stacks **inside** a sub-card expanded body — never for master-level rows.
+3. Each accordion block: `<SubCategorySectionCard>` — 1px `--color-sub-cards-border`, `p-4 sm:p-5`, `rounded-xl`.
+4. Triggers: `subCardNestedAccordionTriggerClass` (flush, no extra radius); body: `<SubCategorySectionBody>` — **no inner `subCardSmClass` box**.
+5. Inner section motion: opacity-only (never height animation inside the capsule — preserves rounded perimeter).
+6. CSS variables (set by `applySubCardCSS`):
+   - `--color-sub-cards-border` — full perimeter on section capsules
+   - `--color-sub-cards-divider` — internal header/body separator
+   - `--color-sub-cards-stripe` / `--color-sub-cards-hover` — list mode only
+
+Global CSS in `index.css` disables glued dividers on `[data-nested-list-capsules]` stacks.
+
+## Standard spacing
+
+- Section capsule padding: `p-4 sm:p-5` via `subCardNestedSectionCapsuleClass`.
+- Stack gap: `gap-4` — do not compress siblings with ad-hoc negative margins.
+
+## Applies to
+
+- Settings nested accordions (מטבעות → מטבע תצוגה, הגדרות כלליות)
+- Profile theme accordions (עיצוב כפתורים, color group rows)
+- Transaction/history line items (`variant="list"` on `SubCardNestedStack`)
+- Any future multi-item settings or parameter list
+
+## Forbidden
+
+- Header and expanded body in separate unrounded boxes.
+- Stacked nested rows with only `space-y-*` and no capsule enclosure in configuration contexts.
+- Hardcoded `divide-neutral-*` or `border-gray-*` between Cat 7 nested items.
+- Height-based framer-motion on content inside a section capsule (clips rounded frame).

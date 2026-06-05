@@ -4,7 +4,7 @@ import CategoryColorPicker from './CategoryColorPicker';
 import CategoryColorChip from './CategoryColorChip';
 import { useLanguage } from '../LanguageContext';
 import { primaryActionButtonClass, primaryActionSelectedChipClass } from '../styles/actionButtonStyles';
-import { surfaceInputClass, surfacePanelClass } from '../styles/themeSurfaceStyles';
+import { surfaceInputClass, surfacePanelClass, typographyLabelClass } from '../styles/themeSurfaceStyles';
 
 interface CreateCategoryFormProps {
   name: string;
@@ -35,7 +35,7 @@ export default function CreateCategoryForm({
   return (
     <div className={`w-full sm:w-96 max-w-full rounded-2xl border border-emerald-500/30 p-5 shadow-lg shadow-black/30 space-y-4 ${surfacePanelClass}`}>
       <div>
-        <label className="block text-xs font-medium text-neutral-300 mb-2">{tr('categoryName')}</label>
+        <label className={`block text-xs font-medium mb-2 ${typographyLabelClass}`}>{tr('categoryName')}</label>
         <input
           type="text"
           value={name}
@@ -55,7 +55,7 @@ export default function CreateCategoryForm({
       <CategoryColorPicker value={color} onChange={onColorChange} />
 
       <div>
-        <label className="block text-xs font-medium text-neutral-300 mb-2">{tr('icon')}</label>
+        <label className={`block text-xs font-medium mb-2 ${typographyLabelClass}`}>{tr('icon')}</label>
         <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
           {ICON_OPTIONS.map((o) => {
             const IconComp = o.icon;

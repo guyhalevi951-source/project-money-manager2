@@ -1,4 +1,5 @@
 import { LtrNumeric, useLanguage } from '../LanguageContext';
+import { subCardClass, typographyBodyClass, typographyMutedClass } from '../styles/themeSurfaceStyles';
 
 export interface SelectedDaySummaryPoint {
   iso: string;
@@ -19,15 +20,15 @@ export default function SelectedDaySummary({ point, formatDate }: SelectedDaySum
       dir={dir}
       role="status"
       aria-live="polite"
-      className="mx-auto mt-4 w-full max-w-sm rounded-xl border border-sky-900/45 bg-[#0f172a]/95 px-4 py-3.5 text-center shadow-lg shadow-black/40 outline-none focus:outline-none focus-visible:outline-none"
+      className={`mx-auto mt-4 w-full max-w-sm px-4 py-3.5 text-center shadow-lg shadow-black/40 outline-none focus:outline-none focus-visible:outline-none ${subCardClass}`}
     >
-      <p className="text-sm leading-relaxed text-slate-400">
+      <p className={`text-sm leading-relaxed ${typographyMutedClass}`}>
         {tr('date')}:{' '}
-        <span className="font-medium text-slate-100">{formatDate(point.iso, lang)}</span>
+        <span className={`font-medium ${typographyBodyClass}`}>{formatDate(point.iso, lang)}</span>
       </p>
-      <p className="mt-1.5 text-sm leading-relaxed text-slate-400">
+      <p className={`mt-1.5 text-sm leading-relaxed ${typographyMutedClass}`}>
         {tr('amountIls')}:{' '}
-        <LtrNumeric className="font-bold text-slate-100">{formatMoney(point.amount)}</LtrNumeric>
+        <LtrNumeric className={`font-bold ${typographyBodyClass}`}>{formatMoney(point.amount)}</LtrNumeric>
       </p>
     </div>
   );

@@ -1,0 +1,65 @@
+---
+description: Theme category mapping standard — classify every UI element into groups 0–7 and bind approved style tokens only.
+globs: project/src/**/*.{tsx,ts}
+alwaysApply: true
+---
+
+# Theme category mapping standard (v1.1.0)
+
+Source of truth: `project/src/theme/themeCategoryMapping.ts`
+Layout / overflow protocol: `project/src/theme/themeLayoutProtocol.ts` (see `theme-layout-protocol.mdc`)
+
+Every structural UI element MUST be classified and bound using this standard. Do not hardcode `bg-white`, `bg-zinc-900`, `bg-gray-900`, `bg-slate-800/50`, or ad-hoc text colors on card wrappers.
+
+## Required workflow for new UI
+
+1. Build a `ThemeClassificationHint` for the element (role, `translationKey`, `tagName`, flags).
+2. Call `classifyThemeCategory(hint)` to resolve the category id.
+3. Import and apply tokens from `getThemeStyleTokens(category)` only — from `actionButtonStyles.ts` or `themeSurfaceStyles.ts`.
+4. Add `themeCategoryProps(category)` → `data-theme-category="…"` on the outermost node.
+5. Scope app content under `data-theme-scope="app"` (`APP_THEME_SCOPE`).
+
+## Category rules (algorithmic)
+
+| # | ID | Criterion | Bind tokens / vars |
+|---|-----|-----------|-------------------|
+| 0 | `page` | Absolute document canvas backdrop | `themePageRootClass`, `--page-bg` — Light/Dark/Custom mode |
+| 1 | `primary` | Write / submit / create / delete mutations | `primaryActionButtonClass`, `--btn-primary-*` |
+| 2 | `currency` | Secondary utilities, currency pills, local tools | `currencyUtilityButtonClass`, `--btn-currency-*` |
+| 3 | `nav` | Routing-only: tabs, navbar, home, globe language | `utilityNav*Class`, `--btn-nav-*` |
+| 4 | `filter` | `input`, `textarea`, `select`, dropdown shells, filter tab bars | `surfaceInputClass`, `filterBar*`, `--surface-input-*` |
+| 5 | `text` | All foreground copy & inline icons | `typography*Class`, `--typography-*` / `--dynamic-text-color` |
+| 6 | `mainCard` | Outermost master cards, timeline boxes, modal backings | `themeCardClass`, `themeCardLgClass`, `--main-card-surface-*` |
+| 7 | `subCard` | Nested inside Cat 6: outer/inner accordion shells (Profile/Settings), expanded panels, inset sub-cards, list rows | `subCardAccordion*Class`, `subCard*Class`, `--color-sub-cards` |
+
+## Classification priority (first match wins)
+
+1. `excludedFromTheming` → static auth sign-up classes only
+2. Page root → `page`
+3. Outer layout / modal backing → `mainCard`
+4. Nested inside master (`isNestedInsideMasterCard`, accordion shell/trigger/body, list row) → `subCard`
+5. Form control / filter tab / input tag → `filter`
+6. Typography tag / text node → `text`
+7. Navigation-only → `nav`
+8. Primary mutation / submit → `primary`
+9. Utility / currency tool → `currency`
+10. Generic `button` fallback → `nav`
+11. Default → `text`
+
+## Forbidden
+
+- Hardcoded structural background classes on outer or inner card wrappers.
+- Using Cat 6 tokens (`themeCardClass`) for elements nested inside a master card — use Cat 7 (`subCardClass`, `subCardSmClass`, `subCardRowClass`).
+- Duplicating theme color classes in components — import from style token modules only.
+- Theming auth sign-up submit buttons (`authSignupStatic*` — hardcoded indigo exclusion).
+
+## Persistence keys (`ThemePreferences`)
+
+- Cat 0: `pageMode`, `pageCustomHex`
+- Cat 1–3: `buttons.primary`, `buttons.currency`, `buttons.nav`
+- Cat 4: `filterGroupColor`
+- Cat 5: `textColor`
+- Cat 6: `mainCardSurfaceColor`
+- Cat 7: `subCardColor`
+
+Firebase: `themePreferences.*` — guest: `guest_theme_preferences` in localStorage.
