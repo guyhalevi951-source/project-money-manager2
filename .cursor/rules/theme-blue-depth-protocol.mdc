@@ -1,13 +1,15 @@
 ---
-description: Global Layered Depth System — premium monochrome black-to-gray hierarchy (darkest outer → lighter inner).
+description: Future-Proof Monochrome Layered Depth — black-to-gray hierarchy (L1→L3) with Settings/Profile enforcement.
 globs: project/src/**/*.{tsx,ts,css}
 alwaysApply: true
 ---
 
-# Monochrome Layered Depth (v2.0.0)
+# Future-Proof Monochrome Layered Depth (v2.0.0)
 
 Source of truth: `project/src/theme/themeMonochromeDepthProtocol.ts`
+Component mapping: `project/src/theme/themeCategoryMapping.ts` (`MONOCHROME_DEPTH_COMPONENT_MAP`)
 Applied by: `applyThemeCSS()` in `buttonThemeService.ts`, `theme-boot.js`, `index.css` `:root`
+Settings/Profile scope: `SETTINGS_PROFILE_SCOPE_ATTR` — see `theme-category-mapping.mdc`
 
 ## CRITICAL COLOR PROTOCOL
 

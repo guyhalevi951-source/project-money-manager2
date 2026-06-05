@@ -16,13 +16,30 @@ import { formatTranslation } from '../translations';
 import { DEFAULT_GUEST_AVATAR_URL, sanitizeAvatarUrl } from '../services/avatarService';
 import { primaryActionButtonClass, utilityNavIconButtonClass } from '../styles/actionButtonStyles';
 import {
-  themeAccordionHeaderLayerClass,
+  monochromeAvatarPickerIdleClass,
+  monochromeAvatarPickerSelectedClass,
+  monochromeAvatarRingClass,
+  monochromeDepthIconBadgeClass,
+  monochromeModalScrimClass,
+  monochromeStatusSavedClass,
+  monochromeToastPanelClass,
+  SETTINGS_PROFILE_CURSOR_ENFORCEMENT,
+  SETTINGS_PROFILE_SCOPE_ATTR,
   themeCardLgClass,
   themeTextClass,
   themeTextMutedClass,
   themeTextSubtleClass,
   typographyTitleClass,
 } from '../styles/themeSurfaceStyles';
+
+/**
+ * FUTURE-PROOF COMPONENT MAPPING RULE (v1.2.0):
+ * ${SETTINGS_PROFILE_CURSOR_ENFORCEMENT}
+ *
+ * Depth stack: L1 MasterCategoryPanel (Cat 6) → L2 SubCategorySectionCard (Cat 7) →
+ * L3 surfacePanelClass/subCardSmClass → Cat 4 surfaceInput* → Cat 5 typography*.
+ * Theme drafts persist via setThemePreferences → Firebase (registered) / localStorage (guest).
+ */
 import { themeCategoryProps } from '../services/buttonThemeService';
 import ButtonGroupColorPicker from './ButtonGroupColorPicker';
 import PageThemePicker from './PageThemePicker';
@@ -134,7 +151,7 @@ export default function ProfilePage({
   userName,
   currentAvatarUrl,
   googleAvatarUrl,
-  onBack,
+  onBack: _onBack,
   onSaveAvatar,
 }: ProfilePageProps) {
   const { tr, lang, themePreferences, setThemePreferences } = useLanguage();
@@ -311,20 +328,8 @@ export default function ProfilePage({
         : PAGE_THEME_META[draftTheme.pageMode].labelEn;
 
   return (
-    <div className="relative mx-auto w-full max-w-3xl">
-      {/* Close control — sticky while the app main scroll viewport moves content */}
-      <div className={`${themeAccordionHeaderLayerClass} -mx-1 mb-2 flex w-full shrink-0 items-center justify-start border-b border-[var(--page-border)]/50 bg-[var(--page-bg)]/95 py-2 backdrop-blur-sm sm:-mx-0`}>
-        <button
-          type="button"
-          onClick={onBack}
-          className={`inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--page-border)] bg-[var(--page-surface-muted)] ${themeTextMutedClass} transition-colors hover:bg-[var(--page-border)]`}
-          aria-label={tr('close')}
-        >
-          <X className="h-5 w-5" />
-        </button>
-      </div>
-
-      <div className="flex flex-col gap-3 pt-2">
+    <div className="relative mx-auto w-full max-w-3xl" {...{ [SETTINGS_PROFILE_SCOPE_ATTR]: '' }}>
+      <div className="flex flex-col gap-3">
       {/* ── Profile card (always visible) ─────────────────────────────── */}
       <div className={`w-full ${themeCardLgClass}`}>
         <div className="flex flex-col items-center px-5 py-6 text-center sm:px-8 sm:py-8">
@@ -338,7 +343,7 @@ export default function ProfilePage({
             <img
               src={selectedAvatar}
               alt=""
-              className="h-24 w-24 rounded-full border-4 border-emerald-500/40 object-cover shadow-lg shadow-black/35 sm:h-32 sm:w-32"
+              className={`h-24 w-24 sm:h-32 sm:w-32 ${monochromeAvatarRingClass}`}
               onError={(e) => {
                 e.currentTarget.src = DEFAULT_GUEST_AVATAR_URL;
                 setSelectedAvatar(DEFAULT_GUEST_AVATAR_URL);
@@ -413,8 +418,8 @@ export default function ProfilePage({
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-3">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-500/25 bg-emerald-500/10">
-                        <Palette className="h-5 w-5 text-emerald-400" />
+                      <div className={monochromeDepthIconBadgeClass}>
+                        <Palette className="h-5 w-5" />
                       </div>
                       <div className="min-w-0 text-start">
                         <h4 className={`truncate text-base font-semibold sm:text-lg ${typographyTitleClass}`}>
@@ -475,8 +480,8 @@ export default function ProfilePage({
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-3">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-violet-500/25 bg-violet-500/10">
-                        <SlidersHorizontal className="h-5 w-5 text-violet-400" />
+                      <div className={monochromeDepthIconBadgeClass}>
+                        <SlidersHorizontal className="h-5 w-5" />
                       </div>
                       <div className="min-w-0 text-start">
                         <h4 className={`truncate text-base font-semibold sm:text-lg ${typographyTitleClass}`}>
@@ -539,7 +544,7 @@ export default function ProfilePage({
                   <div className="flex flex-wrap items-center justify-end gap-3 border-t border-[var(--main-card-surface-border)] pt-4 sm:pt-5">
                     <SettingsSyncStatusBadge className="me-auto" />
                     {themeSaveState === 'saved' && (
-                      <span className="flex items-center gap-1.5 text-sm text-emerald-400">
+                      <span className={monochromeStatusSavedClass}>
                         <Check className="h-4 w-4" strokeWidth={2.5} />
                         {tr('profileColorThemeSaved')}
                       </span>
@@ -577,7 +582,7 @@ export default function ProfilePage({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.98 }}
             transition={{ duration: 0.22, ease: 'easeOut' }}
-            className="pointer-events-none fixed bottom-6 left-1/2 z-50 w-[min(calc(100%-2rem),24rem)] -translate-x-1/2 rounded-xl border border-emerald-500/35 bg-emerald-950/95 px-4 py-3 text-center text-sm font-medium text-emerald-200 shadow-xl shadow-black/40 backdrop-blur-sm"
+            className={monochromeToastPanelClass}
             style={{ marginBottom: 'env(safe-area-inset-bottom, 0px)' }}
           >
             <span className="inline-flex items-center justify-center gap-2">
@@ -590,7 +595,7 @@ export default function ProfilePage({
 
       {/* ── Avatar picker modal ─────────────────────────────────────────── */}
       {pickerOpen && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-4">
+        <div className={monochromeModalScrimClass}>
           <div className={`w-full max-w-xl p-5 sm:p-6 ${themeCardLgClass}`}>
             <div className="mb-4 flex items-center justify-between">
               <h3 className={`text-base font-semibold sm:text-lg ${themeTextClass}`}>
@@ -611,11 +616,11 @@ export default function ProfilePage({
                   key={avatarUrl}
                   type="button"
                   onClick={() => setSelectedAvatar(avatarUrl)}
-                  className={`relative rounded-xl border p-1 transition-all ${
+                  className={
                     selectedAvatar === avatarUrl
-                      ? 'border-indigo-500 bg-indigo-500/10 ring-1 ring-indigo-400/40'
-                      : 'border-[var(--page-border)] bg-[var(--page-surface-muted)] hover:border-indigo-700/50'
-                  }`}
+                      ? monochromeAvatarPickerSelectedClass
+                      : monochromeAvatarPickerIdleClass
+                  }
                   title={
                     index === 0 && googleAvatarUrl
                       ? tr('profileGmailPhotoTitle')
@@ -625,7 +630,7 @@ export default function ProfilePage({
                   <img
                     src={avatarUrl}
                     alt=""
-                    className="h-16 w-16 rounded-lg object-cover sm:h-20 sm:w-20"
+                    className="h-16 w-16 rounded-xl object-cover sm:h-20 sm:w-20"
                     onError={(e) => {
                       e.currentTarget.src = DEFAULT_GUEST_AVATAR_URL;
                     }}

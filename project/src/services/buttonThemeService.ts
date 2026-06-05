@@ -1,7 +1,7 @@
 /**
  * Unified theme system — page canvas + seven functional categories.
  *
- * Classification & binding rules: see theme/themeCategoryMapping.ts (v1.1.0).
+ * Future-Proof Component Mapping: see theme/themeCategoryMapping.ts (v1.2.0).
  * Layout / anti-clipping protocol: see theme/themeLayoutProtocol.ts (v1.0.0).
  * Nested list separation: see theme/themeNestedListProtocol.ts (v1.0.0).
  * Thin border enclosure: see theme/themeThinBorderProtocol.ts (v1.0.0).
@@ -53,6 +53,9 @@ export {
   THEME_CLASSIFICATION_PRIORITY,
   THEME_MAPPING_STANDARD_VERSION,
   THEME_CATEGORY_DATA_ATTR,
+  MONOCHROME_DEPTH_COMPONENT_MAP,
+  SETTINGS_PROFILE_CURSOR_ENFORCEMENT,
+  SETTINGS_PROFILE_SCOPE_ATTR,
   classifyThemeCategory,
   getThemeCategoryRule,
   getThemeStyleTokens,

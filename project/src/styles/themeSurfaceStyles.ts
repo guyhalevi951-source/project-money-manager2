@@ -1,16 +1,12 @@
 /**
- * Theme style tokens — Categories 0, 4–7 (see theme/themeCategoryMapping.ts).
+ * Theme style tokens — Categories 0, 4–7 (see theme/themeCategoryMapping.ts v1.2.0).
+ *
+ * Future-Proof Component Mapping: MONOCHROME_DEPTH_COMPONENT_MAP in themeCategoryMapping.ts
+ * Settings/Profile scope: SETTINGS_PROFILE_SCOPE_ATTR — auto Cat 4/5 rules in index.css
  *
  * Cat 0 page: themePage* — Cat 4 inputs: surfaceInput* / surfacePanel*
- * Cat 5 typography: typography* — Cat 6 masters: themeCard* / surfaceModal*
- * Cat 7 sub-cards: subCard* / subCardAccordion* (--color-sub-cards)
- * Monochrome depth L3: depthInner* (--color-depth-inner) — theme/themeMonochromeDepthProtocol.ts
- *
- * Layout / overflow / scroll safety: theme/themeLayoutProtocol.ts (v1.0.0).
- * Thin border enclosure: theme/themeThinBorderProtocol.ts (v1.0.0).
- * Whenever creating accordions or color pickers, use themeAntiClipVisibleClass +
- * themeScrollSafeContentClass — never overflow-hidden on picker-hosting cards.
- * Nested containers sharing theme colors MUST use full-perimeter `border` tokens.
+ * Cat 5 typography: typography* (locked white on dark) — Cat 6 masters: themeCard*
+ * Cat 7 sub-cards: subCard* — Monochrome L3: depthInner* / subCardSmClass
  */
 
 export {
@@ -27,6 +23,8 @@ export {
   MONO_DEPTH_LEVEL_2,
   MONO_DEPTH_LEVEL_3,
   MONO_DEPTH_BORDER_DARK,
+  SETTINGS_PROFILE_CURSOR_ENFORCEMENT,
+  SETTINGS_PROFILE_SCOPE_ATTR,
 } from '../theme/themeMonochromeDepthProtocol';
 
 export {
@@ -217,10 +215,74 @@ export const subCardClass = [
   subCardSurfaceColors,
 ].join(' ');
 
-/** Level 3 — compact nested panel inside section cards (uniform rounded-xl). */
+/** Level 3 — compact nested panel inside section cards (uniform rounded-xl + border). */
 export const subCardSmClass = [
-  'rounded-xl',
+  'rounded-xl border',
   depthInnerSurfaceColors,
+].join(' ');
+
+/** Level 3 — monochrome icon badge inside Settings/Profile section headers. */
+export const monochromeDepthIconBadgeClass = [
+  'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border',
+  depthInnerSurfaceColors,
+  'text-[var(--typography-primary)]',
+].join(' ');
+
+/** Cat 5 — inline vector icon beside section titles (no arbitrary accent hues). */
+export const monochromeInlineIconClass = 'h-4 w-4 shrink-0 text-[var(--typography-primary)]';
+
+/** Cat 4 — toggle track (off) — sinks into Level 2/3 containers. */
+export const monochromeToggleTrackOffClass = [
+  'relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-all',
+  'border-[var(--surface-input-border)] bg-[var(--surface-input-bg)]',
+].join(' ');
+
+/** Cat 1 — toggle track (on) — primary accent for active persisted state. */
+export const monochromeToggleTrackOnClass = [
+  'relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-all',
+  'border-[var(--btn-primary-bg)] bg-[var(--btn-primary-bg)]',
+].join(' ');
+
+/** Toggle thumb — neutral white knob (control chrome, not typography). */
+export const monochromeToggleThumbClass =
+  'inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform';
+
+/** Profile avatar ring — Level 2 perimeter on Level 1 card. */
+export const monochromeAvatarRingClass = [
+  'rounded-full border-4 object-cover shadow-lg shadow-black/35',
+  'border-[var(--color-sub-cards-border)]',
+].join(' ');
+
+/** Modal scrim behind Settings/Profile pickers. */
+export const monochromeModalScrimClass = 'fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-4';
+
+/** Avatar picker tile — idle. */
+export const monochromeAvatarPickerIdleClass = [
+  'relative rounded-xl border p-1 transition-all',
+  'border-[var(--page-border)] bg-[var(--page-surface-muted)]',
+  'hover:border-[var(--theme-enclosure-border)]',
+].join(' ');
+
+/** Avatar picker tile — selected. */
+export const monochromeAvatarPickerSelectedClass = [
+  'relative rounded-xl border p-1 transition-all',
+  'border-[var(--btn-primary-bg)] bg-[var(--color-depth-inner)]',
+  'ring-1 ring-[var(--btn-primary-bg)]/40',
+].join(' ');
+
+/** Persisted-state confirmation copy (Cat 5). */
+export const monochromeStatusSavedClass = [
+  'flex items-center gap-1.5 text-sm',
+  'text-[var(--typography-primary)]',
+].join(' ');
+
+/** Toast panel after theme reset — Level 3 capsule. */
+export const monochromeToastPanelClass = [
+  'pointer-events-none fixed bottom-6 left-1/2 z-50 w-[min(calc(100%-2rem),24rem)]',
+  '-translate-x-1/2 rounded-xl border px-4 py-3 text-center text-sm font-medium',
+  'shadow-xl shadow-black/40 backdrop-blur-sm',
+  depthInnerSurfaceColors,
+  'text-[var(--typography-primary)]',
 ].join(' ');
 
 /** Level 3 — grid / pill cell (currency cards, action tiles) inside a sub-panel. */
@@ -326,22 +388,23 @@ export const themeCardMutedClass = [
   subCardSurfaceColors,
 ].join(' ');
 
-export const themeTextClass = 'text-[var(--page-text)]';
+/** Group 5 — locked white typography on dark monochrome surfaces. */
+export const themeTextClass = 'text-[var(--page-text)] text-white';
 
-export const themeTextMutedClass = 'text-[var(--page-text-muted)]';
+export const themeTextMutedClass = 'text-[var(--page-text-muted)] text-white';
 
-export const themeTextSubtleClass = 'text-[var(--page-text-subtle)]';
+export const themeTextSubtleClass = 'text-[var(--page-text-subtle)] text-white';
 
-/** Group 5 — primary titles & section headings on the dashboard. */
-export const typographyTitleClass = 'text-[var(--typography-primary)]';
+/** Group 5 — primary titles & section headings. */
+export const typographyTitleClass = 'text-[var(--typography-primary)] text-white';
 
 /** Group 5 — form labels, table cells, and body copy. */
-export const typographyLabelClass = 'text-[var(--typography-secondary)]';
+export const typographyLabelClass = 'text-[var(--typography-secondary)] text-white';
 
-export const typographyBodyClass = 'text-[var(--typography-secondary)]';
+export const typographyBodyClass = 'text-[var(--typography-secondary)] text-white';
 
 /** Group 5 — legends, hints, and de-emphasized copy. */
-export const typographyMutedClass = 'text-[var(--typography-muted)]';
+export const typographyMutedClass = 'text-[var(--typography-muted)] text-white';
 
 const surfaceInputColors = [
   'bg-[var(--surface-input-bg)]',

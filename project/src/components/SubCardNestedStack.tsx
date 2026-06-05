@@ -38,9 +38,12 @@ interface SubCardNestedItemProps {
 }
 
 /**
- * CRITICAL LAYOUT RULE: All nested parameters and option sub-rows inside configuration
- * contexts must render as fully encapsulated standalone capsules separated by a minimal
- * grid gap of 16px (`gap-4`) to prevent vertical item compression.
+ * FUTURE-PROOF COMPONENT MAPPING (themeCategoryMapping v1.2.0):
+ * L1 MasterCategoryPanel (Cat 6 / black) → L2 SubCategorySectionCard (Cat 7 / charcoal) →
+ * L3 inner panels via surfacePanelClass/subCardSmClass. Orange Zone: MasterCategoryPanelBody
+ * keeps Cat 6 canvas visible between floating Cat 7 capsules (variant="capsuleOnMain").
+ *
+ * CRITICAL LAYOUT RULE: configuration sub-rows use standalone capsules with gap-4 (16px).
  */
 export function SubCardNestedStack({ className, children, variant = 'capsule' }: SubCardNestedStackProps) {
   const stackClass =

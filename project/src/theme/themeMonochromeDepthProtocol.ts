@@ -1,10 +1,14 @@
 /**
  * GLOBAL LAYERED DEPTH SYSTEM — Monochrome Hierarchy (v2.0.0)
  * =============================================================================
- * CRITICAL COLOR PROTOCOL: Default states use an optimized monochromatic scale.
- * The outermost layer begins pure black; nested child containers step up
- * sequentially into lighter grays. Text (Category 5) remains white; Inputs
- * (Category 4) stay dark gray for readable UI depth by default.
+ * FUTURE-PROOF COMPONENT MAPPING RULE (authoritative for Settings & Profile):
+ * Whenever creating, editing, or rendering code inside Settings or Profile, do not
+ * use arbitrary colors or sharp edges. Auto-classify every element into the
+ * black-to-gray monochromatic depth stack (L1 Black → L2 Charcoal → L3 Light Gray,
+ * Cat 4 Dark Gray inputs, Cat 5 White text) and enforce uniform rounded corners
+ * (`rounded-xl` / `rounded-2xl`) plus `border border-white/10` on container frames.
+ *
+ * Orange Zone: expanded Level 1 backing canvas stays Cat 6; Level 2/3 capsules float on top.
  *
  * Level 0 — Page canvas:              #000000
  * Level 1 — Cat 6 master + gap canvas: #0A0A0A  (neutral-950)
@@ -15,6 +19,13 @@
  * All levels — 1px perimeter:          rgba(255, 255, 255, 0.10)
  * =============================================================================
  */
+
+/** Permanent Cursor enforcement prompt — mirrored in SettingsPage & ProfilePage file headers. */
+export const SETTINGS_PROFILE_CURSOR_ENFORCEMENT =
+  'Whenever creating, editing, or rendering any code inside the Settings or Profile files, do not use arbitrary colors or sharp edges. Automatically classify elements into the established Black-to-Gray monochromatic depth stack (Level 1 Black, Level 2 Charcoal, Level 3 Light Gray, Category 4 Dark Gray Inputs, Category 5 White Text) and enforce uniform rounded corners on all container frames.';
+
+/** DOM scope attribute for Settings/Profile auto-classification (index.css + components). */
+export const SETTINGS_PROFILE_SCOPE_ATTR = 'data-settings-profile-scope' as const;
 
 import { normalizeCustomHex } from '../categories';
 import type { ThemePreferences } from '../services/buttonThemeService';

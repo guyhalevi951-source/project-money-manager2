@@ -25,12 +25,28 @@ import {
 } from '../styles/actionButtonStyles';
 import { themeCategoryProps } from '../services/buttonThemeService';
 import {
+  monochromeDepthIconBadgeClass,
+  monochromeInlineIconClass,
+  monochromeToggleThumbClass,
+  monochromeToggleTrackOffClass,
+  monochromeToggleTrackOnClass,
+  SETTINGS_PROFILE_CURSOR_ENFORCEMENT,
+  SETTINGS_PROFILE_SCOPE_ATTR,
   themeAntiClipVisibleClass,
   themeCardLgClass,
   themeTextMutedClass,
   themeTextSubtleClass,
   typographyTitleClass,
 } from '../styles/themeSurfaceStyles';
+
+/**
+ * FUTURE-PROOF COMPONENT MAPPING RULE (v1.2.0):
+ * ${SETTINGS_PROFILE_CURSOR_ENFORCEMENT}
+ *
+ * Depth stack: L1 MasterCategoryPanel (Cat 6) → L2 SubCategorySectionCard (Cat 7) →
+ * L3 surfacePanelClass/subCardSmClass → Cat 4 surfaceInput* → Cat 5 typography*.
+ * Dynamic toggles persist via LanguageContext → Firebase (registered) / localStorage (guest).
+ */
 
 type MainSection = 'general' | 'currencies';
 type CurrencySubSection = 'display' | 'exchange' | 'manual-rate' | 'commissions';
@@ -82,9 +98,11 @@ export default function SettingsPage({
   }, [rehydrateGuestSettings]);
   const BackIcon = dir === 'rtl' ? ArrowRight : ArrowLeft;
 
-  const [mainOpen, setMainOpen] = useState<Set<MainSection>>(() => new Set(['currencies']));
+  const [mainOpen, setMainOpen] = useState<Set<MainSection>>(() =>
+    initialCurrencySections?.length ? new Set(['currencies']) : new Set(),
+  );
   const [currencySubOpen, setCurrencySubOpen] = useState<Set<CurrencySubSection>>(
-    () => new Set(initialCurrencySections ?? ['display']),
+    () => new Set(initialCurrencySections ?? []),
   );
 
   const isMainOpen = useCallback((section: MainSection) => mainOpen.has(section), [mainOpen]);
@@ -122,6 +140,7 @@ export default function SettingsPage({
       exit={{ opacity: 0, y: 8 }}
       transition={{ duration: 0.28, ease: 'easeOut' }}
       className={`space-y-6 p-4 sm:space-y-8 sm:p-6 ${themeCardLgClass} ${themeAntiClipVisibleClass}`}
+      {...{ [SETTINGS_PROFILE_SCOPE_ATTR]: '' }}
     >
       <div className="flex items-center gap-3 sm:gap-4">
         <button
@@ -154,8 +173,8 @@ export default function SettingsPage({
           >
             <div className="flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-violet-500/25 bg-violet-500/10">
-                  <Coins className="h-5 w-5 text-violet-400" />
+                <div className={monochromeDepthIconBadgeClass}>
+                  <Coins className="h-5 w-5" />
                 </div>
                 <div className="min-w-0 text-start">
                   <h3 className={`truncate text-base font-semibold sm:text-lg ${typographyTitleClass}`}>
@@ -223,7 +242,7 @@ export default function SettingsPage({
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0 flex-1 text-start">
                           <div className="flex min-w-0 items-center gap-2">
-                            <SlidersHorizontal className="h-4 w-4 shrink-0 text-blue-300" />
+                            <SlidersHorizontal className={monochromeInlineIconClass} />
                             <h4 className={`truncate text-sm font-semibold sm:text-base ${typographyTitleClass}`}>
                               {tr('settingsCurrencySubExchange')}
                             </h4>
@@ -262,7 +281,7 @@ export default function SettingsPage({
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0 flex-1 text-start">
                           <div className="flex min-w-0 items-center gap-2">
-                            <SlidersHorizontal className="h-4 w-4 shrink-0 text-purple-400" />
+                            <SlidersHorizontal className={monochromeInlineIconClass} />
                             <h4 className={`truncate text-sm font-semibold sm:text-base ${typographyTitleClass}`}>
                               {tr('settingsCurrencySubManualRate')}
                             </h4>
@@ -301,7 +320,7 @@ export default function SettingsPage({
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0 flex-1 text-start">
                           <div className="flex min-w-0 items-center gap-2">
-                            <SlidersHorizontal className="h-4 w-4 shrink-0 text-purple-400" />
+                            <SlidersHorizontal className={monochromeInlineIconClass} />
                             <h4 className={`truncate text-sm font-semibold sm:text-base ${typographyTitleClass}`}>
                               {tr('settingsCurrencySubCommissions')}
                             </h4>
@@ -345,8 +364,8 @@ export default function SettingsPage({
           >
             <div className="flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-500/25 bg-emerald-500/10">
-                  <Languages className="h-5 w-5 text-emerald-400" />
+                <div className={monochromeDepthIconBadgeClass}>
+                  <Languages className="h-5 w-5" />
                 </div>
                 <div className="min-w-0 text-start">
                   <h3 className={`truncate text-base font-semibold sm:text-lg ${typographyTitleClass}`}>
@@ -419,14 +438,12 @@ export default function SettingsPage({
                           role="switch"
                           aria-checked={keepOriginalValues}
                           aria-label={tr('keepOriginalValuesLabel')}
-                          className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-all ${
-                            keepOriginalValues
-                              ? 'border-indigo-400/70 bg-indigo-500/80'
-                              : 'border-gray-600 bg-gray-800'
-                          }`}
+                          className={
+                            keepOriginalValues ? monochromeToggleTrackOnClass : monochromeToggleTrackOffClass
+                          }
                         >
                           <span
-                            className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                            className={`${monochromeToggleThumbClass} ${
                               keepOriginalValues
                                 ? dir === 'rtl'
                                   ? '-translate-x-0.5'

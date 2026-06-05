@@ -1,65 +1,67 @@
 ---
-description: Theme category mapping standard — classify every UI element into groups 0–7 and bind approved style tokens only.
+description: Future-Proof Component Mapping — classify every UI element into groups 0–7 and monochrome depth levels L1–L3.
 globs: project/src/**/*.{tsx,ts}
 alwaysApply: true
 ---
 
-# Theme category mapping standard (v1.1.0)
+# Future-Proof Component Mapping Standard (v1.2.0)
 
 Source of truth: `project/src/theme/themeCategoryMapping.ts`
-Layout / overflow protocol: `project/src/theme/themeLayoutProtocol.ts` (see `theme-layout-protocol.mdc`)
+Monochrome depth ladder: `project/src/theme/themeMonochromeDepthProtocol.ts` (v2.0.0)
+Layout / overflow: `project/src/theme/themeLayoutProtocol.ts`
 
-Every structural UI element MUST be classified and bound using this standard. Do not hardcode `bg-white`, `bg-zinc-900`, `bg-gray-900`, `bg-slate-800/50`, or ad-hoc text colors on card wrappers.
+## Permanent Settings/Profile rule
+
+Whenever creating, editing, or rendering code inside **Settings** or **Profile**, do not use arbitrary colors or sharp edges. Auto-classify elements into the black-to-gray monochromatic depth stack and enforce uniform `rounded-xl` / `rounded-2xl` plus `border border-white/10` on container frames.
+
+Scope DOM with `SETTINGS_PROFILE_SCOPE_ATTR` (`data-settings-profile-scope`). CSS auto-binds Cat 5 text and Cat 4 inputs in `index.css`.
+
+## Monochrome depth stack (default dark)
+
+| Level | Role | Tailwind ref | CSS variable | Tokens |
+|-------|------|--------------|--------------|--------|
+| L1 | Master accordion / Cat 6 + orange-zone canvas | `bg-neutral-950` | `--main-card-surface-bg` | `themeCardLgClass`, `MasterCategoryPanel` |
+| L2 | Sub-category wrapper / Cat 7 | `bg-neutral-900` | `--color-sub-cards` | `SubCategorySectionCard`, `subCardNestedSectionCapsuleClass` |
+| L3 | Inner panels, grids, forms | `bg-zinc-800` | `--color-depth-inner` | `surfacePanelClass`, `subCardSmClass`, `subCardGridCellClass` |
+| Cat 4 | Inputs, dropdowns, toggles (off) | `bg-zinc-900` | `--surface-input-bg` | `surfaceInputClass`, `monochromeToggleTrackOffClass` |
+| Cat 5 | All typography | `text-white` | `--typography-primary` | `typography*Class`, `themeText*Class` |
+
+**Orange Zone:** expanded L1 gap canvas stays Cat 6 (`MasterCategoryPanelBody`, `SubCardNestedStack variant="capsuleOnMain"`). L2/L3 capsules float on top.
 
 ## Required workflow for new UI
 
-1. Build a `ThemeClassificationHint` for the element (role, `translationKey`, `tagName`, flags).
-2. Call `classifyThemeCategory(hint)` to resolve the category id.
-3. Import and apply tokens from `getThemeStyleTokens(category)` only — from `actionButtonStyles.ts` or `themeSurfaceStyles.ts`.
-4. Add `themeCategoryProps(category)` → `data-theme-category="…"` on the outermost node.
-5. Scope app content under `data-theme-scope="app"` (`APP_THEME_SCOPE`).
-
-## Category rules (algorithmic)
-
-| # | ID | Criterion | Bind tokens / vars |
-|---|-----|-----------|-------------------|
-| 0 | `page` | Absolute document canvas backdrop | `themePageRootClass`, `--page-bg` — Light/Dark/Custom mode |
-| 1 | `primary` | Write / submit / create / delete mutations | `primaryActionButtonClass`, `--btn-primary-*` |
-| 2 | `currency` | Secondary utilities, currency pills, local tools | `currencyUtilityButtonClass`, `--btn-currency-*` |
-| 3 | `nav` | Routing-only: tabs, navbar, home, globe language | `utilityNav*Class`, `--btn-nav-*` |
-| 4 | `filter` | `input`, `textarea`, `select`, dropdown shells, filter tab bars | `surfaceInputClass`, `filterBar*`, `--surface-input-*` |
-| 5 | `text` | All foreground copy & inline icons | `typography*Class`, `--typography-*` / `--dynamic-text-color` |
-| 6 | `mainCard` | Outermost master cards, timeline boxes, modal backings | `themeCardClass`, `themeCardLgClass`, `--main-card-surface-*` |
-| 7 | `subCard` | Nested inside Cat 6: outer/inner accordion shells (Profile/Settings), expanded panels, inset sub-cards, list rows | `subCardAccordion*Class`, `subCard*Class`, `--color-sub-cards` |
+1. Build a `ThemeClassificationHint` for the element.
+2. Call `classifyThemeCategory(hint)` or consult `MONOCHROME_DEPTH_COMPONENT_MAP`.
+3. Apply tokens from `getThemeStyleTokens(category)` — `actionButtonStyles.ts` or `themeSurfaceStyles.ts`.
+4. Tag outermost node: `themeCategoryProps(category)` → `data-theme-category`.
+5. Settings/Profile routes: add `SETTINGS_PROFILE_SCOPE_ATTR` on page root.
 
 ## Classification priority (first match wins)
 
-1. `excludedFromTheming` → static auth sign-up classes only
+1. `excludedFromTheming` → auth sign-up static only
 2. Page root → `page`
 3. Outer layout / modal backing → `mainCard`
-4. Nested inside master (`isNestedInsideMasterCard`, accordion shell/trigger/body, list row) → `subCard`
-5. Form control / filter tab / input tag → `filter`
-6. Typography tag / text node → `text`
+4. Nested inside master (accordion, list row) → `subCard`
+5. Form control / input tag → `filter`
+6. Typography tag → `text`
 7. Navigation-only → `nav`
-8. Primary mutation / submit → `primary`
+8. Primary mutation → `primary`
 9. Utility / currency tool → `currency`
-10. Generic `button` fallback → `nav`
+10. Generic `button` → `nav`
 11. Default → `text`
 
 ## Forbidden
 
-- Hardcoded structural background classes on outer or inner card wrappers.
-- Using Cat 6 tokens (`themeCardClass`) for elements nested inside a master card — use Cat 7 (`subCardClass`, `subCardSmClass`, `subCardRowClass`).
-- Duplicating theme color classes in components — import from style token modules only.
-- Theming auth sign-up submit buttons (`authSignupStatic*` — hardcoded indigo exclusion).
+- Hardcoded `bg-violet-*`, `bg-emerald-*`, `bg-indigo-*`, `bg-gray-*` on Settings/Profile structural wrappers.
+- Same hex on nested L1 + L2 + L3 (visual bleed).
+- Sharp corners on depth-layer frames.
+- Skipping perimeter `border` on depth containers.
+- `themeCategoryProps('subCard')` on `MasterCategoryPanel` (must be `mainCard`).
+- Non-white default typography on dark monochrome surfaces.
+- Cat 4 inputs using L3 gray in default dark mode.
 
-## Persistence keys (`ThemePreferences`)
+## Persistence (dual channel)
 
-- Cat 0: `pageMode`, `pageCustomHex`
-- Cat 1–3: `buttons.primary`, `buttons.currency`, `buttons.nav`
-- Cat 4: `filterGroupColor`
-- Cat 5: `textColor`
-- Cat 6: `mainCardSurfaceColor`
-- Cat 7: `subCardColor`
-
-Firebase: `themePreferences.*` — guest: `guest_theme_preferences` in localStorage.
+- Registered: Firebase via `settingsPersistenceEngine` / `userFirebaseSync`
+- Guest: isolated localStorage keys (`guest_theme_preferences`, etc.)
+- Dynamic switches in Settings/Profile must route through `LanguageContext` + `useSettingsPersistence`

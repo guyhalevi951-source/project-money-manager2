@@ -1,23 +1,31 @@
 /**
  * ═══════════════════════════════════════════════════════════════════════════════
- * THEME CATEGORY MAPPING STANDARD (v1.1.0)
+ * THEME CATEGORY MAPPING STANDARD (v1.2.0) — Future-Proof Component Mapping
  * ═══════════════════════════════════════════════════════════════════════════════
  *
  * Authoritative, rule-based registry for classifying ANY current or future UI
  * element into the correct theme preference group and style-token binding.
  *
  * Consumed by: buttonThemeService, actionButtonStyles, themeSurfaceStyles,
- * LanguageContext (theme provider), and Cursor agent rules.
+ * LanguageContext (theme provider), SettingsPage, ProfilePage, and Cursor rules.
+ *
+ * Monochrome depth ladder: theme/themeMonochromeDepthProtocol.ts (v2.0.0)
+ *   L1 Black (Cat 6) → L2 Charcoal (Cat 7) → L3 Light Gray → Cat 4 inputs → Cat 5 text
  *
  * Implementation contract for new features:
  *   1. Classify the element: `classifyThemeCategory(hint)`
- *   2. Apply approved tokens: `getThemeStyleTokens(category)`
+ *   2. Apply approved tokens: `getThemeStyleTokens(category)` or `MONOCHROME_DEPTH_COMPONENT_MAP`
  *   3. Tag the DOM node: `themeCategoryProps(category)` → data-theme-category
- *   4. Never hardcode bg/text utility colors on outer structural wrappers.
+ *   4. Settings/Profile: scope with SETTINGS_PROFILE_SCOPE_ATTR + approved tokens only
+ *   5. Never hardcode bg/text utility colors on outer structural wrappers.
  */
 
 import type { ButtonGroupKey, PageThemeMode, ThemePreferences } from '../services/buttonThemeService';
 import type { TranslationKey } from '../translations';
+import {
+  SETTINGS_PROFILE_CURSOR_ENFORCEMENT,
+  SETTINGS_PROFILE_SCOPE_ATTR,
+} from './themeMonochromeDepthProtocol';
 
 /** Canonical category ids — align 1:1 with ThemePreferences + page canvas. */
 export type ThemeCategoryId = ButtonGroupKey | 'page';
@@ -32,7 +40,61 @@ export type ThemeElementRole =
   | 'main-card'
   | 'sub-card';
 
-export const THEME_MAPPING_STANDARD_VERSION = '1.1.0' as const;
+export const THEME_MAPPING_STANDARD_VERSION = '1.2.0' as const;
+
+export { SETTINGS_PROFILE_CURSOR_ENFORCEMENT, SETTINGS_PROFILE_SCOPE_ATTR };
+
+/**
+ * Future-Proof Component Mapping — depth level → category → approved style tokens.
+ * Use inside Settings/Profile (and any nested configuration UI) before adding markup.
+ */
+export const MONOCHROME_DEPTH_COMPONENT_MAP = {
+  level1: {
+    depth: 1,
+    category: 'mainCard' as const,
+    tailwindRef: 'bg-neutral-950',
+    cssVar: '--main-card-surface-bg',
+    radius: 'rounded-2xl',
+    tokens: [
+      'themeCardLgClass',
+      'MasterCategoryPanel',
+      'subCardMasterCategoryExpandedClass',
+      'subCardMasterCategoryCollapsedClass',
+    ],
+  },
+  level2: {
+    depth: 2,
+    category: 'subCard' as const,
+    tailwindRef: 'bg-neutral-900',
+    cssVar: '--color-sub-cards',
+    radius: 'rounded-xl',
+    tokens: ['SubCategorySectionCard', 'subCardNestedSectionCapsuleClass', 'subCardClass'],
+  },
+  level3: {
+    depth: 3,
+    category: 'filter' as const,
+    tailwindRef: 'bg-zinc-800',
+    cssVar: '--color-depth-inner',
+    radius: 'rounded-xl',
+    tokens: ['surfacePanelClass', 'subCardSmClass', 'subCardGridCellClass', 'filterInsetPanelClass'],
+  },
+  cat4: {
+    depth: 4,
+    category: 'filter' as const,
+    tailwindRef: 'bg-zinc-900',
+    cssVar: '--surface-input-bg',
+    radius: 'rounded-xl',
+    tokens: ['surfaceInputClass', 'surfaceSelectPillClass', 'filterFormControlClass'],
+  },
+  cat5: {
+    depth: 5,
+    category: 'text' as const,
+    tailwindRef: 'text-white',
+    cssVar: '--typography-primary',
+    radius: null,
+    tokens: ['typographyTitleClass', 'typographyBodyClass', 'themeTextClass', 'themeTextMutedClass'],
+  },
+} as const;
 
 export const THEME_CATEGORY_DATA_ATTR = 'data-theme-category' as const;
 
@@ -287,6 +349,11 @@ export const THEME_CATEGORY_RULES: Record<ThemeCategoryId, ThemeCategoryRule> = 
       'surfacePanelClass',
       'subCardGridCellClass',
       'subCardGridCellIdleClass',
+      'subCardSmClass',
+      'monochromeToggleTrackOnClass',
+      'monochromeToggleTrackOffClass',
+      'monochromeToggleThumbClass',
+      'monochromeDepthIconBadgeClass',
       'depthInnerSurfaceStyle',
       'depthInnerSurfaceBorderStyle',
     ],
@@ -318,6 +385,8 @@ export const THEME_CATEGORY_RULES: Record<ThemeCategoryId, ThemeCategoryRule> = 
       'themeTextClass',
       'themeTextMutedClass',
       'themeTextSubtleClass',
+      'monochromeInlineIconClass',
+      'monochromeStatusSavedClass',
     ],
   },
   mainCard: {

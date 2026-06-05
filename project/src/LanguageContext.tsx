@@ -97,16 +97,12 @@ interface LanguageContextValue {
 /**
  * Theme provider — persists ThemePreferences and calls applyThemeCSS on change.
  *
- * Category assignment standard (v1.1.0): src/theme/themeCategoryMapping.ts
- * - Cat 0 page canvas → pageMode / themePageRootClass
- * - Cat 1 primary actions → buttons.primary / primaryActionButtonClass
- * - Cat 2 management tools → buttons.currency / currencyUtilityButtonClass
- * - Cat 3 navigation → buttons.nav / utilityNav*Class
- * - Cat 4 input surfaces → filterGroupColor / surfaceInput* & filterBar*
- * - Cat 5 typography → textColor / typography*Class (+ index.css override rules)
- * - Cat 6 main cards → mainCardSurfaceColor / themeCard* & surfaceModal*
- * - Cat 7 sub-cards → subCardColor / subCard* & --color-sub-cards
+ * Future-Proof Component Mapping (v1.2.0): src/theme/themeCategoryMapping.ts
+ * Monochrome depth ladder (v2.0.0): src/theme/themeMonochromeDepthProtocol.ts
+ *   L1 Black (Cat 6) → L2 Charcoal (Cat 7) → L3 Gray → Cat 4 inputs → Cat 5 white text
+ * Settings/Profile: SETTINGS_PROFILE_SCOPE_ATTR + MONOCHROME_DEPTH_COMPONENT_MAP
  *
+ * Dual persistence: Firebase (registered) / localStorage (guest) via settingsPersistenceEngine.
  * New UI: classifyThemeCategory(hint) → approved token → themeCategoryProps(id)
  */
 const LanguageContext = createContext<LanguageContextValue | null>(null);

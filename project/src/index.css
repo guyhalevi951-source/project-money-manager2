@@ -107,6 +107,25 @@
   border-color: var(--color-sub-cards-border);
 }
 
+/* Future-Proof Component Mapping — auto-classify Cat 5 text & Cat 4 inputs in Settings/Profile */
+[data-settings-profile-scope] :where(h1, h2, h3, h4, h5, h6, p, label, li, td, th) {
+  color: var(--typography-primary);
+}
+
+[data-settings-profile-scope] input:not([type='button']):not([type='submit']):not([type='reset']):not([role='switch']),
+[data-settings-profile-scope] textarea,
+[data-settings-profile-scope] select {
+  background-color: var(--surface-input-bg);
+  border-color: var(--surface-input-border);
+  color: var(--surface-input-text);
+  border-radius: 0.75rem;
+}
+
+[data-settings-profile-scope] input::placeholder,
+[data-settings-profile-scope] textarea::placeholder {
+  color: var(--surface-input-placeholder);
+}
+
 html {
   color-scheme: dark;
 }
