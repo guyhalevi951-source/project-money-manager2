@@ -2584,6 +2584,7 @@ function App() {
     displayCurrency,
     savedColors,
     customCurrencies,
+    currencyLayout,
     setSettingsPersistence,
     applySettingsFromCloud,
   } = useLanguage();
@@ -2602,6 +2603,7 @@ function App() {
     displayCurrency,
     savedColors,
     customCurrencies,
+    currencyLayout,
   });
 
   settingsMergeRef.current = {
@@ -2609,6 +2611,7 @@ function App() {
     displayCurrency,
     savedColors,
     customCurrencies,
+    currencyLayout,
   };
 
   useEffect(() => {
@@ -2666,8 +2669,8 @@ function App() {
   // Active top-level navigation tab.
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsInitialCurrencySection, setSettingsInitialCurrencySection] = useState<
-    'display' | 'exchange' | 'fees-manual' | null
+  const [settingsInitialCurrencySections, setSettingsInitialCurrencySections] = useState<
+    ('display' | 'exchange' | 'manual-rate' | 'commissions')[] | null
   >(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const settingsReturnTabRef = useRef<TabId>('dashboard');
@@ -2691,7 +2694,7 @@ function App() {
     setActiveTab(id);
     setNavOpen(false);
     setSettingsOpen(false);
-    setSettingsInitialCurrencySection(null);
+    setSettingsInitialCurrencySections(null);
     setProfileOpen(false);
   };
 
@@ -2699,7 +2702,7 @@ function App() {
     settingsReturnTabRef.current = activeTab;
     setNavOpen(false);
     setProfileOpen(false);
-    setSettingsInitialCurrencySection(null);
+    setSettingsInitialCurrencySections(null);
     setSettingsOpen(true);
   };
 
@@ -2707,7 +2710,7 @@ function App() {
     settingsReturnTabRef.current = activeTab;
     setNavOpen(false);
     setProfileOpen(false);
-    setSettingsInitialCurrencySection('display');
+    setSettingsInitialCurrencySections(['display']);
     setSettingsOpen(true);
   }, [activeTab]);
 
@@ -2715,15 +2718,23 @@ function App() {
     settingsReturnTabRef.current = activeTab;
     setNavOpen(false);
     setProfileOpen(false);
-    setSettingsInitialCurrencySection('exchange');
+    setSettingsInitialCurrencySections(['exchange']);
     setSettingsOpen(true);
   }, [activeTab]);
 
-  const openSettingsFeesAndManualRates = useCallback(() => {
+  const openSettingsManualRate = useCallback(() => {
     settingsReturnTabRef.current = activeTab;
     setNavOpen(false);
     setProfileOpen(false);
-    setSettingsInitialCurrencySection('fees-manual');
+    setSettingsInitialCurrencySections(['manual-rate']);
+    setSettingsOpen(true);
+  }, [activeTab]);
+
+  const openSettingsCommissions = useCallback(() => {
+    settingsReturnTabRef.current = activeTab;
+    setNavOpen(false);
+    setProfileOpen(false);
+    setSettingsInitialCurrencySections(['commissions']);
     setSettingsOpen(true);
   }, [activeTab]);
 
@@ -2746,7 +2757,7 @@ function App() {
 
   const closeSettings = () => {
     setSettingsOpen(false);
-    setSettingsInitialCurrencySection(null);
+    setSettingsInitialCurrencySections(null);
     setActiveTab(settingsReturnTabRef.current);
   };
 
@@ -3239,6 +3250,7 @@ function App() {
                     displayCurrency: mergeBase.displayCurrency,
                     saved_colors: mergeBase.savedColors,
                     custom_currencies: mergeBase.customCurrencies,
+                    currency_layout: mergeBase.currencyLayout,
                   };
               applySettingsFromCloud(merged);
             } else if (meta.exists) {
@@ -3403,6 +3415,7 @@ function App() {
         displayCurrency,
         saved_colors: savedColors,
         custom_currencies: customCurrencies,
+        currency_layout: currencyLayout,
       }).catch(() => {
         // Non-blocking; next change will retry.
       });
@@ -3415,6 +3428,7 @@ function App() {
     displayCurrency,
     savedColors,
     customCurrencies,
+    currencyLayout,
     dataReady,
     user,
     settingsCloudReady,
@@ -4023,7 +4037,7 @@ function App() {
           <SettingsPage
             onBack={closeSettings}
             recentExpenseCurrencies={recentExpenseCurrencies}
-            initialCurrencySection={settingsInitialCurrencySection}
+            initialCurrencySections={settingsInitialCurrencySections}
           />
         ) : (
           <>
@@ -4159,24 +4173,36 @@ function App() {
                         className="ml-0 h-4 w-4 shrink-0 rounded border-gray-600 bg-neutral-800 text-emerald-500 focus:ring-emerald-500/30"
                       />
                     </label>
-                    <div className="flex w-full flex-wrap items-center gap-2">
+                    <div
+                      dir={dir}
+                      className="flex w-full flex-row flex-nowrap gap-2 overflow-x-auto pb-2 [-webkit-overflow-scrolling:touch] no-scrollbar sm:pb-0"
+                    >
                       <button
                         type="button"
                         onClick={openSettingsDisplayCurrency}
-                        className="inline-flex h-7 min-w-[7.5rem] flex-1 items-center justify-center rounded-lg bg-indigo-600 px-3 text-center text-xs font-medium text-white transition-all hover:bg-indigo-700 active:scale-[0.98] sm:flex-none sm:shrink-0"
-                        title={tr('changeCurrencyShortcut')}
-                        aria-label={tr('changeCurrencyShortcut')}
+                        className="inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-lg bg-indigo-600 px-3 py-2 text-center text-xs font-medium text-white transition-all hover:bg-indigo-700 active:scale-[0.98] sm:text-sm"
+                        title={tr('displayCurrency')}
+                        aria-label={tr('displayCurrency')}
                       >
-                        {tr('changeCurrencyShortcut')}
+                        {tr('displayCurrency')}
                       </button>
                       <button
                         type="button"
-                        onClick={openSettingsFeesAndManualRates}
-                        className="inline-flex h-7 min-w-[7.5rem] flex-1 items-center justify-center rounded-lg bg-indigo-600 px-3 text-center text-xs font-medium text-white transition-all hover:bg-indigo-700 active:scale-[0.98] sm:flex-none sm:shrink-0"
-                        title={tr('setExchangeRateAndFeeShortcut')}
-                        aria-label={tr('setExchangeRateAndFeeShortcut')}
+                        onClick={openSettingsManualRate}
+                        className="inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-lg bg-indigo-600 px-3 py-2 text-center text-xs font-medium text-white transition-all hover:bg-indigo-700 active:scale-[0.98] sm:text-sm"
+                        title={tr('settingsCurrencySubManualRate')}
+                        aria-label={tr('settingsCurrencySubManualRate')}
                       >
-                        {tr('setExchangeRateAndFeeShortcut')}
+                        {tr('settingsCurrencySubManualRate')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={openSettingsCommissions}
+                        className="inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-lg bg-indigo-600 px-3 py-2 text-center text-xs font-medium text-white transition-all hover:bg-indigo-700 active:scale-[0.98] sm:text-sm"
+                        title={tr('settingsCurrencySubCommissions')}
+                        aria-label={tr('settingsCurrencySubCommissions')}
+                      >
+                        {tr('settingsCurrencySubCommissions')}
                       </button>
                     </div>
                   </div>

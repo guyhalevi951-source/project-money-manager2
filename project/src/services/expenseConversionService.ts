@@ -1,19 +1,29 @@
-import { applyCommissionToIlsAmount } from './commissionMath';
-import { getActiveCurrencyCommissionPercent } from './currencyCommissionService';
+import { listActiveCurrencyCommissions } from './currencyCommissionService';
+import type { ExchangeRates, ExpenseCurrency } from './exchangeRateService';
+import { listActiveManualExchangeOverrides } from './manualExchangeOverrideService';
 import {
-  convertForeignToIls,
-  type ExchangeRates,
-  type ExpenseCurrency,
-} from './exchangeRateService';
+  processTransactionWithUserRules,
+  toActiveExchangeRatesFromSnapshot,
+  toActiveFeesFromCommissionEntries,
+} from './transactionProcessingService';
 
 export type ConvertExpenseToIlsOptions = {
   displayCurrency?: ExpenseCurrency;
 };
 
+function buildAppProcessingContext(rates: ExchangeRates) {
+  return {
+    activeFees: toActiveFeesFromCommissionEntries(listActiveCurrencyCommissions()),
+    activeExchangeRates: toActiveExchangeRatesFromSnapshot(
+      rates,
+      listActiveManualExchangeOverrides(),
+    ),
+  };
+}
+
 /**
  * Converts a home-page expense amount to ILS, applying any saved commission for that currency.
- * Matches the exchange calculator: `ILS = spot_ILS × (1 + commission%)`.
- * Skips commission when the expense currency matches ILS, display currency, or needs no FX fee.
+ * Thin adapter over `processTransactionWithUserRules` using current app fee/rate snapshots.
  */
 export function convertExpenseAmountToIls(
   amount: number,
@@ -21,15 +31,14 @@ export function convertExpenseAmountToIls(
   rates: ExchangeRates,
   options?: ConvertExpenseToIlsOptions,
 ): number | null {
-  if (!(amount > 0)) return null;
-  if (currency === 'ILS') return amount;
-
-  const converted = convertForeignToIls(amount, currency, rates);
-  if (converted == null) return null;
-
-  const displayCurrency = options?.displayCurrency ?? 'ILS';
-  const commissionPercent = getActiveCurrencyCommissionPercent(currency) ?? 0;
-  return applyCommissionToIlsAmount(converted, commissionPercent, currency, 'ILS', {
-    displayCurrency,
-  });
+  const { activeFees, activeExchangeRates } = buildAppProcessingContext(rates);
+  const result = processTransactionWithUserRules(
+    amount,
+    currency,
+    'ILS',
+    activeFees,
+    activeExchangeRates,
+    { displayCurrency: options?.displayCurrency ?? 'ILS' },
+  );
+  return result?.finalConvertedAmount ?? null;
 }

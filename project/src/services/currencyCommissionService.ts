@@ -4,7 +4,7 @@ const STORAGE_KEY = 'money_manager_currency_commissions_v1';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const COMMISSIONS_UPDATED_EVENT = 'currency-commissions-updated';
 
-/** Applies the saved fee to every non-ILS expense currency. */
+/** Applies the saved fee to every expense/conversion currency (including ILS). */
 export const GLOBAL_COMMISSION_CURRENCY = 'ALL' as const;
 
 export type CommissionCurrency = ExpenseCurrency | typeof GLOBAL_COMMISSION_CURRENCY;
@@ -70,7 +70,7 @@ function isFinitePercent(value: number): boolean {
 
 function isValidCommissionCurrency(currency: string): currency is CommissionCurrency {
   if (currency === GLOBAL_COMMISSION_CURRENCY) return true;
-  return isSupportedCurrency(currency) && currency !== 'ILS';
+  return isSupportedCurrency(currency);
 }
 
 function dispatchCommissionsUpdated(): void {
@@ -154,7 +154,7 @@ function findEntryIndex(
 export function normalizeCommissionCurrency(currency: string): CommissionCurrency | null {
   const code = currency.trim().toUpperCase();
   if (code === GLOBAL_COMMISSION_CURRENCY) return GLOBAL_COMMISSION_CURRENCY;
-  if (!isSupportedCurrency(code) || code === 'ILS') return null;
+  if (!isSupportedCurrency(code)) return null;
   return code;
 }
 
@@ -173,7 +173,7 @@ export function getSavedCommissionPercentForCurrency(currency: CommissionCurrenc
 /** Active fee for an expense/conversion currency (specific entry, else global ALL). */
 export function getActiveCurrencyCommissionPercent(currency: string): number | null {
   const code = currency.trim().toUpperCase();
-  if (!isSupportedCurrency(code) || code === 'ILS') return null;
+  if (!isSupportedCurrency(code)) return null;
 
   const entries = readActiveEntries();
   const specific = entries.find((item) => item.currency === code);

@@ -24,6 +24,12 @@ import {
   type ExpenseCurrency,
 } from './currencyRegistry';
 import {
+  buildDefaultCurrencyLayout,
+  normalizeCurrencyLayout,
+  reconcileCurrencyLayout,
+  type CurrencyLayoutItem,
+} from './currencyLayoutService';
+import {
   GLOBAL_COMMISSION_CURRENCY,
   normalizeCommissionCurrency,
   type CommissionCurrency,
@@ -39,6 +45,7 @@ export interface UserSettings {
   displayCurrency: ExpenseCurrency;
   saved_colors: string[];
   custom_currencies: ExpenseCurrency[];
+  currency_layout: CurrencyLayoutItem[];
 }
 
 export interface UserCategoriesData {
@@ -68,6 +75,7 @@ export const EMPTY_USER_SETTINGS: UserSettings = {
   displayCurrency: 'ILS',
   saved_colors: [],
   custom_currencies: [],
+  currency_layout: buildDefaultCurrencyLayout(),
 };
 
 export const EMPTY_USER_CATEGORIES: UserCategoriesData = {
@@ -84,6 +92,7 @@ const SETTINGS_LS_KEYS = {
   displayCurrency: 'money-manager-display-currency',
   savedColors: 'saved_colors',
   customCurrencies: 'money-manager-custom-currencies',
+  currencyLayout: 'money-manager-currency-layout',
 } as const;
 
 export const shouldSyncToFirestore = (user: User | null): user is User =>
@@ -115,12 +124,20 @@ function parseSettings(raw: Record<string, unknown> | undefined): UserSettings {
       : EMPTY_USER_SETTINGS.keepOriginalValues;
   const displayCurrency = normalizeDisplayCurrency(raw.displayCurrency);
 
+  const custom_currencies = normalizeCustomCurrencies(raw.custom_currencies);
+  const parsedLayout = normalizeCurrencyLayout(raw.currency_layout);
+  const currency_layout =
+    parsedLayout.length > 0
+      ? reconcileCurrencyLayout(parsedLayout, custom_currencies)
+      : buildDefaultCurrencyLayout(custom_currencies);
+
   return {
     lang,
     keepOriginalValues,
     displayCurrency,
     saved_colors: normalizeSavedColors(raw.saved_colors),
-    custom_currencies: normalizeCustomCurrencies(raw.custom_currencies),
+    custom_currencies,
+    currency_layout,
   };
 }
 
@@ -264,12 +281,26 @@ export function loadLegacySettingsFromLocalStorage(): UserSettings {
     custom_currencies = [];
   }
 
+  let currency_layout: CurrencyLayoutItem[] = [];
+  try {
+    const raw = window.localStorage.getItem(SETTINGS_LS_KEYS.currencyLayout);
+    if (raw) currency_layout = normalizeCurrencyLayout(JSON.parse(raw));
+  } catch {
+    currency_layout = [];
+  }
+  if (currency_layout.length === 0) {
+    currency_layout = buildDefaultCurrencyLayout(custom_currencies);
+  } else {
+    currency_layout = reconcileCurrencyLayout(currency_layout, custom_currencies);
+  }
+
   return {
     lang,
     keepOriginalValues,
     displayCurrency,
     saved_colors,
     custom_currencies,
+    currency_layout,
   };
 }
 
@@ -297,6 +328,7 @@ export function clearLegacyLocalStorage(): void {
   window.localStorage.removeItem(SETTINGS_LS_KEYS.displayCurrency);
   window.localStorage.removeItem(SETTINGS_LS_KEYS.savedColors);
   window.localStorage.removeItem(SETTINGS_LS_KEYS.customCurrencies);
+  window.localStorage.removeItem(SETTINGS_LS_KEYS.currencyLayout);
   window.localStorage.removeItem('auto_transfer_start_month');
   window.localStorage.removeItem('auto_transfer_budget');
 }
@@ -421,6 +453,7 @@ export async function migrateLegacyDataToCloud(uid: string): Promise<void> {
         displayCurrency: settings.displayCurrency,
         saved_colors: settings.saved_colors,
         custom_currencies: settings.custom_currencies,
+        currency_layout: settings.currency_layout,
         updatedAt: serverTimestamp(),
       },
       { merge: true },
@@ -534,6 +567,7 @@ export async function saveSettingsToCloud(uid: string, settings: UserSettings): 
       displayCurrency: settings.displayCurrency,
       saved_colors: settings.saved_colors,
       custom_currencies: settings.custom_currencies,
+      currency_layout: settings.currency_layout,
       updatedAt: serverTimestamp(),
     },
     { merge: true },

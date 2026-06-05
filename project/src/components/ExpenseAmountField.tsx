@@ -5,18 +5,22 @@ import { LtrNumeric, useLanguage } from '../LanguageContext';
 import { getCurrencyMeta, type CurrencyCode } from '../constants/currencies';
 import { usePinnedCurrencies } from '../hooks/usePinnedCurrencies';
 import { formatAmountWithSymbol } from '../services/displayCurrencyUtils';
-import { applyCommissionToAmount } from '../services/commissionMath';
 import {
-  getActiveCurrencyCommissionPercent,
+  listActiveCurrencyCommissions,
   subscribeCurrencyCommissionsUpdated,
 } from '../services/currencyCommissionService';
 import {
-  convertAmountViaIls,
   fetchExchangeRates,
   getCachedExchangeRates,
   hasExchangeRate,
   type ExchangeRates,
 } from '../services/exchangeRateService';
+import { listActiveManualExchangeOverrides } from '../services/manualExchangeOverrideService';
+import {
+  processTransactionWithUserRules,
+  toActiveExchangeRatesFromSnapshot,
+  toActiveFeesFromCommissionEntries,
+} from '../services/transactionProcessingService';
 import CurrencyLibraryModal from './CurrencyLibraryModal';
 import CurrencyFlag from './CurrencyFlag';
 import CurrencyDetectionBanner from './CurrencyDetectionBanner';
@@ -227,12 +231,12 @@ export default function ExpenseAmountField({
     [isMaxLengthReached, parsedAmount, lockToDisplayCurrency, inputCurrency, displayCurrency],
   );
 
-  const activeCommissionPercent = useMemo(() => {
-    if (inputCurrency === displayCurrency) return 0;
-    return getActiveCurrencyCommissionPercent(inputCurrency) ?? 0;
-  }, [inputCurrency, displayCurrency, commissionVersion]);
+  const activeFees = useMemo(
+    () => toActiveFeesFromCommissionEntries(listActiveCurrencyCommissions()),
+    [commissionVersion],
+  );
 
-  const convertedDisplayAmount = useMemo(() => {
+  const processedPreview = useMemo(() => {
     if (!showDisplayPreview || !rates) return null;
 
     if (
@@ -242,23 +246,23 @@ export default function ExpenseAmountField({
       return null;
     }
 
-    const converted = convertAmountViaIls(
+    const activeExchangeRates = toActiveExchangeRatesFromSnapshot(
+      rates,
+      listActiveManualExchangeOverrides(),
+    );
+
+    return processTransactionWithUserRules(
       parsedAmount,
       inputCurrency,
       displayCurrency,
-      rates,
-    );
-    if (converted == null) return null;
-
-    const withCommission = applyCommissionToAmount(
-      converted,
-      activeCommissionPercent,
-      inputCurrency,
-      displayCurrency,
+      activeFees,
+      activeExchangeRates,
       { displayCurrency },
     );
-    return Math.round(withCommission * 100) / 100;
-  }, [showDisplayPreview, rates, parsedAmount, inputCurrency, displayCurrency, activeCommissionPercent]);
+  }, [showDisplayPreview, rates, parsedAmount, inputCurrency, displayCurrency, activeFees]);
+
+  const convertedDisplayAmount = processedPreview?.finalConvertedAmount ?? null;
+  const activeCommissionPercent = processedPreview?.appliedFeePercentage ?? 0;
 
   const displayPreviewFormatted = useMemo(() => {
     if (convertedDisplayAmount == null) return null;
@@ -441,10 +445,10 @@ export default function ExpenseAmountField({
               type="button"
               onClick={onOpenExchangeRatesSettings}
               className="inline-flex h-12 shrink-0 items-center justify-center rounded-xl bg-indigo-600 px-3 text-center text-sm font-medium text-white transition-all hover:bg-indigo-700 active:scale-[0.98] sm:px-4"
-              title={tr('exchangeRateShortcut')}
-              aria-label={tr('exchangeRateShortcut')}
+              title={tr('settingsCurrencySubExchange')}
+              aria-label={tr('settingsCurrencySubExchange')}
             >
-              {tr('exchangeRateShortcut')}
+              {tr('settingsCurrencySubExchange')}
             </button>
           )}
         </div>

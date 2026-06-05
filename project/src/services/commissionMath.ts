@@ -1,6 +1,8 @@
 export type CommissionBypassOptions = {
   /** App display currency — expenses entered in this currency skip conversion fees. */
   displayCurrency?: string;
+  /** Global ALL or explicit ILS fees still apply when from equals display currency. */
+  ignoreDisplayCurrencyBypass?: boolean;
 };
 
 function normalizeCurrencyCode(currency: string): string {
@@ -21,7 +23,7 @@ export function shouldApplyCurrencyCommission(
   const display = options?.displayCurrency
     ? normalizeCurrencyCode(options.displayCurrency)
     : null;
-  if (display && from === display) return false;
+  if (display && from === display && !options?.ignoreDisplayCurrencyBypass) return false;
 
   return true;
 }

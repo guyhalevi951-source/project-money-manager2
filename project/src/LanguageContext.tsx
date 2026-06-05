@@ -36,6 +36,15 @@ import {
   resolveExpenseDisplayAmount,
   type ExpenseDisplayAmount,
 } from './services/displayCurrencyUtils';
+import {
+  addCurrencyToLayout,
+  CURRENCY_LAYOUT_STORAGE_KEY,
+  deriveCustomCurrenciesFromLayout,
+  getInitialCurrencyLayout,
+  normalizeLayoutOrder,
+  reconcileCurrencyLayout,
+  type CurrencyLayoutItem,
+} from './services/currencyLayoutService';
 
 interface LanguageContextValue {
   lang: Lang;
@@ -46,8 +55,10 @@ interface LanguageContextValue {
   displayCurrency: CurrencyCode;
   setDisplayCurrency: (next: CurrencyCode) => void;
   customCurrencies: CurrencyCode[];
+  currencyLayout: CurrencyLayoutItem[];
   addCustomCurrency: (code: CurrencyCode) => void;
   replaceCustomCurrencies: (currencies: CurrencyCode[]) => void;
+  replaceCurrencyLayout: (layout: CurrencyLayoutItem[]) => void;
   savedColors: string[];
   saveSavedColor: (hex: string) => string[];
   setSavedColors: (colors: string[]) => void;
@@ -59,6 +70,7 @@ interface LanguageContextValue {
     displayCurrency: ExpenseCurrency;
     saved_colors: string[];
     custom_currencies: ExpenseCurrency[];
+    currency_layout: CurrencyLayoutItem[];
   }) => void;
   formatMoney: (ilsAmount: number) => string;
   formatExpenseMoney: (
@@ -149,6 +161,9 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [customCurrencies, setCustomCurrencies] = useState<ExpenseCurrency[]>(() =>
     getInitialCustomCurrencies(),
   );
+  const [currencyLayout, setCurrencyLayout] = useState<CurrencyLayoutItem[]>(() =>
+    getInitialCurrencyLayout(getInitialCustomCurrencies()),
+  );
   const [savedColors, setSavedColors] = useState<string[]>(() => getLocalSavedColors());
   const [settingsPersistence, setSettingsPersistence] = useState<'local' | 'cloud'>('local');
   const [exchangeRates, setExchangeRates] = useState<ExchangeRates | null>(() =>
@@ -178,12 +193,16 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       displayCurrency: ExpenseCurrency;
       saved_colors: string[];
       custom_currencies: ExpenseCurrency[];
+      currency_layout: CurrencyLayoutItem[];
     }) => {
       setLang(settings.lang);
       setKeepOriginalValues(settings.keepOriginalValues);
       setDisplayCurrencyState(settings.displayCurrency);
       setSavedColors(settings.saved_colors);
       setCustomCurrencies(settings.custom_currencies);
+      setCurrencyLayout(
+        reconcileCurrencyLayout(settings.currency_layout, settings.custom_currencies),
+      );
     },
     [setLang],
   );
@@ -199,11 +218,20 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       if (prev.includes(code)) return prev;
       return [...prev, code];
     });
+    setCurrencyLayout((prev) => addCurrencyToLayout(prev, code));
     setDisplayCurrencyState(code);
   }, []);
 
   const replaceCustomCurrencies = useCallback((currencies: CurrencyCode[]) => {
-    setCustomCurrencies(normalizeCustomCurrencies(currencies));
+    const normalized = normalizeCustomCurrencies(currencies);
+    setCustomCurrencies(normalized);
+    setCurrencyLayout((prev) => reconcileCurrencyLayout(prev, normalized));
+  }, []);
+
+  const replaceCurrencyLayout = useCallback((layout: CurrencyLayoutItem[]) => {
+    const normalized = normalizeLayoutOrder(layout);
+    setCurrencyLayout(normalized);
+    setCustomCurrencies(deriveCustomCurrenciesFromLayout(normalized));
   }, []);
 
   const saveSavedColor = useCallback(
@@ -257,6 +285,11 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     if (settingsPersistence !== 'local') return;
     window.localStorage.setItem(CUSTOM_CURRENCIES_STORAGE_KEY, JSON.stringify(customCurrencies));
   }, [customCurrencies, settingsPersistence]);
+
+  useEffect(() => {
+    if (settingsPersistence !== 'local') return;
+    window.localStorage.setItem(CURRENCY_LAYOUT_STORAGE_KEY, JSON.stringify(currencyLayout));
+  }, [currencyLayout, settingsPersistence]);
 
   useEffect(() => {
     const cached = getCachedExchangeRates();
@@ -384,8 +417,10 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       displayCurrency,
       setDisplayCurrency,
       customCurrencies,
+      currencyLayout,
       addCustomCurrency,
       replaceCustomCurrencies,
+      replaceCurrencyLayout,
       savedColors,
       saveSavedColor,
       setSavedColors,
@@ -406,8 +441,10 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       keepOriginalValues,
       displayCurrency,
       customCurrencies,
+      currencyLayout,
       addCustomCurrency,
       replaceCustomCurrencies,
+      replaceCurrencyLayout,
       savedColors,
       saveSavedColor,
       settingsPersistence,

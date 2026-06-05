@@ -8,12 +8,12 @@ import ExchangeRateSimulator from './ExchangeRateSimulator';
 import type { ExpenseCurrency } from '../services/exchangeRateService';
 
 type MainSection = 'general' | 'currencies';
-type CurrencySubSection = 'display' | 'exchange' | 'fees-manual';
+type CurrencySubSection = 'display' | 'exchange' | 'manual-rate' | 'commissions';
 
 interface SettingsPageProps {
   onBack: () => void;
   recentExpenseCurrencies: ExpenseCurrency[];
-  initialCurrencySection?: CurrencySubSection | null;
+  initialCurrencySections?: CurrencySubSection[] | null;
 }
 
 const panelMotion = {
@@ -46,7 +46,7 @@ function toggleSetMember<T>(key: T, setState: Dispatch<SetStateAction<Set<T>>>) 
 export default function SettingsPage({
   onBack,
   recentExpenseCurrencies,
-  initialCurrencySection = null,
+  initialCurrencySections = null,
 }: SettingsPageProps) {
   const {
     dir,
@@ -68,7 +68,7 @@ export default function SettingsPage({
   );
 
   useEffect(() => {
-    if (!initialCurrencySection) return;
+    if (!initialCurrencySections?.length) return;
     setOpenMainSections((prev) => {
       const next = new Set(prev);
       next.add('currencies');
@@ -76,10 +76,10 @@ export default function SettingsPage({
     });
     setOpenCurrencySubs((prev) => {
       const next = new Set(prev);
-      next.add(initialCurrencySection);
+      initialCurrencySections.forEach((key) => next.add(key));
       return next;
     });
-  }, [initialCurrencySection]);
+  }, [initialCurrencySections]);
 
   const toggleMain = (key: MainSection) => {
     toggleSetMember(key, setOpenMainSections);
@@ -226,18 +226,18 @@ export default function SettingsPage({
 
             <button
               type="button"
-              onClick={() => toggleCurrencySub('fees-manual')}
-              aria-expanded={isCurrencySubOpen('fees-manual')}
+              onClick={() => toggleCurrencySub('manual-rate')}
+              aria-expanded={isCurrencySubOpen('manual-rate')}
               className="w-full cursor-pointer rounded-lg bg-gray-800 p-4 transition-colors hover:bg-gray-700"
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2">
-                  <SlidersHorizontal className="h-4 w-4 shrink-0 text-violet-300" />
+                  <SlidersHorizontal className="h-4 w-4 shrink-0 text-amber-300" />
                   <h4 className="truncate text-sm font-semibold text-white sm:text-base">
-                    {tr('settingsCurrencySubFeesManual')}
+                    {tr('settingsCurrencySubManualRate')}
                   </h4>
                 </div>
-                {isCurrencySubOpen('fees-manual') ? (
+                {isCurrencySubOpen('manual-rate') ? (
                   <ChevronDown className="h-5 w-5 shrink-0 text-gray-300" />
                 ) : (
                   <ChevronUp className="h-5 w-5 shrink-0 text-gray-300" />
@@ -245,14 +245,49 @@ export default function SettingsPage({
               </div>
             </button>
             <AnimatePresence initial={false}>
-              {isCurrencySubOpen('fees-manual') && (
+              {isCurrencySubOpen('manual-rate') && (
                 <motion.div
-                  key="settings-currency-fees-manual"
+                  key="settings-currency-manual-rate"
                   {...currencySubPanelMotion}
                   className="h-fit overflow-visible rounded-lg border border-gray-700/60 bg-gray-950/40 p-4 text-start sm:p-3"
                 >
                   <ExchangeRateSimulator
-                    section="fees-manual"
+                    section="manual-rate"
+                    recentExpenseCurrencies={recentExpenseCurrencies}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <button
+              type="button"
+              onClick={() => toggleCurrencySub('commissions')}
+              aria-expanded={isCurrencySubOpen('commissions')}
+              className="w-full cursor-pointer rounded-lg bg-gray-800 p-4 transition-colors hover:bg-gray-700"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <SlidersHorizontal className="h-4 w-4 shrink-0 text-violet-300" />
+                  <h4 className="truncate text-sm font-semibold text-white sm:text-base">
+                    {tr('settingsCurrencySubCommissions')}
+                  </h4>
+                </div>
+                {isCurrencySubOpen('commissions') ? (
+                  <ChevronDown className="h-5 w-5 shrink-0 text-gray-300" />
+                ) : (
+                  <ChevronUp className="h-5 w-5 shrink-0 text-gray-300" />
+                )}
+              </div>
+            </button>
+            <AnimatePresence initial={false}>
+              {isCurrencySubOpen('commissions') && (
+                <motion.div
+                  key="settings-currency-commissions"
+                  {...currencySubPanelMotion}
+                  className="h-fit overflow-visible rounded-lg border border-gray-700/60 bg-gray-950/40 p-4 text-start sm:p-3"
+                >
+                  <ExchangeRateSimulator
+                    section="commissions"
                     recentExpenseCurrencies={recentExpenseCurrencies}
                   />
                 </motion.div>
