@@ -105,8 +105,9 @@ function formatRate(rate: number): string {
 }
 
 /** Shrinks conversion summary text on narrow screens when the full line gets long. */
-function getConversionRowFontSizePx(displayCharacterCount: number): number {
-  return Math.round(Math.max(11, Math.min(16, 18 - Math.max(0, displayCharacterCount - 10) * 0.5)));
+function getConversionRowFontSizePx(displayCharacterCount: number, narrowViewport = false): number {
+  const base = Math.round(Math.max(11, Math.min(16, 18 - Math.max(0, displayCharacterCount - 10) * 0.5)));
+  return narrowViewport ? Math.min(base, 13) : base;
 }
 
 function buildConversionSummaryLine(
@@ -1044,6 +1045,18 @@ export default function ExchangeRateSimulator({
     return typedSecondary;
   }, [secondaryAmountInput, displayUnitRate, summaryMainAmount]);
 
+  const [narrowConversionViewport, setNarrowConversionViewport] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches,
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 639px)');
+    const onChange = () => setNarrowConversionViewport(mq.matches);
+    onChange();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
   const conversionSummaryLayout = useMemo(() => {
     const { characterCount } = buildConversionSummaryLine(
       mainAmountInput,
@@ -1051,14 +1064,14 @@ export default function ExchangeRateSimulator({
       summarySecondaryAmount,
       secondaryCurrency,
     );
-    const fontSizePx = getConversionRowFontSizePx(characterCount);
+    const fontSizePx = getConversionRowFontSizePx(characterCount, narrowConversionViewport);
     const amountStr = mainAmountInput.trim() || '1';
     return {
       fontSizePx,
-      inputFontSizePx: Math.max(12, fontSizePx),
+      inputFontSizePx: Math.max(11, fontSizePx),
       inputWidthCh: Math.min(11, Math.max(4, amountStr.length + 1)),
     };
-  }, [mainAmountInput, mainCurrency, summarySecondaryAmount, secondaryCurrency]);
+  }, [mainAmountInput, mainCurrency, summarySecondaryAmount, secondaryCurrency, narrowConversionViewport]);
 
   const copyConvertedAmount = useCallback(async () => {
     if (summarySecondaryAmount == null || !(summarySecondaryAmount > 0)) return;
@@ -1755,54 +1768,58 @@ export default function ExchangeRateSimulator({
             <label className="mb-1.5 block w-full text-start text-xs font-medium text-neutral-400">
               {tr('exchangeRateConversionCalculation')}
             </label>
-            <div className="min-h-12 w-full max-w-full flex-1 overflow-hidden rounded-xl border border-blue-900/40 bg-blue-950/25 px-3 py-2.5 text-sm text-blue-100 transition-all duration-300 ease-in-out">
+            <div className="min-h-12 w-full max-w-full flex-1 overflow-visible rounded-xl border border-blue-900/40 bg-blue-950/25 px-3 py-2.5 text-sm text-blue-100 transition-all duration-300 ease-in-out sm:overflow-hidden">
             {loadingRate ? (
               <span className="text-blue-200/80">{tr('exchangeRateLoadingHistorical')}</span>
             ) : (
               <div className="flex min-h-[5.5rem] w-full flex-col flex-wrap items-start gap-2 md:flex-row md:items-center">
                 <div className="flex min-w-0 w-full flex-1 flex-col items-start gap-0.5">
-                  <div className="flex w-full min-w-0 justify-start">
+                  <div className="flex w-full min-w-0 justify-center sm:justify-start">
                     <div
                       dir="ltr"
-                      className="inline-flex min-w-0 max-w-full flex-row items-center justify-start gap-2 overflow-hidden whitespace-nowrap md:text-base"
+                      className="inline-flex min-w-0 max-w-full flex-row flex-wrap items-center justify-center gap-x-1.5 gap-y-1 text-sm sm:flex-nowrap sm:justify-start sm:gap-2 sm:text-base"
                       style={{ fontSize: `${conversionSummaryLayout.fontSizePx}px` }}
                     >
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      min="0"
-                      step="any"
-                      value={mainAmountInput}
-                      onChange={(event) => handleMainAmountChange(event.target.value)}
-                      style={{
-                        fontSize: `${conversionSummaryLayout.inputFontSizePx}px`,
-                        width: `${conversionSummaryLayout.inputWidthCh}ch`,
-                      }}
-                      className="h-[2em] min-w-[3rem] max-w-[7rem] shrink-0 rounded-lg border border-blue-800/60 bg-blue-950/50 px-1.5 font-semibold leading-none text-blue-50 outline-none transition-all focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 [color-scheme:dark]"
-                      aria-label={tr('exchangeRateMainAmountLabel')}
-                    />
-                    <span dir="ltr" className="shrink-0 font-semibold leading-none text-blue-100">
-                      {mainCurrency}
+                    <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap">
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="any"
+                        value={mainAmountInput}
+                        onChange={(event) => handleMainAmountChange(event.target.value)}
+                        style={{
+                          fontSize: `${conversionSummaryLayout.inputFontSizePx}px`,
+                          width: `${conversionSummaryLayout.inputWidthCh}ch`,
+                        }}
+                        className="h-[2em] min-w-[3rem] max-w-[7rem] shrink-0 rounded-lg border border-blue-800/60 bg-blue-950/50 px-1.5 font-semibold leading-none text-blue-50 outline-none transition-all focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 [color-scheme:dark]"
+                        aria-label={tr('exchangeRateMainAmountLabel')}
+                      />
+                      <span dir="ltr" className="shrink-0 font-semibold leading-none text-blue-100">
+                        {mainCurrency}
+                      </span>
+                      <span className="shrink-0 leading-none text-blue-300/80" aria-hidden>
+                        =
+                      </span>
                     </span>
-                    <span className="shrink-0 leading-none text-blue-300/80" aria-hidden>
-                      =
+                    <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap">
+                      <LtrNumeric className="shrink-0 whitespace-nowrap font-semibold tabular-nums leading-none text-blue-50">
+                        {summarySecondaryAmount != null ? formatRate(summarySecondaryAmount) : '-'}
+                      </LtrNumeric>
+                      <span dir="ltr" className="shrink-0 font-semibold leading-none text-blue-100">
+                        {secondaryCurrency}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void copyConvertedAmount()}
+                        disabled={summarySecondaryAmount == null || !(summarySecondaryAmount > 0)}
+                        className="inline-flex h-[1.35em] w-[1.35em] shrink-0 items-center justify-center rounded border border-blue-800/60 bg-blue-950/50 text-blue-200 transition-all hover:border-blue-700/80 hover:bg-blue-900/50 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
+                        aria-label={tr('exchangeRateCopyAmount')}
+                        title={copyFeedback ? tr('exchangeRateCopied') : tr('exchangeRateCopyAmount')}
+                      >
+                        <Copy className="h-[0.7em] w-[0.7em]" strokeWidth={2.25} aria-hidden />
+                      </button>
                     </span>
-                    <LtrNumeric className="min-w-0 shrink font-semibold leading-none text-blue-50">
-                      {summarySecondaryAmount != null ? formatRate(summarySecondaryAmount) : '-'}
-                    </LtrNumeric>
-                    <span dir="ltr" className="shrink-0 font-semibold leading-none text-blue-100">
-                      {secondaryCurrency}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => void copyConvertedAmount()}
-                      disabled={summarySecondaryAmount == null || !(summarySecondaryAmount > 0)}
-                      className="inline-flex h-[1.35em] w-[1.35em] shrink-0 items-center justify-center rounded border border-blue-800/60 bg-blue-950/50 text-blue-200 transition-all hover:border-blue-700/80 hover:bg-blue-900/50 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
-                      aria-label={tr('exchangeRateCopyAmount')}
-                      title={copyFeedback ? tr('exchangeRateCopied') : tr('exchangeRateCopyAmount')}
-                    >
-                      <Copy className="h-[0.7em] w-[0.7em]" strokeWidth={2.25} aria-hidden />
-                    </button>
                     </div>
                   </div>
                   {historicalRateUpdatedAt != null && (

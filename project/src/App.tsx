@@ -1,4 +1,15 @@
-import { useState, useEffect, useMemo, useRef, useCallback, type MutableRefObject, type ReactNode, type TouchEvent } from 'react';
+import {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useCallback,
+  type MutableRefObject,
+  type ReactNode,
+  type TouchEvent,
+} from 'react';
+import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, type PanInfo } from 'framer-motion';
 import {
   Wallet,
@@ -2684,6 +2695,94 @@ function BudgetChangeModal({
 
 type FinancialSummaryCurrencyAnchor = 'budget' | 'expenses' | 'status';
 
+const FINANCIAL_CURRENCY_MENU_WIDTH_PX = 288;
+const FINANCIAL_CURRENCY_MENU_MOBILE_MAX_HEIGHT_PX = 450;
+
+type FinancialCurrencyMenuLayout = {
+  top: number;
+  left: number;
+  width: number;
+  maxHeight: number;
+};
+
+/** Mobile: anchor inward per column; md+: centered dropdown (desktop layout). */
+function financialSummaryCurrencyMenuPositionClass(
+  anchor: FinancialSummaryCurrencyAnchor,
+): string {
+  switch (anchor) {
+    case 'budget':
+      return 'start-0 end-auto origin-top-start translate-x-0 md:start-auto md:end-auto md:left-1/2 md:origin-top md:-translate-x-1/2';
+    case 'status':
+      return 'end-0 start-auto origin-top-end translate-x-0 md:start-auto md:end-auto md:left-1/2 md:origin-top md:-translate-x-1/2';
+    default:
+      return 'left-1/2 origin-top -translate-x-1/2';
+  }
+}
+
+function computeFinancialCurrencyMenuLayout(
+  trigger: HTMLElement,
+  anchor: FinancialSummaryCurrencyAnchor,
+  dir: 'ltr' | 'rtl',
+): FinancialCurrencyMenuLayout {
+  const gap = 6;
+  const edgePad = 8;
+  const width = Math.min(FINANCIAL_CURRENCY_MENU_WIDTH_PX, window.innerWidth - edgePad * 2);
+  const maxHeightCap = Math.min(window.innerHeight * 0.65, FINANCIAL_CURRENCY_MENU_MOBILE_MAX_HEIGHT_PX);
+
+  const rect = trigger.getBoundingClientRect();
+  const viewport = window.visualViewport;
+  const viewportTop = viewport?.offsetTop ?? 0;
+  const viewportHeight = viewport?.height ?? window.innerHeight;
+  const viewportBottom = viewportTop + viewportHeight;
+
+  const spaceBelow = viewportBottom - rect.bottom - gap - edgePad;
+  const spaceAbove = rect.top - viewportTop - gap - edgePad;
+  const openUpward = spaceBelow < 140 && spaceAbove > spaceBelow;
+
+  const maxHeight = Math.min(maxHeightCap, Math.max(160, openUpward ? spaceAbove : spaceBelow));
+  const top = openUpward
+    ? Math.max(viewportTop + edgePad, rect.top - gap - maxHeight)
+    : rect.bottom + gap;
+
+  const alignEnd =
+    (anchor === 'status' && dir === 'ltr') || (anchor === 'budget' && dir === 'rtl');
+  const alignStart =
+    (anchor === 'budget' && dir === 'ltr') || (anchor === 'status' && dir === 'rtl');
+
+  let left: number;
+  if (alignEnd) {
+    left = Math.max(edgePad, Math.min(rect.right - width, window.innerWidth - width - edgePad));
+  } else if (alignStart) {
+    left = Math.max(edgePad, Math.min(rect.left, window.innerWidth - width - edgePad));
+  } else {
+    left = Math.max(
+      edgePad,
+      Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - edgePad),
+    );
+  }
+
+  return { top, left, width, maxHeight };
+}
+
+function useMobileFinancialCurrencyMenu(): boolean {
+  const [mobile, setMobile] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches,
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const onChange = () => setMobile(mq.matches);
+    onChange();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  return mobile;
+}
+
+const financialSummaryCurrencyMenuScrollClass =
+  'overflow-y-auto overscroll-contain touch-pan-y scroll-smooth [-webkit-overflow-scrolling:touch]';
+
 function FinancialSummaryAmount({
   parts,
   amountClassName,
@@ -2692,6 +2791,7 @@ function FinancialSummaryAmount({
   onToggleMenu,
   onCurrencyPicked,
   menuContainerRef,
+  menuPortalRef,
 }: {
   parts: AmountDisplayParts;
   amountClassName: string;
@@ -2700,18 +2800,53 @@ function FinancialSummaryAmount({
   onToggleMenu: (anchor: FinancialSummaryCurrencyAnchor) => void;
   onCurrencyPicked: () => void;
   menuContainerRef: MutableRefObject<HTMLDivElement | null>;
+  menuPortalRef: MutableRefObject<HTMLDivElement | null>;
 }) {
-  const { tr } = useLanguage();
+  const { tr, dir } = useLanguage();
   const isOpen = menuAnchor === activeMenuAnchor;
+  const isMobileMenu = useMobileFinancialCurrencyMenu();
+  const symbolButtonRef = useRef<HTMLButtonElement>(null);
+  const [mobileMenuLayout, setMobileMenuLayout] = useState<FinancialCurrencyMenuLayout | null>(null);
+
+  useLayoutEffect(() => {
+    if (!isOpen || !isMobileMenu) {
+      setMobileMenuLayout(null);
+      return;
+    }
+
+    const updateLayout = () => {
+      const trigger = symbolButtonRef.current;
+      if (!trigger) return;
+      setMobileMenuLayout(computeFinancialCurrencyMenuLayout(trigger, menuAnchor, dir));
+    };
+
+    updateLayout();
+    window.addEventListener('resize', updateLayout);
+    window.addEventListener('scroll', updateLayout, true);
+    const visualViewport = window.visualViewport;
+    visualViewport?.addEventListener('resize', updateLayout);
+    visualViewport?.addEventListener('scroll', updateLayout);
+    return () => {
+      window.removeEventListener('resize', updateLayout);
+      window.removeEventListener('scroll', updateLayout, true);
+      visualViewport?.removeEventListener('resize', updateLayout);
+      visualViewport?.removeEventListener('scroll', updateLayout);
+    };
+  }, [isOpen, isMobileMenu, menuAnchor, dir]);
+
+  const menuPanel = (
+    <DisplayCurrencyInlineMenu onSelected={onCurrencyPicked} className="py-2" />
+  );
 
   return (
     <div
       ref={isOpen ? menuContainerRef : undefined}
-      className="relative inline-flex max-w-full items-center justify-center"
+      className="relative inline-flex max-w-full items-center justify-center overflow-visible"
     >
       <LtrNumeric className="inline-flex max-w-full items-baseline justify-center gap-0 truncate text-center text-sm font-bold leading-tight sm:text-base md:text-2xl">
         {parts.sign ? <span className={amountClassName}>{parts.sign}</span> : null}
         <button
+          ref={symbolButtonRef}
           type="button"
           onClick={() => onToggleMenu(menuAnchor)}
           className={currencySymbolTriggerClass}
@@ -2724,13 +2859,30 @@ function FinancialSummaryAmount({
         </button>
         <span className={amountClassName}>{parts.amount}</span>
       </LtrNumeric>
-      {isOpen && (
+      {isOpen && isMobileMenu && mobileMenuLayout
+        ? createPortal(
+            <div
+              ref={menuPortalRef}
+              className={`fixed z-[9999] px-1.5 ${financialSummaryCurrencyMenuScrollClass} ${filterDropdownWrapperClass}`}
+              style={{
+                top: mobileMenuLayout.top,
+                left: mobileMenuLayout.left,
+                width: mobileMenuLayout.width,
+                maxHeight: mobileMenuLayout.maxHeight,
+              }}
+            >
+              {menuPanel}
+            </div>,
+            document.body,
+          )
+        : null}
+      {isOpen && !isMobileMenu ? (
         <div
-          className={`absolute top-full left-1/2 z-50 mt-1.5 w-[min(100vw-2rem,18rem)] -translate-x-1/2 p-1.5 ${filterDropdownWrapperClass}`}
+          className={`absolute top-full z-50 mt-1.5 w-[min(calc(100vw-1rem),18rem)] max-h-80 px-1.5 ${financialSummaryCurrencyMenuScrollClass} ${financialSummaryCurrencyMenuPositionClass(menuAnchor)} ${filterDropdownWrapperClass}`}
         >
-          <DisplayCurrencyInlineMenu onSelected={onCurrencyPicked} />
+          {menuPanel}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -2826,20 +2978,14 @@ function App() {
   const settingsReturnTabRef = useRef<TabId>('dashboard');
   const [navOpen, setNavOpen] = useState(false);
   const chartDateSetterRef = useRef<((iso: string) => void) | null>(null);
-  const isHomeView = activeTab === 'dashboard' && !settingsOpen;
   const isScrollRoute = profileOpen || settingsOpen;
-  const wasHomeViewRef = useRef(isHomeView);
 
+  // Keep new-expense currency aligned with global display currency (Financial Summary shortcuts, Settings, etc.).
   useEffect(() => {
-    const wasHome = wasHomeViewRef.current;
-    if (!wasHome && isHomeView) {
-      setNewExpense((prev) => ({
-        ...prev,
-        currency: displayCurrency as ExpenseCurrency,
-      }));
-    }
-    wasHomeViewRef.current = isHomeView;
-  }, [isHomeView, displayCurrency]);
+    setNewExpense((prev) =>
+      prev.currency === displayCurrency ? prev : { ...prev, currency: displayCurrency as ExpenseCurrency },
+    );
+  }, [displayCurrency]);
 
   const handleTabSelect = (id: TabId) => {
     setActiveTab(id);
@@ -3962,6 +4108,7 @@ function App() {
   const [financialCurrencyMenuAnchor, setFinancialCurrencyMenuAnchor] =
     useState<FinancialSummaryCurrencyAnchor | null>(null);
   const financialCurrencyMenuRef = useRef<HTMLDivElement>(null);
+  const financialCurrencyMenuPortalRef = useRef<HTMLDivElement>(null);
   const toggleFinancialCurrencyMenu = useCallback((anchor: FinancialSummaryCurrencyAnchor) => {
     setFinancialCurrencyMenuAnchor((prev) => (prev === anchor ? null : anchor));
   }, []);
@@ -3977,6 +4124,7 @@ function App() {
     const handlePointerDownOutside = (event: PointerEvent) => {
       const target = event.target as Node;
       if (financialCurrencyMenuRef.current?.contains(target)) return;
+      if (financialCurrencyMenuPortalRef.current?.contains(target)) return;
       closeFinancialCurrencyMenu();
     };
 
@@ -4233,8 +4381,8 @@ function App() {
             {/* Financial summary — row 2 uses a fixed height so all three amount cells share one baseline */}
             <div className={`mb-6 ${themeCardClass} p-4 shadow-sm sm:mb-8 sm:p-6`}>
               <h2 className={`mb-4 text-lg font-bold md:text-xl ${typographyTitleClass}`}>{tr('financialSummaryTitle')}</h2>
-              <div className={`p-3 sm:p-4 ${filterInsetPanelClass}`}>
-              <table className="w-full table-fixed border-collapse">
+              <div className={`overflow-visible p-3 sm:p-4 ${filterInsetPanelClass}`}>
+              <table className="w-full table-fixed border-collapse overflow-visible">
                 <tbody>
                   <tr>
                     <td className="w-1/3 border-x border-[var(--surface-input-border)] px-2 pb-2 text-center align-bottom">
@@ -4254,8 +4402,8 @@ function App() {
                     </td>
                   </tr>
                   <tr>
-                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-[var(--surface-input-border)] px-2 text-center align-middle">
-                      <div className="flex h-full min-h-0 items-center justify-center">
+                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] overflow-visible border-x border-[var(--surface-input-border)] px-2 text-center align-middle">
+                      <div className="flex h-full min-h-0 items-center justify-center overflow-visible">
                         <FinancialSummaryAmount
                           parts={selectedBudgetDisplayParts}
                           amountClassName={typographyBodyClass}
@@ -4264,11 +4412,12 @@ function App() {
                           onToggleMenu={toggleFinancialCurrencyMenu}
                           onCurrencyPicked={handleFinancialCurrencyPicked}
                           menuContainerRef={financialCurrencyMenuRef}
+                          menuPortalRef={financialCurrencyMenuPortalRef}
                         />
                       </div>
                     </td>
-                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-[var(--surface-input-border)] px-2 text-center align-middle">
-                      <div className="flex h-full min-h-0 items-center justify-center">
+                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] overflow-visible border-x border-[var(--surface-input-border)] px-2 text-center align-middle">
+                      <div className="flex h-full min-h-0 items-center justify-center overflow-visible">
                         <FinancialSummaryAmount
                           parts={totalExpensesDisplayParts}
                           amountClassName={isOverBudget ? 'text-rose-400' : typographyBodyClass}
@@ -4277,11 +4426,12 @@ function App() {
                           onToggleMenu={toggleFinancialCurrencyMenu}
                           onCurrencyPicked={handleFinancialCurrencyPicked}
                           menuContainerRef={financialCurrencyMenuRef}
+                          menuPortalRef={financialCurrencyMenuPortalRef}
                         />
                       </div>
                     </td>
-                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-[var(--surface-input-border)] px-2 text-center align-middle">
-                      <div className="flex h-full min-h-0 items-center justify-center">
+                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] overflow-visible border-x border-[var(--surface-input-border)] px-2 text-center align-middle">
+                      <div className="flex h-full min-h-0 items-center justify-center overflow-visible">
                         <FinancialSummaryAmount
                           parts={remainingDisplayParts}
                           amountClassName={isOverBudget ? 'text-rose-400' : typographyBodyClass}
@@ -4290,6 +4440,7 @@ function App() {
                           onToggleMenu={toggleFinancialCurrencyMenu}
                           onCurrencyPicked={handleFinancialCurrencyPicked}
                           menuContainerRef={financialCurrencyMenuRef}
+                          menuPortalRef={financialCurrencyMenuPortalRef}
                         />
                       </div>
                     </td>
