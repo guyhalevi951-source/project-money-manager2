@@ -1,10 +1,25 @@
-import { ArrowLeft, ArrowRight, ChevronDown, ChevronUp, Coins, Languages, SlidersHorizontal } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { ChevronDown, ChevronUp, Coins, Languages, SlidersHorizontal } from 'lucide-react';
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react';
-import { useSettingsPersistence } from '../context/SettingsPersistenceContext';
-import SettingsSyncStatusBadge from './SettingsSyncStatusBadge';
 import { useLanguage } from '../LanguageContext';
 import { writePreferredLanguage } from '../services/authLanguagePreference';
+import type { ExpenseCurrency } from '../services/exchangeRateService';
+import { themeCategoryProps } from '../services/buttonThemeService';
+import {
+  filterBarContainerClass,
+  filterBarInactiveTabClass,
+  primaryActionActivePillClass,
+} from '../styles/actionButtonStyles';
+import {
+  monochromeDepthIconBadgeClass,
+  monochromeInlineIconClass,
+  monochromeToggleThumbClass,
+  monochromeToggleTrackOffClass,
+  monochromeToggleTrackOnClass,
+  themeTextMutedClass,
+  themeTextSubtleClass,
+  typographyTitleClass,
+} from '../styles/themeSurfaceStyles';
 import DisplayCurrencySelector from './DisplayCurrencySelector';
 import ExchangeRateSimulator from './ExchangeRateSimulator';
 import {
@@ -16,48 +31,10 @@ import {
   subCardMasterCategoryStackClass,
   subCardNestedAccordionTriggerClass,
 } from './SubCardNestedStack';
-import type { ExpenseCurrency } from '../services/exchangeRateService';
-import {
-  filterBarContainerClass,
-  filterBarInactiveTabClass,
-  primaryActionActivePillClass,
-  utilityNavIconButtonClass,
-} from '../styles/actionButtonStyles';
-import { themeCategoryProps } from '../services/buttonThemeService';
-import {
-  monochromeDepthIconBadgeClass,
-  monochromeInlineIconClass,
-  monochromeToggleThumbClass,
-  monochromeToggleTrackOffClass,
-  monochromeToggleTrackOnClass,
-  SETTINGS_PROFILE_CURSOR_ENFORCEMENT,
-  SETTINGS_PROFILE_SCOPE_ATTR,
-  themeAntiClipVisibleClass,
-  themeCardLgClass,
-  themeTextMutedClass,
-  themeTextSubtleClass,
-  typographyTitleClass,
-} from '../styles/themeSurfaceStyles';
 
-/**
- * FUTURE-PROOF COMPONENT MAPPING RULE (v1.2.0):
- * ${SETTINGS_PROFILE_CURSOR_ENFORCEMENT}
- *
- * Depth stack: L1 MasterCategoryPanel (Cat 6) → L2 SubCategorySectionCard (Cat 7) →
- * L3 surfacePanelClass/subCardSmClass → Cat 4 surfaceInput* → Cat 5 typography*.
- * Dynamic toggles persist via LanguageContext → Firebase (registered) / localStorage (guest).
- */
-
+export type ProfileCurrencySubSection = 'display' | 'exchange' | 'manual-rate' | 'commissions';
 type MainSection = 'general' | 'currencies';
-type CurrencySubSection = 'display' | 'exchange' | 'manual-rate' | 'commissions';
 
-interface SettingsPageProps {
-  onBack: () => void;
-  recentExpenseCurrencies: ExpenseCurrency[];
-  initialCurrencySections?: CurrencySubSection[] | null;
-}
-
-/** Master category body — opacity only so rounded-2xl perimeter stays intact. */
 const masterCategoryBodyMotion = {
   initial: { opacity: 0 },
   animate: { opacity: 1 },
@@ -65,7 +42,6 @@ const masterCategoryBodyMotion = {
   transition: { duration: 0.2, ease: 'easeOut' as const },
 };
 
-/** Currency sub-panels: opacity only so height hugs content on mobile. */
 const currencySubPanelMotion = {
   initial: { opacity: 0 },
   animate: { opacity: 1 },
@@ -85,25 +61,29 @@ function toggleSetMember<T>(key: T, setState: Dispatch<SetStateAction<Set<T>>>) 
   });
 }
 
-export default function SettingsPage({
-  onBack,
+interface ProfileSettingsSectionsProps {
+  recentExpenseCurrencies: ExpenseCurrency[];
+  initialCurrencySections?: ProfileCurrencySubSection[] | null;
+}
+
+export default function ProfileSettingsSections({
   recentExpenseCurrencies,
   initialCurrencySections,
-}: SettingsPageProps) {
+}: ProfileSettingsSectionsProps) {
   const { tr, lang, dir, setLang, keepOriginalValues, setKeepOriginalValues } = useLanguage();
-  const { rehydrateGuestSettings } = useSettingsPersistence();
-
-  useEffect(() => {
-    rehydrateGuestSettings();
-  }, [rehydrateGuestSettings]);
-  const BackIcon = dir === 'rtl' ? ArrowRight : ArrowLeft;
 
   const [mainOpen, setMainOpen] = useState<Set<MainSection>>(() =>
     initialCurrencySections?.length ? new Set(['currencies']) : new Set(),
   );
-  const [currencySubOpen, setCurrencySubOpen] = useState<Set<CurrencySubSection>>(
+  const [currencySubOpen, setCurrencySubOpen] = useState<Set<ProfileCurrencySubSection>>(
     () => new Set(initialCurrencySections ?? []),
   );
+
+  useEffect(() => {
+    if (!initialCurrencySections?.length) return;
+    setMainOpen((prev) => new Set([...prev, 'currencies']));
+    setCurrencySubOpen(new Set(initialCurrencySections));
+  }, [initialCurrencySections]);
 
   const isMainOpen = useCallback((section: MainSection) => mainOpen.has(section), [mainOpen]);
   const toggleMain = useCallback(
@@ -112,11 +92,11 @@ export default function SettingsPage({
   );
 
   const isCurrencySubOpen = useCallback(
-    (section: CurrencySubSection) => currencySubOpen.has(section),
+    (section: ProfileCurrencySubSection) => currencySubOpen.has(section),
     [currencySubOpen],
   );
   const toggleCurrencySub = useCallback(
-    (section: CurrencySubSection) => toggleSetMember(section, setCurrencySubOpen),
+    (section: ProfileCurrencySubSection) => toggleSetMember(section, setCurrencySubOpen),
     [],
   );
 
@@ -125,79 +105,42 @@ export default function SettingsPage({
     setLang(next);
   };
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onBack();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onBack]);
-
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: 8 }}
-      transition={{ duration: 0.28, ease: 'easeOut' }}
-      className={`space-y-6 p-4 sm:space-y-8 sm:p-6 ${themeCardLgClass} ${themeAntiClipVisibleClass}`}
-      {...{ [SETTINGS_PROFILE_SCOPE_ATTR]: '' }}
-    >
-      <div className="flex items-center gap-3 sm:gap-4">
+    <section className={subCardMasterCategoryStackClass}>
+      <MasterCategoryPanel expanded={isMainOpen('currencies')} {...themeCategoryProps('mainCard')}>
         <button
           type="button"
-          onClick={onBack}
-          className={`shrink-0 w-11 h-11 ${utilityNavIconButtonClass}`}
-          aria-label={tr('backToApp')}
+          onClick={() => toggleMain('currencies')}
+          aria-expanded={isMainOpen('currencies')}
+          className={subCardNestedAccordionTriggerClass}
         >
-          <BackIcon className="w-5 h-5" />
-        </button>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <h2 className={`text-2xl font-bold tracking-tight sm:text-3xl ${typographyTitleClass}`}>
-              {tr('settings')}
-            </h2>
-            <SettingsSyncStatusBadge />
-          </div>
-          <p className={`mt-0.5 text-sm ${themeTextMutedClass}`}>{tr('settingsPageSubtitle')}</p>
-        </div>
-      </div>
-
-      <section className={subCardMasterCategoryStackClass}>
-        {/* מטבעות — master rounded enclosure (header + sub-category capsules) */}
-        <MasterCategoryPanel expanded={isMainOpen('currencies')} {...themeCategoryProps('mainCard')}>
-          <button
-            type="button"
-            onClick={() => toggleMain('currencies')}
-            aria-expanded={isMainOpen('currencies')}
-            className={subCardNestedAccordionTriggerClass}
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-3">
-                <div className={monochromeDepthIconBadgeClass}>
-                  <Coins className="h-5 w-5" />
-                </div>
-                <div className="min-w-0 text-start">
-                  <h3 className={`truncate text-base font-semibold sm:text-lg ${typographyTitleClass}`}>
-                    {tr('settingsSectionCurrencies')}
-                  </h3>
-                  <p className={`mt-0.5 text-xs sm:text-sm ${themeTextMutedClass}`}>
-                    {tr('settingsSectionCurrenciesDesc')}
-                  </p>
-                </div>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className={monochromeDepthIconBadgeClass}>
+                <Coins className="h-5 w-5" />
               </div>
-              {isMainOpen('currencies') ? (
-                <ChevronDown className={`h-5 w-5 shrink-0 ${themeTextMutedClass}`} />
-              ) : (
-                <ChevronUp className={`h-5 w-5 shrink-0 ${themeTextMutedClass}`} />
-              )}
+              <div className="min-w-0 text-start">
+                <h3 className={`truncate text-base font-semibold sm:text-lg ${typographyTitleClass}`}>
+                  {tr('settingsSectionCurrencies')}
+                </h3>
+                <p className={`mt-0.5 text-xs sm:text-sm ${themeTextMutedClass}`}>
+                  {tr('settingsSectionCurrenciesDesc')}
+                </p>
+              </div>
             </div>
-          </button>
+            {isMainOpen('currencies') ? (
+              <ChevronDown className={`h-5 w-5 shrink-0 ${themeTextMutedClass}`} />
+            ) : (
+              <ChevronUp className={`h-5 w-5 shrink-0 ${themeTextMutedClass}`} />
+            )}
+          </div>
+        </button>
 
-          <AnimatePresence initial={false}>
-            {isMainOpen('currencies') && (
-              <motion.div key="settings-main-currencies" {...masterCategoryBodyMotion}>
-                <MasterCategoryPanelBody>
-                  <SubCardNestedStack variant="capsuleOnMain">
+        <AnimatePresence initial={false}>
+          {isMainOpen('currencies') && (
+            <motion.div key="profile-settings-currencies" {...masterCategoryBodyMotion}>
+              <MasterCategoryPanelBody>
+                <SubCardNestedStack variant="capsuleOnMain">
                   <SubCategorySectionCard>
                     <button
                       type="button"
@@ -222,7 +165,7 @@ export default function SettingsPage({
                     </button>
                     <AnimatePresence initial={false}>
                       {isCurrencySubOpen('display') && (
-                        <motion.div key="settings-currency-display" {...currencySubPanelMotion} className="h-fit">
+                        <motion.div key="profile-currency-display" {...currencySubPanelMotion} className="h-fit">
                           <SubCategorySectionBody>
                             <DisplayCurrencySelector recentExpenseCurrencies={recentExpenseCurrencies} />
                           </SubCategorySectionBody>
@@ -258,7 +201,7 @@ export default function SettingsPage({
                     </button>
                     <AnimatePresence initial={false}>
                       {isCurrencySubOpen('exchange') && (
-                        <motion.div key="settings-currency-exchange" {...currencySubPanelMotion} className="h-fit text-start">
+                        <motion.div key="profile-currency-exchange" {...currencySubPanelMotion} className="h-fit text-start">
                           <SubCategorySectionBody>
                             <ExchangeRateSimulator
                               section="exchange"
@@ -297,7 +240,7 @@ export default function SettingsPage({
                     </button>
                     <AnimatePresence initial={false}>
                       {isCurrencySubOpen('manual-rate') && (
-                        <motion.div key="settings-currency-manual-rate" {...currencySubPanelMotion} className="h-fit text-start">
+                        <motion.div key="profile-currency-manual-rate" {...currencySubPanelMotion} className="h-fit text-start">
                           <SubCategorySectionBody>
                             <ExchangeRateSimulator
                               section="manual-rate"
@@ -336,7 +279,7 @@ export default function SettingsPage({
                     </button>
                     <AnimatePresence initial={false}>
                       {isCurrencySubOpen('commissions') && (
-                        <motion.div key="settings-currency-commissions" {...currencySubPanelMotion} className="h-fit text-start">
+                        <motion.div key="profile-currency-commissions" {...currencySubPanelMotion} className="h-fit text-start">
                           <SubCategorySectionBody>
                             <ExchangeRateSimulator
                               section="commissions"
@@ -347,51 +290,50 @@ export default function SettingsPage({
                       )}
                     </AnimatePresence>
                   </SubCategorySectionCard>
-                  </SubCardNestedStack>
-                </MasterCategoryPanelBody>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </MasterCategoryPanel>
+                </SubCardNestedStack>
+              </MasterCategoryPanelBody>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </MasterCategoryPanel>
 
-        {/* הגדרות כלליות */}
-        <MasterCategoryPanel expanded={isMainOpen('general')} {...themeCategoryProps('mainCard')}>
-          <button
-            type="button"
-            onClick={() => toggleMain('general')}
-            aria-expanded={isMainOpen('general')}
-            className={subCardNestedAccordionTriggerClass}
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-3">
-                <div className={monochromeDepthIconBadgeClass}>
-                  <Languages className="h-5 w-5" />
-                </div>
-                <div className="min-w-0 text-start">
-                  <h3 className={`truncate text-base font-semibold sm:text-lg ${typographyTitleClass}`}>
-                    {tr('settingsSectionGeneral')}
-                  </h3>
-                  <p className={`mt-0.5 text-xs sm:text-sm ${themeTextMutedClass}`}>
-                    {tr('settingsSectionGeneralDesc')}
-                  </p>
-                </div>
+      <MasterCategoryPanel expanded={isMainOpen('general')} {...themeCategoryProps('mainCard')}>
+        <button
+          type="button"
+          onClick={() => toggleMain('general')}
+          aria-expanded={isMainOpen('general')}
+          className={subCardNestedAccordionTriggerClass}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className={monochromeDepthIconBadgeClass}>
+                <Languages className="h-5 w-5" />
               </div>
-              {isMainOpen('general') ? (
-                <ChevronDown className={`h-5 w-5 shrink-0 ${themeTextMutedClass}`} />
-              ) : (
-                <ChevronUp className={`h-5 w-5 shrink-0 ${themeTextMutedClass}`} />
-              )}
+              <div className="min-w-0 text-start">
+                <h3 className={`truncate text-base font-semibold sm:text-lg ${typographyTitleClass}`}>
+                  {tr('settingsSectionGeneral')}
+                </h3>
+                <p className={`mt-0.5 text-xs sm:text-sm ${themeTextMutedClass}`}>
+                  {tr('settingsSectionGeneralDesc')}
+                </p>
+              </div>
             </div>
-          </button>
+            {isMainOpen('general') ? (
+              <ChevronDown className={`h-5 w-5 shrink-0 ${themeTextMutedClass}`} />
+            ) : (
+              <ChevronUp className={`h-5 w-5 shrink-0 ${themeTextMutedClass}`} />
+            )}
+          </div>
+        </button>
 
-          <AnimatePresence initial={false}>
-            {isMainOpen('general') && (
-              <motion.div key="settings-main-general" {...masterCategoryBodyMotion}>
-                <MasterCategoryPanelBody>
-                  <SubCardNestedStack variant="capsuleOnMain">
+        <AnimatePresence initial={false}>
+          {isMainOpen('general') && (
+            <motion.div key="profile-settings-general" {...masterCategoryBodyMotion}>
+              <MasterCategoryPanelBody>
+                <SubCardNestedStack variant="capsuleOnMain">
                   <SubCategorySectionCard>
-                    <div aria-labelledby="settings-language-heading">
-                      <h4 id="settings-language-heading" className={`text-sm font-semibold sm:text-base ${typographyTitleClass}`}>
+                    <div aria-labelledby="profile-settings-language-heading">
+                      <h4 id="profile-settings-language-heading" className={`text-sm font-semibold sm:text-base ${typographyTitleClass}`}>
                         {tr('language')}
                       </h4>
                       <p className={`mt-1 text-xs sm:text-sm ${themeTextMutedClass}`}>{tr('languageDescription')}</p>
@@ -400,9 +342,7 @@ export default function SettingsPage({
                           type="button"
                           onClick={() => selectLanguage('he')}
                           className={`flex-1 py-2.5 text-sm transition-all sm:py-3 ${
-                            lang === 'he'
-                              ? primaryActionActivePillClass
-                              : filterBarInactiveTabClass
+                            lang === 'he' ? primaryActionActivePillClass : filterBarInactiveTabClass
                           }`}
                         >
                           {tr('hebrew')}
@@ -411,9 +351,7 @@ export default function SettingsPage({
                           type="button"
                           onClick={() => selectLanguage('en')}
                           className={`flex-1 py-2.5 text-sm transition-all sm:py-3 ${
-                            lang === 'en'
-                              ? primaryActionActivePillClass
-                              : filterBarInactiveTabClass
+                            lang === 'en' ? primaryActionActivePillClass : filterBarInactiveTabClass
                           }`}
                         >
                           {tr('english')}
@@ -457,13 +395,12 @@ export default function SettingsPage({
                       </div>
                     </div>
                   </SubCategorySectionCard>
-                  </SubCardNestedStack>
-                </MasterCategoryPanelBody>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </MasterCategoryPanel>
-      </section>
-    </motion.div>
+                </SubCardNestedStack>
+              </MasterCategoryPanelBody>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </MasterCategoryPanel>
+    </section>
   );
 }

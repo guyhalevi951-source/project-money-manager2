@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronUp,
   Palette,
+  LogOut,
   Pencil,
   RefreshCw,
   SlidersHorizontal,
@@ -67,6 +68,8 @@ import {
   type ThemePreferences,
 } from '../services/buttonThemeService';
 import { SETTINGS_SYNC_DEBOUNCE_MS } from '../services/settingsPersistenceEngine';
+import type { ExpenseCurrency } from '../services/exchangeRateService';
+import ProfileSettingsSections, { type ProfileCurrencySubSection } from './ProfileSettingsSections';
 
 function createFreshDefaultTheme(): ThemePreferences {
   return {
@@ -84,6 +87,9 @@ interface ProfilePageProps {
   googleAvatarUrl: string | null;
   onBack: () => void;
   onSaveAvatar: (avatarUrl: string) => Promise<void>;
+  onLogout: () => void;
+  recentExpenseCurrencies: ExpenseCurrency[];
+  initialCurrencySections?: ProfileCurrencySubSection[] | null;
 }
 
 const PRESET_AVATARS = [
@@ -153,6 +159,9 @@ export default function ProfilePage({
   googleAvatarUrl,
   onBack: _onBack,
   onSaveAvatar,
+  onLogout,
+  recentExpenseCurrencies,
+  initialCurrencySections,
 }: ProfilePageProps) {
   const { tr, lang, themePreferences, setThemePreferences } = useLanguage();
   const { rehydrateGuestSettings } = useSettingsPersistence();
@@ -305,7 +314,17 @@ export default function ProfilePage({
       <div className="flex flex-col gap-3">
       {/* ── Profile card (always visible) ─────────────────────────────── */}
       <div className={`w-full ${themeCardLgClass}`}>
-        <div className="flex flex-col items-center px-5 py-6 text-center sm:px-8 sm:py-8">
+        <div className="flex justify-end px-5 pt-5 sm:px-8 sm:pt-6">
+          <button
+            type="button"
+            onClick={onLogout}
+            className="inline-flex min-h-10 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-red-500 transition-colors hover:bg-red-50 dark:hover:bg-red-900/20"
+          >
+            <LogOut className="h-4 w-4 shrink-0" aria-hidden />
+            {tr('logout')}
+          </button>
+        </div>
+        <div className="flex flex-col items-center px-5 pb-6 pt-2 text-center sm:px-8 sm:pb-8">
           <p className={`mb-6 text-lg font-semibold ${themeTextClass}`}>{welcome}</p>
           <button
             type="button"
@@ -339,6 +358,13 @@ export default function ProfilePage({
           </button>
         </div>
       </div>
+
+      <hr className="my-6 border-gray-200 dark:border-gray-800" />
+
+      <ProfileSettingsSections
+        recentExpenseCurrencies={recentExpenseCurrencies}
+        initialCurrencySections={initialCurrencySections}
+      />
 
       {/* ── Color theme customization — master rounded enclosure ── */}
       <div className={subCardMasterCategoryStackClass}>

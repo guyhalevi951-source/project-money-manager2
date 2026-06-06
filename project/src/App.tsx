@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useCallback,
+  type ChangeEvent,
   type MutableRefObject,
   type ReactNode,
   type TouchEvent,
@@ -31,6 +32,7 @@ import {
   Layers,
   ChevronUp,
   Menu,
+  User as UserIcon,
   LogOut,
   Loader2,
   type LucideIcon,
@@ -41,22 +43,18 @@ import {
   resolveIcon,
   DEFAULT_CATEGORY_COLOR,
   hexForColor,
-  isValidCategoryColor,
   aggregateByCategory,
   lookupCategory,
   type Category,
 } from './categories';
 import appLogo from './assets/app-logo.png';
-import CategoryColorPicker from './components/CategoryColorPicker';
 import CreateCategoryForm from './components/CreateCategoryForm';
 import CategoryIconBadge from './components/CategoryIconBadge';
-import CategoryBreakdownLegend from './components/CategoryBreakdownLegend';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { updateProfile } from 'firebase/auth';
 import { auth, signOutUser } from './firebase';
 import AuthPage from './components/AuthPage';
 import UserProfileMenu from './components/UserProfileMenu';
-import SettingsPage from './components/SettingsPage';
 import ProfilePage from './components/ProfilePage';
 import { SettingsPersistenceProvider } from './context/SettingsPersistenceContext';
 import {
@@ -101,7 +99,6 @@ import {
   utilityNavButtonLgClass,
   utilityNavIconBadgeClass,
   utilityNavMenuToggleClass,
-  utilityNavShortcutClass,
 } from './styles/actionButtonStyles';
 import {
   surfaceInputClass,
@@ -240,31 +237,6 @@ const formatDisplayDate = (iso: string, lang: 'he' | 'en' = 'he'): string => {
   const [y, m, d] = iso.split('-').map((n) => parseInt(n, 10));
   if (!y || !m || !d) return iso;
   return new Date(y, m - 1, d).toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US');
-};
-
-// DD/MM/YYYY subtitle for the dashboard category donut.
-const formatChartDateLabel = (iso: string): string => {
-  const [y, m, d] = iso.split('-').map((n) => parseInt(n, 10));
-  if (!y || !m || !d) return iso;
-  return `${pad2(d)}/${pad2(m)}/${y}`;
-};
-
-const shiftISODate = (iso: string, dayOffset: number): string => {
-  const d = parseISO(iso);
-  d.setDate(d.getDate() + dayOffset);
-  return toISODate(d);
-};
-
-const isSameCalendarMonth = (a: Date, b: Date): boolean =>
-  a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
-
-/** Daily chart date for a viewed month: today if it is the real-world current month, else the 1st. */
-const chartDateIsoForMonth = (monthDate: Date): string => {
-  const now = new Date();
-  if (isSameCalendarMonth(monthDate, now)) {
-    return toISODate(now);
-  }
-  return toISODate(new Date(monthDate.getFullYear(), monthDate.getMonth(), 1));
 };
 
 // Parse an ISO 'YYYY-MM-DD' into a local Date (midnight).
@@ -427,7 +399,7 @@ const findNearestPriorMonthWithSubBudgets = (
   return candidates[0] ?? null;
 };
 
-type SummaryView = 'week' | 'month' | 'year';
+type SummaryView = 'daily' | 'week' | 'month' | 'year';
 
 // Top-level navigation tabs.
 const TABS = [
@@ -436,7 +408,8 @@ const TABS = [
   { id: 'subbudgets', icon: Wallet },
   { id: 'expenses', icon: Receipt },
 ] as const;
-type TabId = (typeof TABS)[number]['id'];
+type MainTabId = (typeof TABS)[number]['id'];
+type TabId = MainTabId | 'profile';
 
 type HistoryTimeFilter = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
@@ -529,6 +502,8 @@ function CollapsibleNavMenu({
         return tr('tabSubbudgets');
       case 'expenses':
         return tr('tabExpenses');
+      case 'profile':
+        return tr('profile');
       default:
         return tabId;
     }
@@ -706,6 +681,211 @@ function CollapsibleNavMenu({
   );
 }
 
+interface MobileBottomNavProps {
+  activeTab: TabId;
+  onOpenProfile: () => void;
+  onTabSelect: (id: TabId) => void;
+}
+
+function MobileBottomNav({ activeTab, onOpenProfile, onTabSelect }: MobileBottomNavProps) {
+  const { tr, dir } = useLanguage();
+
+  const items = useMemo(
+    () => [
+      {
+        key: 'profile',
+        icon: UserIcon,
+        label: tr('profile'),
+        isActive: activeTab === 'profile',
+        onClick: () => onOpenProfile(),
+      },
+      {
+        key: 'expenses',
+        icon: Receipt,
+        label: tr('tabExpenses'),
+        isActive: activeTab === 'expenses',
+        onClick: () => onTabSelect('expenses'),
+      },
+      {
+        key: 'analytics',
+        icon: PieChartIcon,
+        label: tr('tabAnalytics'),
+        isActive: activeTab === 'analytics',
+        onClick: () => onTabSelect('analytics'),
+      },
+      {
+        key: 'subbudgets',
+        icon: Wallet,
+        label: tr('tabSubbudgets'),
+        isActive: activeTab === 'subbudgets',
+        onClick: () => onTabSelect('subbudgets'),
+      },
+      {
+        key: 'dashboard',
+        icon: LayoutDashboard,
+        label: tr('tabDashboard'),
+        isActive: activeTab === 'dashboard',
+        onClick: () => onTabSelect('dashboard'),
+      },
+    ],
+    [tr, activeTab, onOpenProfile, onTabSelect],
+  );
+
+  return (
+    <nav
+      aria-label={tr('tabDashboard')}
+      className="fixed bottom-0 left-0 z-[100] flex w-full bg-white/80 pb-[env(safe-area-inset-bottom,0px)] shadow-[0_-8px_30px_-5px_rgba(0,0,0,0.1)] backdrop-blur-lg md:hidden dark:bg-gray-900/80 dark:shadow-[0_-8px_30px_-5px_rgba(0,0,0,0.5)]"
+    >
+      <div dir={dir} className="flex min-h-16 w-full items-center justify-between py-1.5">
+        {items.map((item) => {
+          const Icon = item.icon;
+          return (
+            <button
+              key={item.key}
+              type="button"
+              onClick={item.onClick}
+              aria-current={item.isActive ? 'page' : undefined}
+              className="flex min-h-[3.25rem] min-w-0 flex-1 cursor-pointer flex-col items-center justify-center px-1 touch-manipulation transition-transform active:scale-95"
+            >
+              <span
+                className={`mb-1 flex items-center justify-center transition-all duration-300 ${
+                  item.isActive
+                    ? 'rounded-full bg-emerald-100 px-4 py-1 dark:bg-emerald-900/40'
+                    : 'px-4 py-1'
+                }`}
+              >
+                <Icon
+                  className={`h-5 w-5 shrink-0 ${item.isActive ? 'text-emerald-500 dark:text-emerald-400' : 'text-neutral-500'}`}
+                />
+              </span>
+              <span
+                className={`line-clamp-2 max-w-full whitespace-normal px-0.5 text-center text-[10px] leading-tight ${
+                  item.isActive ? 'font-medium text-emerald-500 dark:text-emerald-400' : 'text-neutral-500'
+                }`}
+              >
+                {item.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
+interface MonthNavigationBarProps {
+  monthLabel: string;
+  monthValue: string;
+  isCurrentMonth: boolean;
+  onPrev: () => void;
+  onNext: () => void;
+  onGoToCurrent: () => void;
+  onMonthChange: (monthKey: string) => void;
+  compact?: boolean;
+  className?: string;
+}
+
+function MonthNavigationBar({
+  monthLabel,
+  monthValue,
+  isCurrentMonth,
+  onPrev,
+  onNext,
+  onGoToCurrent,
+  onMonthChange,
+  compact = false,
+  className = '',
+}: MonthNavigationBarProps) {
+  const { tr } = useLanguage();
+  const monthInputRef = useRef<HTMLInputElement>(null);
+
+  const openMonthPicker = () => {
+    const inputEl = monthInputRef.current;
+    if (!inputEl) return;
+    const pickerCapable = inputEl as HTMLInputElement & { showPicker?: () => void };
+    if (typeof pickerCapable.showPicker === 'function') {
+      pickerCapable.showPicker();
+      return;
+    }
+    inputEl.click();
+  };
+
+  const handleMonthInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.value;
+    if (value) onMonthChange(value);
+  };
+
+  const navButtonClass = [
+    'relative z-10 flex shrink-0 cursor-pointer items-center justify-center',
+    'pointer-events-auto min-h-11 min-w-11 p-3',
+    'rounded-full text-neutral-400',
+    'transition-colors hover:bg-white/10 active:scale-95',
+    'touch-manipulation',
+  ].join(' ');
+  const chevronClass = compact ? 'pointer-events-none h-5 w-5' : 'pointer-events-none h-6 w-6';
+  const labelTextClass = compact
+    ? 'text-sm sm:text-base font-semibold capitalize truncate'
+    : 'text-base sm:text-lg font-semibold capitalize truncate';
+
+  return (
+    <div
+      dir="ltr"
+      className={['relative z-50 flex items-center justify-between gap-2', className].filter(Boolean).join(' ')}
+    >
+      <button
+        type="button"
+        onClick={onPrev}
+        className={navButtonClass}
+        aria-label={tr('prevMonth')}
+        title={tr('prevMonth')}
+      >
+        <ChevronLeft className={chevronClass} />
+      </button>
+
+      <div className="flex min-w-0 flex-col items-center">
+        <button
+          type="button"
+          onClick={openMonthPicker}
+          className="relative flex min-w-0 cursor-pointer items-center gap-2 text-neutral-100 transition-all hover:opacity-80"
+          aria-label={tr('date')}
+          title={tr('date')}
+        >
+          <CalendarDays className={`${compact ? 'h-4 w-4' : 'h-5 w-5'} shrink-0 text-emerald-400`} />
+          <span className={labelTextClass}>{monthLabel}</span>
+          <input
+            ref={monthInputRef}
+            type="month"
+            value={monthValue}
+            onChange={handleMonthInputChange}
+            className="pointer-events-none absolute inset-0 h-full w-full opacity-0"
+            tabIndex={-1}
+            aria-hidden
+          />
+        </button>
+        {!isCurrentMonth && (
+          <button
+            type="button"
+            onClick={onGoToCurrent}
+            className="mt-0.5 text-xs font-medium text-emerald-400 transition-colors hover:text-emerald-300 active:opacity-70"
+          >
+            {tr('backToCurrentMonth')}
+          </button>
+        )}
+      </div>
+
+      <button
+        type="button"
+        onClick={onNext}
+        className={navButtonClass}
+        aria-label={tr('nextMonth')}
+        title={tr('nextMonth')}
+      >
+        <ChevronRight className={chevronClass} />
+      </button>
+    </div>
+  );
+}
+
 interface ExpenseSummaryProps {
   expenses: Expense[];
   categories: Category[];
@@ -840,9 +1020,30 @@ const buildContinuousTrendSeries = (
   view: SummaryView,
   anchor: Date,
   amountByDate: Record<string, number>,
-  lang: 'he' | 'en' = 'he'
+  lang: 'he' | 'en' = 'he',
+  hourlyAmounts?: number[],
 ): { dailySeries: TrendSeriesPoint[]; periodDayCount: number } => {
   const points: TrendSeriesPoint[] = [];
+
+  if (view === 'daily') {
+    const dayIso = toISODate(anchor);
+    const buckets = hourlyAmounts ?? Array(24).fill(0);
+    if (hourlyAmounts == null) {
+      const dayTotal = amountByDate[dayIso] ?? 0;
+      buckets[12] = dayTotal;
+    }
+    for (let hour = 0; hour < 24; hour++) {
+      points.push({
+        iso: `${dayIso}_${pad2(hour)}`,
+        day: hour,
+        dayLabel: pad2(hour),
+        dateLabel: `${pad2(hour)}:00`,
+        amount: buckets[hour] ?? 0,
+        hex: DAILY_SLICE_COLORS[hour % DAILY_SLICE_COLORS.length],
+      });
+    }
+    return { dailySeries: points, periodDayCount: 1 };
+  }
 
   if (view === 'month') {
     const y = anchor.getFullYear();
@@ -928,6 +1129,11 @@ function defaultTrendSelectionIso(
   const todayIso = toISODate(new Date());
   const todayInSeries = series.find((p) => p.iso === todayIso);
 
+  if (view === 'daily') {
+    const lastWithAmount = [...series].reverse().find((p) => p.amount > 0);
+    if (lastWithAmount) return lastWithAmount.iso;
+    return series[12]?.iso ?? series[0]?.iso ?? null;
+  }
   if (view === 'month' && monthKeyOf(todayIso) === monthKeyOfDate(anchor) && todayInSeries) {
     return todayInSeries.iso;
   }
@@ -990,14 +1196,23 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
   const [selectedTrendIso, setSelectedTrendIso] = useState<string | null>(null);
   const isCoarsePointer = useCoarsePointer();
   const touchStartXRef = useRef<number | null>(null);
+  const showMultiChartViews = view !== 'daily';
+  const maxChartSlideIndex = showMultiChartViews ? ANALYTICS_SLIDE_COUNT - 1 : 0;
+
   const goToChartSlide = useCallback((nextIndex: number) => {
-    const clampedNextIndex = Math.max(0, Math.min(ANALYTICS_SLIDE_COUNT - 1, nextIndex));
+    const clampedNextIndex = Math.max(0, Math.min(maxChartSlideIndex, nextIndex));
     setChartSlide((current) => {
       if (clampedNextIndex === current) return current;
       setChartDirection(clampedNextIndex > current ? 'forward' : 'backward');
       return clampedNextIndex;
     });
-  }, []);
+  }, [maxChartSlideIndex]);
+
+  useEffect(() => {
+    if (view === 'daily') {
+      setChartSlide(0);
+    }
+  }, [view]);
   const chartSlideVariants = useMemo(
     () => ({
       enter: (direction: 'forward' | 'backward') => ({
@@ -1016,7 +1231,8 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
   const shift = (dir: number) => {
     setAnchor((a) => {
       const x = new Date(a);
-      if (view === 'week') x.setDate(x.getDate() + dir * 7);
+      if (view === 'daily') x.setDate(x.getDate() + dir);
+      else if (view === 'week') x.setDate(x.getDate() + dir * 7);
       else if (view === 'month') x.setMonth(x.getMonth() + dir);
       else x.setFullYear(x.getFullYear() + dir);
       return x;
@@ -1028,6 +1244,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
   const inPeriod = (rawDate: string): boolean => {
     const iso = normalizeDate(rawDate);
     const d = parseISO(iso);
+    if (view === 'daily') return iso === toISODate(anchor);
     if (view === 'year') return d.getFullYear() === anchor.getFullYear();
     if (view === 'month') return monthKeyOf(iso) === anchorMonthKey;
     const s = startOfWeek(anchor);
@@ -1043,7 +1260,10 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
     [expenses, view, anchor, anchorMonthKey]
   );
 
-  const chartPeriodKey = `${view}-${anchorMonthKey}-${anchor.getFullYear()}-${anchor.getMonth()}-${weekNumber(anchor)}`;
+  const chartPeriodKey =
+    view === 'daily'
+      ? `${view}-${toISODate(anchor)}`
+      : `${view}-${anchorMonthKey}-${anchor.getFullYear()}-${anchor.getMonth()}-${weekNumber(anchor)}`;
 
   const total = periodExpenses.reduce((sum, e) => sum + e.amount, 0);
 
@@ -1058,6 +1278,22 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
       : [{ name: '', value: 1, hex: '#27272a' }];
 
   const dailyBreakdown = useMemo(() => {
+    if (view === 'daily') {
+      return periodExpenses
+        .map((e, i) => {
+          const cat = lookupCategory(e.category, categories);
+          const label = e.description.trim() || cat.label;
+          return {
+            date: e.id,
+            label,
+            amount: e.amount,
+            hex: DAILY_SLICE_COLORS[i % DAILY_SLICE_COLORS.length],
+            percentage: total > 0 ? (e.amount / total) * 100 : 0,
+          };
+        })
+        .sort((a, b) => b.amount - a.amount);
+    }
+
     const grouped = periodExpenses.reduce<Record<string, number>>((acc, e) => {
       const iso = normalizeDate(e.date);
       acc[iso] = (acc[iso] || 0) + e.amount;
@@ -1072,7 +1308,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
         percentage: total > 0 ? (amount / total) * 100 : 0,
       }))
       .sort((a, b) => b.amount - a.amount);
-  }, [periodExpenses, total, lang]);
+  }, [view, periodExpenses, categories, total, lang]);
 
   const dailyDonutData =
     dailyBreakdown.length > 0
@@ -1089,9 +1325,19 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
     [periodExpenses],
   );
 
+  const hourlyAmounts = useMemo(() => {
+    if (view !== 'daily') return undefined;
+    const buckets = Array(24).fill(0);
+    periodExpenses.forEach((e, i) => {
+      const hour = 8 + (i % 12);
+      buckets[hour] += e.amount;
+    });
+    return buckets;
+  }, [view, periodExpenses]);
+
   const { dailySeries, periodDayCount } = useMemo(
-    () => buildContinuousTrendSeries(view, anchor, amountByDate, lang),
-    [view, anchor, amountByDate, lang],
+    () => buildContinuousTrendSeries(view, anchor, amountByDate, lang, hourlyAmounts),
+    [view, anchor, amountByDate, lang, hourlyAmounts],
   );
 
   const average = periodDayCount > 0 ? total / periodDayCount : 0;
@@ -1159,7 +1405,9 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
 
   let periodLabel = '';
   let periodSubtitle = '';
-  if (view === 'year') {
+  if (view === 'daily') {
+    periodLabel = formatTrendDateLabel(toISODate(anchor), lang);
+  } else if (view === 'year') {
     periodLabel = `${anchor.getFullYear()}`;
   } else if (view === 'month') {
     periodLabel = anchor.toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US', { month: 'long', year: 'numeric' });
@@ -1171,12 +1419,14 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
   const chipOffsets = [-3, -2, -1, 0, 1];
   const chips = chipOffsets.map((offset) => {
     const d = new Date(anchor);
-    if (view === 'week') d.setDate(d.getDate() + offset * 7);
+    if (view === 'daily') d.setDate(d.getDate() + offset);
+    else if (view === 'week') d.setDate(d.getDate() + offset * 7);
     else if (view === 'month') d.setMonth(d.getMonth() + offset);
     else d.setFullYear(d.getFullYear() + offset);
 
     let label: string;
-    if (view === 'year') label = `${d.getFullYear()}`;
+    if (view === 'daily') label = formatDayLabel(toISODate(d), lang);
+    else if (view === 'year') label = `${d.getFullYear()}`;
     else if (view === 'month') label = d.toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US', { month: 'short' });
     else label = `${tr('weekPrefix')} ${weekNumber(d)}`;
 
@@ -1184,10 +1434,26 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
   });
 
   const views: { id: SummaryView; label: string }[] = [
+    { id: 'daily', label: tr('viewDaily') },
     { id: 'week', label: tr('viewWeek') },
     { id: 'month', label: tr('viewMonth') },
     { id: 'year', label: tr('viewYear') },
   ];
+
+  const formatTrendSummaryDate = useCallback(
+    (iso: string, summaryLang: 'he' | 'en') => {
+      const hourMatch = iso.match(/^(\d{4}-\d{2}-\d{2})_(\d{2})$/);
+      if (view === 'daily' && hourMatch) {
+        const [, dayPart, hour] = hourMatch;
+        return `${formatTrendDateLabel(dayPart, summaryLang)} · ${hour}:00`;
+      }
+      if (view === 'daily') {
+        return formatTrendDateLabel(iso.slice(0, 10), summaryLang);
+      }
+      return formatTooltipDate(iso, summaryLang);
+    },
+    [view],
+  );
 
   const handleCarouselDragEnd = (_: unknown, info: PanInfo) => {
     const offset = info.offset.x;
@@ -1260,6 +1526,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
               key={v.id}
               onClick={() => {
                 if (view === v.id) return;
+                if (v.id === 'daily') setChartSlide(0);
                 setView(v.id);
               }}
               className={`flex-1 py-2.5 text-sm ${
@@ -1325,10 +1592,10 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
           className={`relative mt-6 w-full touch-pan-y overflow-hidden outline-none focus:outline-none focus-visible:outline-none ${filterInsetPanelClass}`}
           style={{ height: ANALYTICS_CHART_HEIGHT, minHeight: ANALYTICS_CHART_HEIGHT }}
         >
-          {/* Swipe layer disabled on trend slide so hover/tap reaches the chart */}
+          {/* Swipe layer disabled on trend slide (and daily view) so hover/tap reaches the chart */}
           <motion.div
-            className={`absolute inset-0 ${chartSlide === 2 ? 'pointer-events-none z-0' : 'z-10'}`}
-            drag={chartSlide === 2 ? false : 'x'}
+            className={`absolute inset-0 ${!showMultiChartViews || chartSlide === 2 ? 'pointer-events-none z-0' : 'z-10'}`}
+            drag={!showMultiChartViews || chartSlide === 2 ? false : 'x'}
             dragConstraints={{ left: 0, right: 0 }}
             dragElastic={0.12}
             dragMomentum={false}
@@ -1355,7 +1622,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                 <h3 className={`mb-3 shrink-0 text-center text-lg font-bold md:text-xl ${typographyTitleClass}`}>
                   {tr('chartCategorySplit')}
                 </h3>
-                <div className="flex min-h-0 flex-1 items-center">
+                <div className={`flex min-h-0 flex-1 items-center ${view === 'daily' ? 'justify-center' : ''}`}>
                 <AnalyticsDonutPanel
                   chartKey={`category-donut-${chartPeriodKey}`}
                   total={total}
@@ -1367,7 +1634,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
               </motion.div>
             )}
 
-            {chartSlide === 1 && (
+            {showMultiChartViews && chartSlide === 1 && (
               <motion.div
                 key={`slide-1-${chartPeriodKey}`}
                 className="absolute inset-0 flex h-full w-full flex-col px-1"
@@ -1404,7 +1671,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
               </motion.div>
             )}
 
-            {chartSlide === 2 && (
+            {showMultiChartViews && chartSlide === 2 && (
               <motion.div
                 key={`slide-2-${chartPeriodKey}`}
                 className="absolute inset-0 z-20 flex h-full w-full flex-col overflow-visible px-2 pt-2 outline-none focus:outline-none focus-visible:outline-none"
@@ -1498,7 +1765,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                           tick={{ fill: '#525252', fontSize: 11 }}
                           axisLine={false}
                           tickLine={false}
-                          interval={view === 'month' ? 6 : view === 'year' ? 1 : 0}
+                          interval={view === 'month' ? 6 : view === 'year' ? 1 : view === 'daily' ? 3 : 0}
                           tickFormatter={(value) => {
                             if (view !== 'year') return String(value);
                             if (typeof value !== 'string') return '';
@@ -1580,37 +1847,39 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
           </AnimatePresence>
         </div>
 
-        {chartSlide === 2 && selectedTrendPoint && (
-          <SelectedDaySummary point={selectedTrendPoint} formatDate={formatTooltipDate} />
+        {showMultiChartViews && chartSlide === 2 && selectedTrendPoint && (
+          <SelectedDaySummary point={selectedTrendPoint} formatDate={formatTrendSummaryDate} />
         )}
 
-        {/* Carousel pagination dots */}
-        <div
-          dir="ltr"
-          className={`flex flex-row justify-center items-center gap-2 ${chartSlide === 2 && selectedTrendPoint ? 'mt-4' : 'mt-5'}`}
-          role="tablist"
-          aria-label={tr('analyticsViews')}
-        >
-          {ANALYTICS_CHART_ORDER.map((i) => (
-            <button
-              key={i}
-              type="button"
-              role="tab"
-              aria-selected={chartSlide === i}
-              aria-label={`${tr('viewPrefix')} ${i + 1}`}
-              onClick={() => goToChartSlide(i)}
-              className={`rounded-full transition-all duration-300 ease-in-out ${
-                chartSlide === i
-                  ? 'w-6 h-2 bg-sky-500/90 shadow shadow-sky-500/20'
-                  : 'w-2 h-2 bg-neutral-700 hover:bg-neutral-600'
-              }`}
-            />
-          ))}
-        </div>
+        {/* Carousel pagination dots — hidden in daily view (category chart only) */}
+        {showMultiChartViews && (
+          <div
+            dir="ltr"
+            className={`flex flex-row justify-center items-center gap-2 ${chartSlide === 2 && selectedTrendPoint ? 'mt-4' : 'mt-5'}`}
+            role="tablist"
+            aria-label={tr('analyticsViews')}
+          >
+            {ANALYTICS_CHART_ORDER.map((i) => (
+              <button
+                key={i}
+                type="button"
+                role="tab"
+                aria-selected={chartSlide === i}
+                aria-label={`${tr('viewPrefix')} ${i + 1}`}
+                onClick={() => goToChartSlide(i)}
+                className={`rounded-full transition-all duration-300 ease-in-out ${
+                  chartSlide === i
+                    ? 'w-6 h-2 bg-sky-500/90 shadow shadow-sky-500/20'
+                    : 'w-2 h-2 bg-neutral-700 hover:bg-neutral-600'
+                }`}
+              />
+            ))}
+          </div>
+        )}
 
-        {/* Detailed category list — companion to View 1 only */}
+        {/* Detailed category list — companion to category chart (always visible in daily view) */}
         {chartSlide === 0 && (
-        <div className="mt-8 space-y-5">
+        <div className={`space-y-5 ${showMultiChartViews ? 'mt-8' : 'mt-6'}`}>
           {breakdown.length === 0 ? (
             <div className="text-center py-12">
               <div className="bg-neutral-900 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -1665,249 +1934,13 @@ interface Envelope {
   isGeneral: boolean;
 }
 
-/** Currency settings shortcuts — unified purple branding. */
-interface SpendingDonutProps {
-  dayExpenses: Expense[];
-  categories: Category[];
-  selectedDateIso: string;
-  dateLabel: string;
-  onSelectDate: (isoDate: string) => void;
-  onPreviousDay: () => void;
-  onNextDay: () => void;
-  isNotCurrentMonth: boolean;
-  onNavigateToAnalytics: () => void;
-  onNavigateToExpenses: () => void;
-}
-
-// Compact donut of how much was spent per category on the selected day.
-function SpendingDonut({
-  dayExpenses,
-  categories,
-  selectedDateIso,
-  dateLabel,
-  onSelectDate,
-  onPreviousDay,
-  onNextDay,
-  isNotCurrentMonth,
-  onNavigateToAnalytics,
-  onNavigateToExpenses,
-}: SpendingDonutProps) {
-  const { tr } = useLanguage();
-  const dateInputRef = useRef<HTMLInputElement | null>(null);
-  const shortcutButtons = (
-    <div className="ms-auto flex max-w-full flex-row flex-nowrap items-center justify-end gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch] no-scrollbar md:gap-3">
-      <button
-        type="button"
-        onClick={onNavigateToAnalytics}
-        className={utilityNavShortcutClass}
-      >
-        {tr('tabAnalytics')}
-      </button>
-      <button
-        type="button"
-        onClick={onNavigateToExpenses}
-        className={utilityNavShortcutClass}
-      >
-        {tr('tabExpenses')}
-      </button>
-    </div>
-  );
-  const total = sumMoney(dayExpenses.map((expense) => expense.amount));
-  const breakdown = aggregateByCategory(dayExpenses, categories);
-
-  const donutData =
-    breakdown.length > 0
-      ? breakdown.map((b) => ({ id: b.value, value: b.amount, hex: b.hex }))
-      : [{ id: 'empty', value: 1, hex: '#262626' }];
-
-  const handleOpenDatePicker = () => {
-    const inputEl = dateInputRef.current;
-    if (!inputEl) return;
-    const pickerCapable = inputEl as HTMLInputElement & { showPicker?: () => void };
-    if (typeof pickerCapable.showPicker === 'function') {
-      pickerCapable.showPicker();
-      return;
-    }
-    inputEl.click();
-  };
-
-  return (
-    <div className={`${themeCardClass} p-4 sm:p-6 mb-6 sm:mb-8`}>
-      <h2 className={`mb-3 flex items-center gap-2 text-base font-semibold sm:text-lg ${typographyTitleClass}`}>
-        <PieChartIcon className="h-5 w-5 shrink-0 text-emerald-400" />
-        {tr('expenseByCategory')}
-      </h2>
-
-      <div
-        dir="ltr"
-        className="mb-4 flex items-center justify-center gap-2 sm:gap-3"
-      >
-        <button
-          type="button"
-          onClick={onPreviousDay}
-          aria-label={tr('prevDay')}
-          title={tr('prevDay')}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-transparent text-neutral-400 transition-all hover:border-neutral-700 hover:bg-neutral-800 hover:text-neutral-100 active:scale-95"
-        >
-          <ChevronLeft className="h-5 w-5" />
-        </button>
-        <button
-          type="button"
-          onClick={handleOpenDatePicker}
-          className="relative flex min-w-[7.5rem] items-center justify-center gap-1.5 rounded-lg px-2 py-1 text-center text-sm font-medium tabular-nums text-neutral-300 transition-colors hover:bg-neutral-800 hover:text-neutral-100"
-          aria-label={tr('date')}
-          title={tr('date')}
-        >
-          <CalendarDays className="h-3.5 w-3.5 shrink-0 text-neutral-400" />
-          <span>{dateLabel}</span>
-          <input
-            ref={dateInputRef}
-            type="date"
-            value={selectedDateIso}
-            onChange={(event) => onSelectDate(normalizeDate(event.target.value))}
-            className="pointer-events-none absolute inset-0 h-full w-full opacity-0"
-            tabIndex={-1}
-            aria-hidden
-          />
-        </button>
-        <button
-          type="button"
-          onClick={onNextDay}
-          aria-label={tr('nextDay')}
-          title={tr('nextDay')}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-transparent text-neutral-400 transition-all hover:border-neutral-700 hover:bg-neutral-800 hover:text-neutral-100 active:scale-95"
-        >
-          <ChevronRight className="h-5 w-5" />
-        </button>
-      </div>
-
-      {breakdown.length === 0 ? (
-        <>
-          <div className="mb-4 mt-2 max-w-full">{shortcutButtons}</div>
-          <div className="py-8 text-center">
-            <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-neutral-800">
-              <TrendingDown className="h-7 w-7 text-neutral-500" />
-            </div>
-            <p className="text-neutral-400">{tr('noExpensesOnDate')}</p>
-            <p className="mt-1 text-sm text-neutral-500">{tr('addExpenseToSeeBreakdown')}</p>
-          </div>
-        </>
-      ) : (
-        <div className="flex max-w-full flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="order-2 flex min-w-0 flex-col items-center gap-6 sm:order-1 sm:flex-1 sm:flex-row sm:items-center">
-            <div className="relative h-44 w-44 shrink-0 pointer-events-none">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={donutData}
-                    dataKey="value"
-                    nameKey="id"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius="64%"
-                    outerRadius="100%"
-                    paddingAngle={breakdown.length > 1 ? 2 : 0}
-                    stroke="#0a0a0a"
-                    strokeWidth={2}
-                    isAnimationActive={false}
-                  >
-                    {donutData.map((s) => (
-                      <Cell key={s.id} fill={s.hex} />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                <DisplayMoney amount={total} className="text-xl font-bold leading-none" />
-                <span className="mt-1 text-[11px] text-neutral-500">{tr('totalShort')}</span>
-              </div>
-            </div>
-
-            <CategoryBreakdownLegend items={breakdown} layout="grid" />
-          </div>
-
-          <div className="order-1 mb-4 mt-2 max-w-full shrink-0 sm:order-2 sm:mb-0 sm:mt-0 sm:self-start">
-            {shortcutButtons}
-          </div>
-        </div>
-      )}
-
-      {isNotCurrentMonth && (
-        <p className="mt-4 text-center text-xs leading-relaxed text-neutral-400">
-          {tr('expenseByCategoryPastMonthFootnote')}
-        </p>
-      )}
-    </div>
-  );
-}
-
-interface DashboardCategoryChartProps {
-  expenses: Expense[];
-  categories: Category[];
-  chartDateSetterRef: MutableRefObject<((iso: string) => void) | null>;
-  initialChartDateIso: string;
-  isCurrentCalendarMonth: boolean;
-  onNavigateToAnalytics: () => void;
-  onNavigateToExpenses: () => void;
-}
-
-// Mounts only on the Home tab; remounting picks today (current month) or the 1st (other months).
-function DashboardCategoryChart({
-  expenses,
-  categories,
-  chartDateSetterRef,
-  initialChartDateIso,
-  isCurrentCalendarMonth,
-  onNavigateToAnalytics,
-  onNavigateToExpenses,
-}: DashboardCategoryChartProps) {
-  const [selectedChartDate, setSelectedChartDate] = useState(() => initialChartDateIso);
-
-  useEffect(() => {
-    chartDateSetterRef.current = setSelectedChartDate;
-    return () => {
-      chartDateSetterRef.current = null;
-    };
-  }, [chartDateSetterRef]);
-
-  const dayExpenses = useMemo(
-    () => expenses.filter((e) => normalizeDate(e.date) === selectedChartDate),
-    [expenses, selectedChartDate]
-  );
-
-  const goToPreviousChartDay = () => {
-    setSelectedChartDate((prev) => shiftISODate(prev, -1));
-  };
-
-  const goToNextChartDay = () => {
-    setSelectedChartDate((prev) => shiftISODate(prev, 1));
-  };
-
-  return (
-    <SpendingDonut
-      dayExpenses={dayExpenses}
-      categories={categories}
-      selectedDateIso={selectedChartDate}
-      dateLabel={formatChartDateLabel(selectedChartDate)}
-      onSelectDate={setSelectedChartDate}
-      onPreviousDay={goToPreviousChartDay}
-      onNextDay={goToNextChartDay}
-      isNotCurrentMonth={!isCurrentCalendarMonth}
-      onNavigateToAnalytics={onNavigateToAnalytics}
-      onNavigateToExpenses={onNavigateToExpenses}
-    />
-  );
-}
-
 interface SubBudgetTrackerProps {
   budget: number;
   monthLabel: string;
   monthExpenses: Expense[];
   categories: Category[];
   subBudgets: Record<string, number>;
-  onAddSubBudget: (name: string, amount: number, colorClass: string) => void;
-  onSetSubBudget: (value: string, amount: number) => void;
-  onRemoveSubBudget: (value: string) => void;
+  onSaveSubBudgets: (draft: Record<string, number>) => Promise<void>;
 }
 
 function BudgetOverLimitBanner({ label }: { label: string }) {
@@ -1991,48 +2024,76 @@ function SubBudgetTracker({
   monthExpenses,
   categories,
   subBudgets,
-  onAddSubBudget,
-  onSetSubBudget,
-  onRemoveSubBudget,
+  onSaveSubBudgets,
 }: SubBudgetTrackerProps) {
   const { tr, ensureUserContents, formatMoney, dir, lang, displayCurrency } = useLanguage();
 
-  const subBudgetAmountPlaceholder = `${currencySymbol(displayCurrency)} ${tr('amountLabel')}`;
-  const [name, setName] = useState('');
-  const [amount, setAmount] = useState('');
-  const [newSubBudgetColor, setNewSubBudgetColor] = useState(DEFAULT_CATEGORY_COLOR);
   const [subChartSlide, setSubChartSlide] = useState(0);
   const [subChartDirection, setSubChartDirection] = useState<'forward' | 'backward'>('forward');
+  const [draftSubBudgets, setDraftSubBudgets] = useState<Record<string, number>>(() => ({ ...subBudgets }));
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    setDraftSubBudgets({ ...subBudgets });
+  }, [subBudgets, monthLabel]);
 
   const spentByCat = monthExpenses.reduce<Record<string, number>>((acc, e) => {
     acc[e.category] = (acc[e.category] || 0) + e.amount;
     return acc;
   }, {});
 
-  const budgetedValues = useMemo(
-    () =>
-      subBudgetCategoryKeys(subBudgets)
-        .filter((v) => subBudgets[v] > 0)
-        .sort(compareSubBudgetCategoryKeys),
-    [subBudgets],
+  const categoryValues = useMemo(
+    () => categories.map((c) => c.value).sort(compareSubBudgetCategoryKeys),
+    [categories],
   );
 
   useEffect(() => {
-    void ensureUserContents(budgetedValues);
-  }, [budgetedValues, ensureUserContents]);
+    void ensureUserContents(categoryValues);
+  }, [categoryValues, ensureUserContents]);
 
-  const allocatedTotal = sumMoney(budgetedValues.map((value) => subBudgets[value]));
+  const hasChanges = useMemo(
+    () =>
+      categoryValues.some(
+        (value) =>
+          roundMoneyAmount(draftSubBudgets[value] ?? 0) !== roundMoneyAmount(subBudgets[value] ?? 0),
+      ),
+    [categoryValues, draftSubBudgets, subBudgets],
+  );
+
+  const updateDraftSubBudget = useCallback((categoryValue: string, amount: number | null) => {
+    setDraftSubBudgets((prev) => {
+      const next = { ...prev };
+      if (amount === null || amount <= 0) {
+        delete next[categoryValue];
+      } else {
+        next[categoryValue] = roundMoneyAmount(amount);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleSaveChanges = useCallback(async () => {
+    if (!hasChanges || isSaving) return;
+    setIsSaving(true);
+    try {
+      await onSaveSubBudgets(draftSubBudgets);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [draftSubBudgets, hasChanges, isSaving, onSaveSubBudgets]);
+
+  const allocatedTotal = sumMoney(categoryValues.map((value) => draftSubBudgets[value] ?? 0));
   const generalAllocated = roundMoneyAmount(Math.max(0, budget - allocatedTotal));
 
   // Spending that falls outside any budgeted category draws from the General pool.
   const unbudgetedSpent = Object.entries(spentByCat)
-    .filter(([v]) => !budgetedValues.includes(v))
+    .filter(([v]) => !categoryValues.includes(v))
     .reduce((s, [, amt]) => roundMoneyAmount(s + amt), 0);
 
   const totalSpent = sumMoney(monthExpenses.map((expense) => expense.amount));
 
   const envelopes: Envelope[] = useMemo(() => {
-    const list: Envelope[] = budgetedValues.map((v) => {
+    const list: Envelope[] = categoryValues.map((v) => {
       const cat = lookupCategory(v, categories);
       return {
         key: v,
@@ -2040,7 +2101,7 @@ function SubBudgetTracker({
         icon: cat.icon,
         color: cat.color,
         hex: hexForColor(cat.color),
-        allocated: subBudgets[v],
+        allocated: draftSubBudgets[v] ?? 0,
         spent: spentByCat[v] || 0,
         isGeneral: false,
       };
@@ -2061,9 +2122,9 @@ function SubBudgetTracker({
 
     return list;
   }, [
-    budgetedValues,
+    categoryValues,
     categories,
-    subBudgets,
+    draftSubBudgets,
     spentByCat,
     generalAllocated,
     unbudgetedSpent,
@@ -2086,7 +2147,7 @@ function SubBudgetTracker({
   const subCategoryCharts = useMemo(
     () =>
       envelopes
-        .filter((env) => !env.isGeneral && env.allocated > 0)
+        .filter((env) => !env.isGeneral && (env.allocated > 0 || env.spent > 0))
         .map((env) => ({
           ...env,
           spentAmount: Math.min(env.spent, env.allocated),
@@ -2135,27 +2196,6 @@ function SubBudgetTracker({
     }),
     [],
   );
-
-  const handleAdd = () => {
-    const parsed = parseMoneyInput(amount);
-    if (!name.trim() || parsed === null || !(parsed > 0)) return;
-
-    const resolveIlsAmount = async (): Promise<number | null> => {
-      if (displayCurrency === 'ILS') return roundMoneyAmount(parsed);
-      const rates = getCachedExchangeRates() ?? (await fetchExchangeRates().catch(() => null));
-      if (!rates) return null;
-      const converted = convertForeignToIls(parsed, displayCurrency, rates);
-      return converted == null ? null : roundMoneyAmount(converted);
-    };
-
-    void resolveIlsAmount().then((ilsAmount) => {
-      if (ilsAmount == null || !(ilsAmount > 0)) return;
-      onAddSubBudget(name, ilsAmount, newSubBudgetColor);
-      setName('');
-      setAmount('');
-      setNewSubBudgetColor(DEFAULT_CATEGORY_COLOR);
-    });
-  };
 
   return (
     <div className={`${themeCardClass} p-4 sm:p-6 mb-6 sm:mb-8`}>
@@ -2282,18 +2322,7 @@ function SubBudgetTracker({
                   })}
                 </div>
 
-                <div className={`relative w-full overflow-hidden p-3 pb-14 sm:p-4 sm:pb-16 ${subCardClass}`}>
-                  {subCategoryCharts[subChartSlide] && (
-                    <button
-                      type="button"
-                      onClick={() => onRemoveSubBudget(subCategoryCharts[subChartSlide].key)}
-                      className="absolute bottom-3 right-3 z-30 inline-flex max-w-[calc(100%-1.5rem)] items-center justify-center rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-300 transition-colors hover:bg-rose-500/20 sm:bottom-4 sm:right-4"
-                      title={tr('removeSubBudget')}
-                      aria-label={tr('removeSubBudget')}
-                    >
-                      <span className="truncate">{tr('removeSubBudget')}</span>
-                    </button>
-                  )}
+                <div className={`relative w-full overflow-hidden p-3 sm:p-4 ${subCardClass}`}>
                   <AnimatePresence mode="popLayout" initial={false}>
                     {activeSubChart && (
                       <motion.div
@@ -2413,123 +2442,72 @@ function SubBudgetTracker({
             )}
           </div>
 
-          {/* Management: add / edit sub-budgets */}
-          <div className="mt-6 pt-5 border-t border-neutral-800">
-            <p className="text-xs font-medium text-neutral-400 mb-2">{tr('addOrUpdateSubBudget')}</p>
-            <datalist id="subbudget-categories">
-              {categories.map((c) => (
-                <option key={c.value} value={c.label} />
-              ))}
-            </datalist>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <input
-                type="text"
-                list="subbudget-categories"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder={tr('addSubBudgetPlaceholder')}
-                className={`flex-1 min-w-0 px-3 py-2.5 text-sm ${surfaceInputSmClass}`}
-              />
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={amount}
-                  onChange={(e) => setAmount(sanitizeMoneyInputDraft(e.target.value))}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleAdd();
-                    }
-                  }}
-                  placeholder={subBudgetAmountPlaceholder}
-                  className={`w-28 sm:w-32 px-3 py-2.5 text-sm ${surfaceInputSmClass}`}
-                />
+          {/* Per-category budget limits (1:1 with categories list) */}
+          <div className="mt-6 border-t border-neutral-800 pt-5">
+            <p className="mb-2 text-xs font-medium text-neutral-400">{tr('addOrUpdateSubBudget')}</p>
+            <div className="space-y-2">
+              {categories.map((cat) => {
+                const catHex = hexForColor(cat.color);
+                const allocated = draftSubBudgets[cat.value] ?? 0;
+                return (
+                  <div key={cat.value} className="flex items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white/20"
+                      style={{ backgroundColor: catHex }}
+                    />
+                    <span className={`flex-1 truncate text-sm ${typographyLabelClass}`}>
+                      <LocalizedUserText text={cat.value} />
+                    </span>
+                    <LtrNumeric className="text-sm text-neutral-500">
+                      {currencySymbol(displayCurrency)}
+                    </LtrNumeric>
+                    <MoneyAmountInput
+                      value={allocated}
+                      displayCurrency={displayCurrency}
+                      onCommit={(amount) => updateDraftSubBudget(cat.value, amount)}
+                      className={`w-24 text-left ${surfaceInputSmClass}`}
+                    />
+                  </div>
+                );
+              })}
+              <div className="flex items-center justify-between pt-1 text-xs">
+                <LtrNumeric className="text-neutral-500">
+                  {tr('allocated')}:{' '}
+                  <DisplayMoney amount={allocatedTotal} className="inline-block" /> /{' '}
+                  <DisplayMoney amount={budget} className="inline-block" />
+                </LtrNumeric>
+                <LtrNumeric
+                  className={
+                    allocatedTotal > budget ? 'text-rose-400 font-medium' : 'text-neutral-500'
+                  }
+                >
+                  {allocatedTotal > budget ? (
+                    <>
+                      {tr('overBudget')}:{' '}
+                      <DisplayMoney
+                        amount={allocatedTotal - budget}
+                        className="inline-block font-medium"
+                      />
+                    </>
+                  ) : (
+                    <>
+                      {tr('unallocated')}:{' '}
+                      <DisplayMoney amount={generalAllocated} className="inline-block" />
+                    </>
+                  )}
+                </LtrNumeric>
+              </div>
+              <div className={`flex pt-3 ${dir === 'rtl' ? 'justify-end' : 'justify-start'}`}>
                 <button
                   type="button"
-                  onClick={handleAdd}
-                  className={`shrink-0 px-4 py-2.5 rounded-lg text-sm flex items-center justify-center gap-1 ${primaryActionButtonClass}`}
+                  onClick={() => void handleSaveChanges()}
+                  disabled={!hasChanges || isSaving}
+                  className={`rounded-lg px-4 py-2 text-sm transition-all hover:brightness-110 active:scale-95 ${primaryActionButtonClass} ${primaryActionDisabled}`}
                 >
-                  <Plus className="w-4 h-4" />
-                  {tr('add')}
+                  {isSaving ? tr('subBudgetSaving') : tr('subBudgetSaveChanges')}
                 </button>
               </div>
             </div>
-
-            <div className="mt-4">
-              <CategoryColorPicker
-                value={newSubBudgetColor}
-                onChange={setNewSubBudgetColor}
-                label={tr('newCategoryColor')}
-              />
-              <p className="text-[11px] text-neutral-500 mt-2">
-                {tr('categoryColorHint')}
-              </p>
-            </div>
-
-            {/* Quick-edit allocations for existing sub-budgets */}
-            {budgetedValues.length > 0 && (
-              <div className="mt-3 space-y-2">
-                {budgetedValues.map((v) => {
-                  const cat = categories.find((c) => c.value === v);
-                  const catHex = hexForColor(cat?.color ?? 'bg-gray-500');
-                  return (
-                    <div key={v} className="flex items-center gap-2">
-                      <span
-                        className="w-2.5 h-2.5 rounded-full shrink-0 ring-1 ring-white/20"
-                        style={{ backgroundColor: catHex }}
-                      />
-                      <span className={`text-sm flex-1 truncate ${typographyLabelClass}`}>
-                        {v === GENERAL_KEY ? (
-                          tr('generalUnallocated')
-                        ) : (
-                          <LocalizedUserText text={v} />
-                        )}
-                      </span>
-                      <LtrNumeric className="text-neutral-500 text-sm">
-                        {currencySymbol(displayCurrency)}
-                      </LtrNumeric>
-                      <MoneyAmountInput
-                        value={subBudgets[v] ?? 0}
-                        displayCurrency={displayCurrency}
-                        onCommit={(amount) => {
-                          if (amount === null || amount <= 0) onRemoveSubBudget(v);
-                          else onSetSubBudget(v, amount);
-                        }}
-                        className={`w-24 text-left ${surfaceInputSmClass}`}
-                      />
-                    </div>
-                  );
-                })}
-                <div className="flex items-center justify-between pt-1 text-xs">
-                  <LtrNumeric className="text-neutral-500">
-                    {tr('allocated')}:{' '}
-                    <DisplayMoney amount={allocatedTotal} className="inline-block" /> /{' '}
-                    <DisplayMoney amount={budget} className="inline-block" />
-                  </LtrNumeric>
-                  <LtrNumeric
-                    className={
-                      allocatedTotal > budget ? 'text-rose-400 font-medium' : 'text-neutral-500'
-                    }
-                  >
-                    {allocatedTotal > budget ? (
-                      <>
-                        {tr('overBudget')}:{' '}
-                        <DisplayMoney
-                          amount={allocatedTotal - budget}
-                          className="inline-block font-medium"
-                        />
-                      </>
-                    ) : (
-                      <>
-                        {tr('unallocated')}:{' '}
-                        <DisplayMoney amount={generalAllocated} className="inline-block" />
-                      </>
-                    )}
-                  </LtrNumeric>
-                </div>
-              </div>
-            )}
           </div>
         </>
       )}
@@ -2705,20 +2683,6 @@ type FinancialCurrencyMenuLayout = {
   maxHeight: number;
 };
 
-/** Mobile: anchor inward per column; md+: centered dropdown (desktop layout). */
-function financialSummaryCurrencyMenuPositionClass(
-  anchor: FinancialSummaryCurrencyAnchor,
-): string {
-  switch (anchor) {
-    case 'budget':
-      return 'start-0 end-auto origin-top-start translate-x-0 md:start-auto md:end-auto md:left-1/2 md:origin-top md:-translate-x-1/2';
-    case 'status':
-      return 'end-0 start-auto origin-top-end translate-x-0 md:start-auto md:end-auto md:left-1/2 md:origin-top md:-translate-x-1/2';
-    default:
-      return 'left-1/2 origin-top -translate-x-1/2';
-  }
-}
-
 function computeFinancialCurrencyMenuLayout(
   trigger: HTMLElement,
   anchor: FinancialSummaryCurrencyAnchor,
@@ -2762,22 +2726,6 @@ function computeFinancialCurrencyMenuLayout(
   }
 
   return { top, left, width, maxHeight };
-}
-
-function useMobileFinancialCurrencyMenu(): boolean {
-  const [mobile, setMobile] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches,
-  );
-
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 767px)');
-    const onChange = () => setMobile(mq.matches);
-    onChange();
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
-
-  return mobile;
 }
 
 const financialSummaryCurrencyMenuScrollClass =
@@ -2828,20 +2776,19 @@ function FinancialSummaryAmount({
 }) {
   const { tr, dir } = useLanguage();
   const isOpen = menuAnchor === activeMenuAnchor;
-  const isMobileMenu = useMobileFinancialCurrencyMenu();
   const symbolButtonRef = useRef<HTMLButtonElement>(null);
-  const [mobileMenuLayout, setMobileMenuLayout] = useState<FinancialCurrencyMenuLayout | null>(null);
+  const [currencyMenuLayout, setCurrencyMenuLayout] = useState<FinancialCurrencyMenuLayout | null>(null);
 
   useLayoutEffect(() => {
-    if (!isOpen || !isMobileMenu) {
-      setMobileMenuLayout(null);
+    if (!isOpen) {
+      setCurrencyMenuLayout(null);
       return;
     }
 
     const updateLayout = () => {
       const trigger = symbolButtonRef.current;
       if (!trigger) return;
-      setMobileMenuLayout(computeFinancialCurrencyMenuLayout(trigger, menuAnchor, dir));
+      setCurrencyMenuLayout(computeFinancialCurrencyMenuLayout(trigger, menuAnchor, dir));
     };
 
     updateLayout();
@@ -2856,7 +2803,7 @@ function FinancialSummaryAmount({
       visualViewport?.removeEventListener('resize', updateLayout);
       visualViewport?.removeEventListener('scroll', updateLayout);
     };
-  }, [isOpen, isMobileMenu, menuAnchor, dir]);
+  }, [isOpen, menuAnchor, dir]);
 
   const menuPanel = (
     <DisplayCurrencyInlineMenu onSelected={onCurrencyPicked} className="py-2" />
@@ -2869,10 +2816,10 @@ function FinancialSummaryAmount({
   return (
     <div
       ref={isOpen ? menuContainerRef : undefined}
-      className={`relative flex w-full min-w-0 max-w-full items-center justify-center overflow-visible ${FINANCIAL_SUMMARY_AMOUNT_CONTAINER_CLASS}`}
+      className={`relative flex w-full min-w-0 max-w-full items-center justify-center overflow-visible md:overflow-visible ${FINANCIAL_SUMMARY_AMOUNT_CONTAINER_CLASS}`}
     >
       <LtrNumeric className="inline-flex max-w-full min-w-0 items-baseline justify-center text-center font-bold leading-tight">
-        <span className="inline-flex min-w-0 max-w-full items-center gap-2 overflow-hidden">
+        <span className="inline-flex min-w-0 max-w-full items-center gap-2">
           <button
             ref={symbolButtonRef}
             type="button"
@@ -2892,16 +2839,16 @@ function FinancialSummaryAmount({
           </span>
         </span>
       </LtrNumeric>
-      {isOpen && isMobileMenu && mobileMenuLayout
+      {isOpen && currencyMenuLayout
         ? createPortal(
             <div
               ref={menuPortalRef}
-              className={`fixed z-[9999] px-1.5 ${financialSummaryCurrencyMenuScrollClass} ${filterDropdownWrapperClass}`}
+              className={`fixed z-[100] px-1.5 ${financialSummaryCurrencyMenuScrollClass} ${filterDropdownWrapperClass}`}
               style={{
-                top: mobileMenuLayout.top,
-                left: mobileMenuLayout.left,
-                width: mobileMenuLayout.width,
-                maxHeight: mobileMenuLayout.maxHeight,
+                top: currencyMenuLayout.top,
+                left: currencyMenuLayout.left,
+                width: currencyMenuLayout.width,
+                maxHeight: currencyMenuLayout.maxHeight,
               }}
             >
               {menuPanel}
@@ -2909,13 +2856,6 @@ function FinancialSummaryAmount({
             document.body,
           )
         : null}
-      {isOpen && !isMobileMenu ? (
-        <div
-          className={`absolute top-full z-[60] mt-1.5 w-[min(calc(100vw-1rem),18rem)] max-h-80 px-1.5 ${financialSummaryCurrencyMenuScrollClass} ${financialSummaryCurrencyMenuPositionClass(menuAnchor)} ${filterDropdownWrapperClass}`}
-        >
-          {menuPanel}
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -3003,15 +2943,13 @@ function App() {
 
   // Active top-level navigation tab.
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsInitialCurrencySections, setSettingsInitialCurrencySections] = useState<
+  const [profileInitialCurrencySections, setProfileInitialCurrencySections] = useState<
     ('display' | 'exchange' | 'manual-rate' | 'commissions')[] | null
   >(null);
-  const [profileOpen, setProfileOpen] = useState(false);
-  const settingsReturnTabRef = useRef<TabId>('dashboard');
+  const profileReturnTabRef = useRef<MainTabId>('dashboard');
   const [navOpen, setNavOpen] = useState(false);
-  const chartDateSetterRef = useRef<((iso: string) => void) | null>(null);
-  const isScrollRoute = profileOpen || settingsOpen;
+  const isProfileView = activeTab === 'profile';
+  const isScrollRoute = isProfileView;
 
   // Keep new-expense currency aligned with global display currency (Financial Summary shortcuts, Settings, etc.).
   useEffect(() => {
@@ -3023,64 +2961,46 @@ function App() {
   const handleTabSelect = (id: TabId) => {
     setActiveTab(id);
     setNavOpen(false);
-    setSettingsOpen(false);
-    setSettingsInitialCurrencySections(null);
-    setProfileOpen(false);
+    if (id !== 'profile') {
+      setProfileInitialCurrencySections(null);
+    }
   };
 
-  const openSettings = () => {
-    settingsReturnTabRef.current = activeTab;
-    setNavOpen(false);
-    setProfileOpen(false);
-    setSettingsInitialCurrencySections(null);
-    setSettingsOpen(true);
-  };
+  const openProfile = useCallback(
+    (currencySections?: ('display' | 'exchange' | 'manual-rate' | 'commissions')[] | null) => {
+      setNavOpen(false);
+      const sections = Array.isArray(currencySections) ? currencySections : null;
+      setProfileInitialCurrencySections(sections);
+      if (activeTab !== 'profile') {
+        profileReturnTabRef.current = activeTab as MainTabId;
+      }
+      setActiveTab('profile');
+    },
+    [activeTab],
+  );
 
   const openSettingsExchangeRates = useCallback(() => {
-    settingsReturnTabRef.current = activeTab;
-    setNavOpen(false);
-    setProfileOpen(false);
-    setSettingsInitialCurrencySections(['exchange']);
-    setSettingsOpen(true);
-  }, [activeTab]);
+    openProfile(['exchange']);
+  }, [openProfile]);
 
   const openSettingsManualRate = useCallback(() => {
-    settingsReturnTabRef.current = activeTab;
-    setNavOpen(false);
-    setProfileOpen(false);
-    setSettingsInitialCurrencySections(['manual-rate']);
-    setSettingsOpen(true);
-  }, [activeTab]);
+    openProfile(['manual-rate']);
+  }, [openProfile]);
 
   const openSettingsCommissions = useCallback(() => {
-    settingsReturnTabRef.current = activeTab;
-    setNavOpen(false);
-    setProfileOpen(false);
-    setSettingsInitialCurrencySections(['commissions']);
-    setSettingsOpen(true);
-  }, [activeTab]);
-
-  const openProfile = () => {
-    setNavOpen(false);
-    setSettingsOpen(false);
-    setProfileOpen(true);
-  };
+    openProfile(['commissions']);
+  }, [openProfile]);
 
   const handleQuickLanguageToggle = () => {
     const nextLang = lang === 'he' ? 'en' : 'he';
-    // Keep parity with SettingsPage language switch flow.
+    // Keep parity with profile settings language switch flow.
     writePreferredLanguage(nextLang);
     setLang(nextLang);
   };
 
   const closeProfile = () => {
-    setProfileOpen(false);
-  };
-
-  const closeSettings = () => {
-    setSettingsOpen(false);
-    setSettingsInitialCurrencySections(null);
-    setActiveTab(settingsReturnTabRef.current);
+    setProfileInitialCurrencySections(null);
+    setActiveTab(profileReturnTabRef.current);
   };
 
   const handleLogout = async () => {
@@ -3098,7 +3018,6 @@ function App() {
       setAvatarUrl(getGuestAvatarFromStorage());
       setNavOpen(false);
       setActiveTab('dashboard');
-      setProfileOpen(false);
       await signOutUser();
     } catch {
       // sign-out errors are rare; user state will sync via onAuthStateChanged
@@ -3243,11 +3162,6 @@ function App() {
     budget,
     formatMoney,
   ]);
-  const budgetInputLength = useMemo(() => budgetInput.trim().length, [budgetInput]);
-  const budgetInputFlexGrow = useMemo(() => {
-    if (budgetInputLength <= 4) return 1;
-    return Math.min(2.8, 1 + (budgetInputLength - 4) * 0.22);
-  }, [budgetInputLength]);
   const budgetInputVisibleLength = useMemo(() => {
     const typedLen = budgetInput.trim().length;
     if (typedLen > 0) return typedLen;
@@ -3264,7 +3178,6 @@ function App() {
   );
   const updateBudgetLabel = tr('updateBudget');
   const budgetSavedLabel = tr('budgetSaved');
-  const subBudgetsButtonLabel = tr('tabSubbudgets');
   const getBudgetButtonTextClass = useCallback((label: string): string => {
     const len = label.trim().length;
     if (len < 8) return 'text-sm sm:text-base leading-tight';
@@ -3835,8 +3748,6 @@ function App() {
       }));
       setExpenseRatesReady(true);
 
-      chartDateSetterRef.current?.(isoDate);
-
       const [y, m] = isoDate.split('-').map((n) => parseInt(n, 10));
       setSelectedDate(new Date(y, m - 1, 1));
     });
@@ -3990,78 +3901,44 @@ function App() {
     resetCategoryForm();
   };
 
-  // Sub-budget handlers ------------------------------------------------------
-  // Adds/updates a sub-budget. If the category doesn't exist yet, it's created
-  // on the fly (matching by value or label, case-insensitive).
-  const handleAddSubBudget = (rawName: string, amount: number, colorClass: string) => {
-    const trimmed = rawName.trim();
-    if (!trimmed || trimmed === ADD_CUSTOM_VALUE || !(amount > 0)) return;
-
-    const chosenColor = isValidCategoryColor(colorClass) ? colorClass : DEFAULT_CATEGORY_COLOR;
-
-    const existing = allCategories.find(
-      (c) =>
-        c.value.toLowerCase() === trimmed.toLowerCase() ||
-        c.label.toLowerCase() === trimmed.toLowerCase()
-    );
-
-    let value = existing?.value;
-    if (!value) {
-      setCustomCategories((prev) => [
-        ...prev,
-        { value: trimmed, label: trimmed, color: chosenColor, iconName: ICON_OPTIONS[0].name },
-      ]);
-      value = trimmed;
-    }
-
-    const key = value as string;
-    patchSubBudgetsByMonth(selectedMonthKey, (monthMap) =>
-      markSubBudgetMonthInitialized({
-        ...monthMap,
-        [key]: roundMoneyAmount(amount),
-      }),
-    );
-  };
-
-  const handleSetSubBudget = (value: string, amount: number) => {
-    if (!isSubBudgetCategoryKey(value)) return;
-    patchSubBudgetsByMonth(selectedMonthKey, (monthMap) => {
-      const next =
-        amount > 0
-          ? { ...monthMap, [value]: roundMoneyAmount(amount) }
-          : withoutSubBudgetKey(monthMap, value);
-      return markSubBudgetMonthInitialized(next);
-    });
-  };
-
-  const handleRemoveSubBudget = (value: string) => {
-    if (!isSubBudgetCategoryKey(value)) return;
-    patchSubBudgetsByMonth(selectedMonthKey, (monthMap) => {
-      if (!(value in monthMap)) return monthMap;
-      return markSubBudgetMonthInitialized(withoutSubBudgetKey(monthMap, value));
-    });
-  };
+  // Sub-budget handlers — allocations are keyed by category ID (1:1 with categories).
+  const handleSaveSubBudgets = useCallback(
+    async (draft: Record<string, number>) => {
+      patchSubBudgetsByMonth(selectedMonthKey, (monthMap) => {
+        let next = { ...monthMap };
+        for (const cat of allCategories) {
+          if (!isSubBudgetCategoryKey(cat.value)) continue;
+          const amount = draft[cat.value] ?? 0;
+          next =
+            amount > 0
+              ? { ...next, [cat.value]: roundMoneyAmount(amount) }
+              : withoutSubBudgetKey(next, cat.value);
+        }
+        return markSubBudgetMonthInitialized(next);
+      });
+      if (user && !user.isAnonymous) {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 450));
+      }
+    },
+    [allCategories, patchSubBudgetsByMonth, selectedMonthKey, user],
+  );
 
   // Month navigation (selectedMonthKey is derived above with budget/subBudgets).
   const monthLabel = selectedDate.toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US', { month: 'long', year: 'numeric' });
   const isCurrentMonth = selectedMonthKey === monthKeyOfDate(new Date());
-  const syncCategoryChartDateForMonth = (monthDate: Date) => {
-    chartDateSetterRef.current?.(chartDateIsoForMonth(monthDate));
-  };
-
   const goToMonth = (offset: number) => {
-    setSelectedDate((d) => {
-      const next = new Date(d.getFullYear(), d.getMonth() + offset, 1);
-      syncCategoryChartDateForMonth(next);
-      return next;
-    });
+    setSelectedDate((d) => new Date(d.getFullYear(), d.getMonth() + offset, 1));
   };
 
   const goToCurrentMonth = () => {
     const now = new Date();
-    const next = new Date(now.getFullYear(), now.getMonth(), 1);
-    syncCategoryChartDateForMonth(now);
-    setSelectedDate(next);
+    setSelectedDate(new Date(now.getFullYear(), now.getMonth(), 1));
+  };
+
+  const handleMonthKeySelect = (monthKey: string) => {
+    const [y, m] = monthKey.split('-').map((n) => parseInt(n, 10));
+    if (!y || !m) return;
+    setSelectedDate(new Date(y, m - 1, 1));
   };
 
   // Expenses for the selected month only (filtered by ISO date).
@@ -4213,45 +4090,18 @@ function App() {
       });
   }, [expenses]);
 
-  // Reusable month selector (used on Dashboard & Sub-Budgets pages).
+  // Reusable month selector card (Sub-Budgets tab).
   const monthSelector = (
     <div className={`${themeCardClass} p-3 sm:p-4 mb-6 sm:mb-8`}>
-      <div dir="ltr" className="flex items-center justify-between gap-2">
-        <button
-          onClick={() => goToMonth(-1)}
-          className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl text-neutral-400 hover:bg-neutral-800 active:scale-95 transition-all"
-          aria-label={tr('prevMonth')}
-          title={tr('prevMonth')}
-        >
-          <ChevronLeft className="w-6 h-6" />
-        </button>
-
-        <div className="flex flex-col items-center min-w-0">
-          <div className="flex items-center gap-2 text-neutral-100">
-            <CalendarDays className="w-5 h-5 text-emerald-400 shrink-0" />
-            <span className="text-base sm:text-lg font-semibold capitalize truncate">
-              {monthLabel}
-            </span>
-          </div>
-          {!isCurrentMonth && (
-            <button
-              onClick={goToCurrentMonth}
-              className="mt-0.5 text-xs font-medium text-emerald-400 hover:text-emerald-300 active:opacity-70 transition-colors"
-            >
-              {tr('backToCurrentMonth')}
-            </button>
-          )}
-        </div>
-
-        <button
-          onClick={() => goToMonth(1)}
-          className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl text-neutral-400 hover:bg-neutral-800 active:scale-95 transition-all"
-          aria-label={tr('nextMonth')}
-          title={tr('nextMonth')}
-        >
-          <ChevronRight className="w-6 h-6" />
-        </button>
-      </div>
+      <MonthNavigationBar
+        monthLabel={monthLabel}
+        monthValue={selectedMonthKey}
+        isCurrentMonth={isCurrentMonth}
+        onPrev={() => goToMonth(-1)}
+        onNext={() => goToMonth(1)}
+        onGoToCurrent={goToCurrentMonth}
+        onMonthChange={handleMonthKeySelect}
+      />
     </div>
   );
 
@@ -4345,23 +4195,12 @@ function App() {
               >
                 <Globe className="h-4 w-4 sm:h-5 sm:w-5" />
               </button>
-              <UserProfileMenu
-                avatarUrl={currentAvatarUrl}
-                onOpenProfile={openProfile}
-                onOpenSettings={openSettings}
-                onLogout={handleLogout}
-              />
-              {!settingsOpen && (
-                <CollapsibleNavMenu
-                  variant="mobile"
-                  activeTab={activeTab}
-                  open={navOpen}
-                  onOpenChange={setNavOpen}
-                  onTabSelect={handleTabSelect}
-                  userEmail={userDisplayLabel}
-                  onLogout={handleLogout}
+              <div className="hidden md:block">
+                <UserProfileMenu
+                  avatarUrl={currentAvatarUrl}
+                  onOpenProfile={() => openProfile()}
                 />
-              )}
+              </div>
               <CollapsibleNavMenu
                 variant="desktop"
                 activeTab={activeTab}
@@ -4374,25 +4213,16 @@ function App() {
         </div>
       </header>
 
-      {!settingsOpen && navOpen && (
-        <button
-          type="button"
-          aria-label={tr('closeMenu')}
-          onClick={() => setNavOpen(false)}
-          className="fixed top-[64px] inset-x-0 bottom-0 z-40 bg-black/50 backdrop-blur-sm transition-opacity duration-300 md:hidden"
-        />
-      )}
-
       <div className={isScrollRoute ? themeScrollRouteShellClass : 'relative flex min-h-0 flex-1 flex-col'}>
       <main
         className={[
           'relative z-0 mx-auto w-full max-w-5xl min-h-0 flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8',
           isScrollRoute
             ? `${themeScrollViewportClass} ${themeScrollSafeContentClass}`
-            : `${themeAntiClipVisibleClass} pb-24 md:pb-10`,
+            : `${themeAntiClipVisibleClass} max-md:pb-24 md:pb-10`,
         ].join(' ')}
       >
-        {profileOpen ? (
+        {isProfileView ? (
           <ProfilePage
             user={user}
             userName={userName}
@@ -4400,25 +4230,43 @@ function App() {
             googleAvatarUrl={googleAvatarUrl}
             onBack={closeProfile}
             onSaveAvatar={handleSaveAvatar}
-          />
-        ) : settingsOpen ? (
-          <SettingsPage
-            onBack={closeSettings}
+            onLogout={handleLogout}
             recentExpenseCurrencies={recentExpenseCurrencies}
-            initialCurrencySections={settingsInitialCurrencySections}
+            initialCurrencySections={profileInitialCurrencySections}
           />
         ) : (
           <>
         {/* ============================ DASHBOARD ============================ */}
         {activeTab === 'dashboard' && (
           <>
-            {monthSelector}
-
             {/* Financial summary — row 2 uses a fixed height so all three amount cells share one baseline */}
-            <div className={`mb-6 ${themeCardClass} p-4 shadow-sm sm:mb-8 sm:p-6`}>
-              <h2 className={`mb-4 text-lg font-bold md:text-xl ${typographyTitleClass}`}>{tr('financialSummaryTitle')}</h2>
-              <div className={`overflow-visible p-3 sm:p-4 ${filterInsetPanelClass}`}>
-              <table className="w-full table-fixed border-collapse">
+            <div className={`mb-6 overflow-visible md:overflow-visible ${themeCardClass} p-4 shadow-sm sm:mb-8 sm:p-6`}>
+              <div
+                dir={dir}
+                className="relative mb-4 grid grid-cols-1 items-center gap-y-3 sm:min-h-[3.5rem] sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:gap-x-2"
+              >
+                <div className="pointer-events-none max-w-fit shrink-0 justify-self-start sm:col-start-1 sm:row-start-1">
+                  <h2 className={`text-start text-lg font-bold md:text-xl ${typographyTitleClass}`}>
+                    {tr('financialSummaryTitle')}
+                  </h2>
+                </div>
+                <div className="relative z-50 w-full max-w-[min(100%,20rem)] justify-self-center px-1 sm:col-start-2 sm:row-start-1">
+                  <MonthNavigationBar
+                    compact
+                    className="pointer-events-auto"
+                    monthLabel={monthLabel}
+                    monthValue={selectedMonthKey}
+                    isCurrentMonth={isCurrentMonth}
+                    onPrev={() => goToMonth(-1)}
+                    onNext={() => goToMonth(1)}
+                    onGoToCurrent={goToCurrentMonth}
+                    onMonthChange={handleMonthKeySelect}
+                  />
+                </div>
+                <div className="hidden min-w-0 sm:col-start-3 sm:block" aria-hidden />
+              </div>
+              <div className={`overflow-visible md:overflow-visible p-3 sm:p-4 ${filterInsetPanelClass}`}>
+              <table className="w-full table-fixed border-collapse overflow-visible md:overflow-visible">
                 <tbody>
                   <tr>
                     <td className="w-1/3 border-x border-[var(--surface-input-border)] px-2 pb-2 text-center align-bottom">
@@ -4438,8 +4286,8 @@ function App() {
                     </td>
                   </tr>
                   <tr>
-                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] overflow-visible border-x border-[var(--surface-input-border)] px-1 text-center align-middle sm:px-2">
-                      <div className={`flex h-full min-h-0 w-full items-center justify-center overflow-visible ${FINANCIAL_SUMMARY_AMOUNT_CONTAINER_CLASS}`}>
+                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] overflow-visible md:overflow-visible border-x border-[var(--surface-input-border)] px-1 text-center align-middle sm:px-2">
+                      <div className={`flex h-full min-h-0 w-full items-center justify-center overflow-visible md:overflow-visible ${FINANCIAL_SUMMARY_AMOUNT_CONTAINER_CLASS}`}>
                         <FinancialSummaryAmount
                           parts={selectedBudgetDisplayParts}
                           amountClassName={typographyBodyClass}
@@ -4452,8 +4300,8 @@ function App() {
                         />
                       </div>
                     </td>
-                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] overflow-visible border-x border-[var(--surface-input-border)] px-1 text-center align-middle sm:px-2">
-                      <div className={`flex h-full min-h-0 w-full items-center justify-center overflow-visible ${FINANCIAL_SUMMARY_AMOUNT_CONTAINER_CLASS}`}>
+                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] overflow-visible md:overflow-visible border-x border-[var(--surface-input-border)] px-1 text-center align-middle sm:px-2">
+                      <div className={`flex h-full min-h-0 w-full items-center justify-center overflow-visible md:overflow-visible ${FINANCIAL_SUMMARY_AMOUNT_CONTAINER_CLASS}`}>
                         <FinancialSummaryAmount
                           parts={totalExpensesDisplayParts}
                           amountClassName={isOverBudget ? 'text-rose-400' : typographyBodyClass}
@@ -4466,8 +4314,8 @@ function App() {
                         />
                       </div>
                     </td>
-                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] overflow-visible border-x border-[var(--surface-input-border)] px-1 text-center align-middle sm:px-2">
-                      <div className={`flex h-full min-h-0 w-full items-center justify-center overflow-visible ${FINANCIAL_SUMMARY_AMOUNT_CONTAINER_CLASS}`}>
+                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] overflow-visible md:overflow-visible border-x border-[var(--surface-input-border)] px-1 text-center align-middle sm:px-2">
+                      <div className={`flex h-full min-h-0 w-full items-center justify-center overflow-visible md:overflow-visible ${FINANCIAL_SUMMARY_AMOUNT_CONTAINER_CLASS}`}>
                         <FinancialSummaryAmount
                           parts={remainingDisplayParts}
                           amountClassName={isOverBudget ? 'text-rose-400' : typographyBodyClass}
@@ -4491,6 +4339,29 @@ function App() {
                 </tbody>
               </table>
               </div>
+              <div
+                dir={dir}
+                className="mt-4 flex w-full flex-row flex-nowrap justify-start gap-2 overflow-x-auto pt-2 [-webkit-overflow-scrolling:touch] no-scrollbar sm:gap-3 sm:pt-4"
+              >
+                <button
+                  type="button"
+                  onClick={openSettingsManualRate}
+                  className={currencyUtilityButtonClass}
+                  title={tr('settingsCurrencySubManualRate')}
+                  aria-label={tr('settingsCurrencySubManualRate')}
+                >
+                  {tr('settingsCurrencySubManualRate')}
+                </button>
+                <button
+                  type="button"
+                  onClick={openSettingsCommissions}
+                  className={currencyUtilityButtonClass}
+                  title={tr('settingsCurrencySubCommissions')}
+                  aria-label={tr('settingsCurrencySubCommissions')}
+                >
+                  {tr('settingsCurrencySubCommissions')}
+                </button>
+              </div>
             </div>
 
             {/* Monthly budget setter */}
@@ -4504,18 +4375,15 @@ function App() {
                   <label className={`mb-2 block text-sm font-medium ${typographyLabelClass}`}>
                     {tr('budgetAmountLabel')} ({currencySymbol(displayCurrency)})
                   </label>
-                  <div className="flex w-full min-w-0 items-center gap-1.5 overflow-hidden sm:gap-2">
-                    <div
-                      className="relative min-w-0 max-w-full basis-0 overflow-hidden transition-all duration-200 ease-in-out"
-                      style={{ flexGrow: budgetInputFlexGrow }}
-                    >
+                  <div className="flex w-full items-center justify-start gap-4">
+                    <div className="relative w-auto min-w-[12rem] max-w-full shrink-0 overflow-hidden sm:min-w-[250px] sm:max-w-sm">
                       <input
                         type="text"
                         inputMode="decimal"
                         value={budgetInput}
                         onChange={(e) => setBudgetInput(sanitizeMoneyInputDraft(e.target.value))}
                         placeholder={showBudgetCurrentAmountOverlay ? '' : tr('enterAmount')}
-                        className={`block h-10 w-full min-w-0 max-w-full truncate px-2 py-1.5 sm:h-12 sm:px-4 sm:py-3 ${budgetInputTextClass} ${surfaceInputClass}`}
+                        className={`block h-10 w-full truncate px-2 py-1.5 sm:h-12 sm:px-4 sm:py-3 ${budgetInputTextClass} ${surfaceInputClass}`}
                       />
                       {showBudgetCurrentAmountOverlay && (
                         <div
@@ -4541,7 +4409,7 @@ function App() {
                     <button
                       type="button"
                       onClick={handleSetBudget}
-                      className={`flex h-10 min-w-[40px] basis-0 flex-1 shrink flex-col items-center justify-center gap-0.5 overflow-hidden p-2 text-center sm:h-12 sm:min-w-[88px] ${primaryActionButtonClass}`}
+                      className={`flex h-10 flex-none shrink-0 flex-col items-center justify-center gap-0.5 overflow-hidden px-3 py-2 text-center sm:h-12 sm:px-4 ${primaryActionButtonClass}`}
                     >
                       {showBudgetSaved ? (
                         <>
@@ -4551,13 +4419,6 @@ function App() {
                       ) : (
                         renderBudgetButtonText(updateBudgetLabel)
                       )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleTabSelect('subbudgets')}
-                      className={`flex h-10 min-w-[40px] basis-0 flex-1 shrink flex-col items-center justify-center gap-0.5 overflow-hidden p-2 text-center sm:h-12 sm:min-w-[88px] ${utilityNavButtonLgClass}`}
-                    >
-                      {renderBudgetButtonText(subBudgetsButtonLabel)}
                     </button>
                   </div>
                   <div className="mt-2 flex w-full flex-col gap-2">
@@ -4574,29 +4435,6 @@ function App() {
                         className="ml-0 h-4 w-4 shrink-0 rounded border-gray-600 bg-neutral-800 text-emerald-500 focus:ring-emerald-500/30"
                       />
                     </label>
-                    <div
-                      dir={dir}
-                      className="flex w-full flex-row flex-nowrap gap-2 overflow-x-auto pb-2 [-webkit-overflow-scrolling:touch] no-scrollbar sm:pb-0"
-                    >
-                      <button
-                        type="button"
-                        onClick={openSettingsManualRate}
-                        className={currencyUtilityButtonClass}
-                        title={tr('settingsCurrencySubManualRate')}
-                        aria-label={tr('settingsCurrencySubManualRate')}
-                      >
-                        {tr('settingsCurrencySubManualRate')}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={openSettingsCommissions}
-                        className={currencyUtilityButtonClass}
-                        title={tr('settingsCurrencySubCommissions')}
-                        aria-label={tr('settingsCurrencySubCommissions')}
-                      >
-                        {tr('settingsCurrencySubCommissions')}
-                      </button>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -4697,16 +4535,6 @@ function App() {
           </form>
         </div>
 
-            {/* Spending by category (daily) */}
-            <DashboardCategoryChart
-              expenses={expenses}
-              categories={allCategories}
-              chartDateSetterRef={chartDateSetterRef}
-              initialChartDateIso={chartDateIsoForMonth(selectedDate)}
-              isCurrentCalendarMonth={isCurrentMonth}
-              onNavigateToAnalytics={() => handleTabSelect('analytics')}
-              onNavigateToExpenses={() => handleTabSelect('expenses')}
-            />
           </>
         )}
 
@@ -4726,9 +4554,7 @@ function App() {
               monthExpenses={monthExpenses}
               categories={allCategories}
               subBudgets={subBudgets}
-              onAddSubBudget={handleAddSubBudget}
-              onSetSubBudget={handleSetSubBudget}
-              onRemoveSubBudget={handleRemoveSubBudget}
+              onSaveSubBudgets={handleSaveSubBudgets}
             />
           </>
         )}
@@ -5118,8 +4944,13 @@ function App() {
         </div>
       )}
 
+      <MobileBottomNav
+        activeTab={activeTab}
+        onOpenProfile={() => openProfile()}
+        onTabSelect={handleTabSelect}
+      />
+
       {/* Footer (desktop only; mobile uses the bottom nav) */}
-      {!settingsOpen && (
       <footer className={themeFooterClass}>
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <p className="text-center text-sm text-neutral-500">
@@ -5127,7 +4958,6 @@ function App() {
           </p>
         </div>
       </footer>
-      )}
 
       {/* Budget change confirmation modal */}
       <BudgetChangeModal
