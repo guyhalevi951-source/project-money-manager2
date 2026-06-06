@@ -208,6 +208,16 @@ html :where(.text-white):not(.auth-signup-static):not(:where(.auth-signup-static
   color: var(--color-category-5) !important;
 }
 
+/* Financial Summary currency symbols — buttons.currency live token (כלי ניהול והגדרות) */
+[data-theme-scope='app'] button.currency-symbol-trigger[data-theme-category='currency'] {
+  color: var(--btn-currency-bg) !important;
+}
+
+[data-theme-scope='app'] button.currency-symbol-trigger[data-theme-category='currency']:hover,
+[data-theme-scope='app'] button.currency-symbol-trigger[data-theme-category='currency']:active {
+  color: #ffffff !important;
+}
+
 @layer base {
   button,
   [type='button'],

@@ -279,6 +279,7 @@ export const THEME_CATEGORY_RULES: Record<ThemeCategoryId, ThemeCategoryRule> = 
     styleTokens: [
       'currencyUtilityButtonClass',
       'currencyUtilityButtonLgClass',
+      'currencySymbolTriggerClass',
     ],
     actionTranslationKeys: UTILITY_TRANSLATION_KEYS,
     actionKeywords: UTILITY_KEYWORDS,

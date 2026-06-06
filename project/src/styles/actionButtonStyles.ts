@@ -56,11 +56,15 @@ export const primaryActionSelectedChipClass =
 const currencyUtilityColors =
   'bg-[var(--btn-currency-bg)] hover:bg-[var(--btn-currency-hover)] active:bg-[var(--btn-currency-active)] text-[var(--btn-currency-fg,var(--color-category-5))] font-medium';
 
-/** Inline currency symbol trigger (Financial Summary) — Category 2 text, no chrome. */
+/**
+ * Inline currency symbol trigger (Financial Summary) — `buttons.currency` group
+ * (כלי ניהול והגדרות). Default/hover colors are set in index.css so they beat
+ * the Cat 5 `button { color: inherit }` engine.
+ */
 export const currencySymbolTriggerClass = [
-  'inline-flex items-center justify-center border-0 bg-transparent p-0',
-  'cursor-pointer transition duration-150 hover:opacity-80 active:scale-95',
-  'text-[var(--btn-currency-bg)]',
+  'currency-symbol-trigger',
+  'inline-flex shrink-0 items-center justify-center border-0 bg-transparent p-0 m-0',
+  'cursor-pointer transition-colors duration-200',
 ].join(' ');
 
 /** Budget-row currency shortcuts (display currency, manual rate, commissions). */

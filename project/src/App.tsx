@@ -67,6 +67,7 @@ import {
   type AmountDisplayParts,
 } from './services/displayCurrencyUtils';
 import { DisplayCurrencyInlineMenu } from './components/DisplayCurrencySelector';
+import { themeCategoryProps } from './services/buttonThemeService';
 import {
   clearAllCurrencyCommissionsLocal,
   clearCloudCurrencyCommissions,
@@ -2685,7 +2686,7 @@ type FinancialSummaryCurrencyAnchor = 'budget' | 'expenses' | 'status';
 
 function FinancialSummaryAmount({
   parts,
-  className,
+  amountClassName,
   menuAnchor,
   activeMenuAnchor,
   onToggleMenu,
@@ -2693,7 +2694,7 @@ function FinancialSummaryAmount({
   menuContainerRef,
 }: {
   parts: AmountDisplayParts;
-  className: string;
+  amountClassName: string;
   menuAnchor: FinancialSummaryCurrencyAnchor;
   activeMenuAnchor: FinancialSummaryCurrencyAnchor | null;
   onToggleMenu: (anchor: FinancialSummaryCurrencyAnchor) => void;
@@ -2708,21 +2709,20 @@ function FinancialSummaryAmount({
       ref={isOpen ? menuContainerRef : undefined}
       className="relative inline-flex max-w-full items-center justify-center"
     >
-      <LtrNumeric
-        className={`inline-flex max-w-full items-baseline justify-center gap-0 truncate text-center text-sm font-bold leading-tight sm:text-base md:text-2xl ${className}`}
-      >
-        {parts.sign ? <span>{parts.sign}</span> : null}
+      <LtrNumeric className="inline-flex max-w-full items-baseline justify-center gap-0 truncate text-center text-sm font-bold leading-tight sm:text-base md:text-2xl">
+        {parts.sign ? <span className={amountClassName}>{parts.sign}</span> : null}
         <button
           type="button"
           onClick={() => onToggleMenu(menuAnchor)}
           className={currencySymbolTriggerClass}
+          {...themeCategoryProps('currency')}
           aria-label={tr('displayCurrency')}
           aria-haspopup="listbox"
           aria-expanded={isOpen}
         >
           {parts.symbol}
         </button>
-        <span>{parts.amount}</span>
+        <span className={amountClassName}>{parts.amount}</span>
       </LtrNumeric>
       {isOpen && (
         <div
@@ -4258,7 +4258,7 @@ function App() {
                       <div className="flex h-full min-h-0 items-center justify-center">
                         <FinancialSummaryAmount
                           parts={selectedBudgetDisplayParts}
-                          className={typographyBodyClass}
+                          amountClassName={typographyBodyClass}
                           menuAnchor="budget"
                           activeMenuAnchor={financialCurrencyMenuAnchor}
                           onToggleMenu={toggleFinancialCurrencyMenu}
@@ -4271,7 +4271,7 @@ function App() {
                       <div className="flex h-full min-h-0 items-center justify-center">
                         <FinancialSummaryAmount
                           parts={totalExpensesDisplayParts}
-                          className={isOverBudget ? 'text-rose-400' : typographyBodyClass}
+                          amountClassName={isOverBudget ? 'text-rose-400' : typographyBodyClass}
                           menuAnchor="expenses"
                           activeMenuAnchor={financialCurrencyMenuAnchor}
                           onToggleMenu={toggleFinancialCurrencyMenu}
@@ -4284,7 +4284,7 @@ function App() {
                       <div className="flex h-full min-h-0 items-center justify-center">
                         <FinancialSummaryAmount
                           parts={remainingDisplayParts}
-                          className={isOverBudget ? 'text-rose-400' : typographyBodyClass}
+                          amountClassName={isOverBudget ? 'text-rose-400' : typographyBodyClass}
                           menuAnchor="status"
                           activeMenuAnchor={financialCurrencyMenuAnchor}
                           onToggleMenu={toggleFinancialCurrencyMenu}
