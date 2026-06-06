@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Globe } from 'lucide-react';
 
-export type CurrencyFlagSize = 'xs' | 'sm' | 'md' | 'lg';
+export type CurrencyFlagSize = 'text' | 'xs' | 'sm' | 'md' | 'lg';
 
 const SIZE_CLASSES: Record<CurrencyFlagSize, string> = {
+  /** Scales with parent font-size for inline dual-currency helper lines. */
+  text: 'h-3.5 w-[1.17rem] min-w-[1.17rem] rounded-[3px] sm:h-4 sm:w-[1.33rem] sm:min-w-[1.33rem]',
   xs: 'w-4 h-3 rounded-[2px]',
   sm: 'w-5 h-[15px] rounded-[3px]',
   md: 'w-6 h-[18px] rounded',
@@ -11,6 +13,7 @@ const SIZE_CLASSES: Record<CurrencyFlagSize, string> = {
 };
 
 const FALLBACK_ICON: Record<CurrencyFlagSize, string> = {
+  text: 'h-[0.85em] w-[0.85em]',
   xs: 'w-3 h-3',
   sm: 'w-3.5 h-3.5',
   md: 'w-4 h-4',
@@ -69,8 +72,8 @@ export default function CurrencyFlag({
       src={getFlagCdnSrc(code, 40)}
       srcSet={getFlagCdnSrcSet(code)}
       alt={alt}
-      width={size === 'lg' ? 32 : size === 'md' ? 24 : size === 'sm' ? 20 : 16}
-      height={size === 'lg' ? 24 : size === 'md' ? 18 : size === 'sm' ? 15 : 12}
+      width={size === 'lg' ? 32 : size === 'md' ? 24 : size === 'sm' ? 20 : size === 'text' ? 14 : 16}
+      height={size === 'lg' ? 24 : size === 'md' ? 18 : size === 'sm' ? 15 : size === 'text' ? 11 : 12}
       loading="lazy"
       decoding="async"
       onError={handleError}

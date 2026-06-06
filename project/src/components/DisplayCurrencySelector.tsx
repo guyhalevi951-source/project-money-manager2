@@ -315,6 +315,64 @@ function DroppableZone({
   );
 }
 
+// ─── Inline picker (Financial Summary, dropdown menus) ───────────────────────
+
+interface DisplayCurrencyInlineMenuProps {
+  onSelected?: (code: CurrencyCode) => void;
+  className?: string;
+}
+
+export function DisplayCurrencyInlineMenu({ onSelected, className }: DisplayCurrencyInlineMenuProps) {
+  const { tr, displayCurrency, setDisplayCurrency, currencyLayout } = useLanguage();
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const sortedLayout = useMemo(() => sortCurrencyLayout(currencyLayout), [currencyLayout]);
+
+  const handleSelect = useCallback(
+    (code: CurrencyCode) => {
+      setDisplayCurrency(code);
+      onSelected?.(code);
+    },
+    [onSelected, setDisplayCurrency],
+  );
+
+  return (
+    <>
+      <div
+        role="listbox"
+        aria-label={tr('displayCurrency')}
+        dir="ltr"
+        className={className}
+      >
+        <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
+          {sortedLayout.map((item) => (
+            <CurrencyCell
+              key={item.code}
+              code={item.code}
+              editMode={false}
+              selected={displayCurrency === item.code}
+              isFavorite={item.isFavorite}
+              onSelect={handleSelect}
+              onToggleFavorite={() => {}}
+              onRemove={() => {}}
+            />
+          ))}
+          <div className="relative aspect-square min-w-0">
+            <button
+              type="button"
+              onClick={() => setLibraryOpen(true)}
+              aria-label={tr('currencyLibraryTitle')}
+              className={`${cellInnerClass} ${subCardGridCellIdleClass} active:scale-[0.98]`}
+            >
+              <Plus className="w-5 h-5 sm:w-6 sm:h-6" strokeWidth={2.25} />
+            </button>
+          </div>
+        </div>
+      </div>
+      <CurrencyLibraryModal open={libraryOpen} onClose={() => setLibraryOpen(false)} mode="display" />
+    </>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 interface DisplayCurrencySelectorProps {
@@ -332,7 +390,6 @@ function DisplayCurrencySelector({ recentExpenseCurrencies: _recent }: DisplayCu
 
   const pinnedFromCtx = usePinnedCurrencies();
 
-  const [libraryOpen, setLibraryOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [tempLayout, setTempLayout] = useState<CurrencyLayoutItem[]>([]);
   const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
@@ -422,34 +479,7 @@ function DisplayCurrencySelector({ recentExpenseCurrencies: _recent }: DisplayCu
 
   // ── Render ───────────────────────────────────────────────────────────────
 
-  const readonlyGrid = (
-    <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
-      {sortedLayout.map((item) => (
-        <CurrencyCell
-          key={item.code}
-          code={item.code}
-          editMode={false}
-          selected={displayCurrency === item.code}
-          isFavorite={item.isFavorite}
-          onSelect={handleSelect}
-          onToggleFavorite={handleToggleFavorite}
-          onRemove={handleRemove}
-        />
-      ))}
-      <div className="relative aspect-square min-w-0">
-        <button
-          type="button"
-          onClick={() => setLibraryOpen(true)}
-          aria-label={tr('currencyLibraryTitle')}
-          className={`${cellInnerClass} ${subCardGridCellIdleClass} active:scale-[0.98] ${
-            libraryOpen ? 'ring-1 ring-indigo-400/40 text-indigo-300' : ''
-          }`}
-        >
-          <Plus className="w-5 h-5 sm:w-6 sm:h-6" strokeWidth={2.25} />
-        </button>
-      </div>
-    </div>
-  );
+  const readonlyGrid = <DisplayCurrencyInlineMenu />;
 
   const editGrid = (
     /**
@@ -548,8 +578,6 @@ function DisplayCurrencySelector({ recentExpenseCurrencies: _recent }: DisplayCu
           {readonlyGrid}
         </motion.div>
       )}
-
-      <CurrencyLibraryModal open={libraryOpen} onClose={() => setLibraryOpen(false)} mode="display" />
 
       <CurrencyPinSaveConfirmModal
         open={saveConfirmOpen}

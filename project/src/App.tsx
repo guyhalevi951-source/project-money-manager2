@@ -59,7 +59,14 @@ import DisplayMoney from './components/DisplayMoney';
 import CategoryColorChip from './components/CategoryColorChip';
 import { LocalizedUserText, LtrNumeric, useLanguage } from './LanguageContext';
 import { formatTranslation, localizeCategoryLabel } from './translations';
-import { formatAmountWithSymbol, symbolToCurrency } from './services/displayCurrencyUtils';
+import {
+  formatAmountParts,
+  formatAmountWithSymbol,
+  formatMoneyPartsFromIls,
+  symbolToCurrency,
+  type AmountDisplayParts,
+} from './services/displayCurrencyUtils';
+import { DisplayCurrencyInlineMenu } from './components/DisplayCurrencySelector';
 import {
   clearAllCurrencyCommissionsLocal,
   clearCloudCurrencyCommissions,
@@ -68,10 +75,12 @@ import {
 } from './services/currencyCommissionService';
 import { convertExpenseAmountToIls } from './services/expenseConversionService';
 import {
+  currencySymbolTriggerClass,
   currencyUtilityButtonClass,
   filterBarActiveTabClass,
   filterBarContainerClass,
   filterBarInactiveTabClass,
+  filterDropdownWrapperClass,
   filterInsetPanelClass,
   primaryActionAccentIconClass,
   primaryActionButtonClass,
@@ -2672,6 +2681,60 @@ function BudgetChangeModal({
   );
 }
 
+type FinancialSummaryCurrencyAnchor = 'budget' | 'expenses' | 'status';
+
+function FinancialSummaryAmount({
+  parts,
+  className,
+  menuAnchor,
+  activeMenuAnchor,
+  onToggleMenu,
+  onCurrencyPicked,
+  menuContainerRef,
+}: {
+  parts: AmountDisplayParts;
+  className: string;
+  menuAnchor: FinancialSummaryCurrencyAnchor;
+  activeMenuAnchor: FinancialSummaryCurrencyAnchor | null;
+  onToggleMenu: (anchor: FinancialSummaryCurrencyAnchor) => void;
+  onCurrencyPicked: () => void;
+  menuContainerRef: MutableRefObject<HTMLDivElement | null>;
+}) {
+  const { tr } = useLanguage();
+  const isOpen = menuAnchor === activeMenuAnchor;
+
+  return (
+    <div
+      ref={isOpen ? menuContainerRef : undefined}
+      className="relative inline-flex max-w-full items-center justify-center"
+    >
+      <LtrNumeric
+        className={`inline-flex max-w-full items-baseline justify-center gap-0 truncate text-center text-sm font-bold leading-tight sm:text-base md:text-2xl ${className}`}
+      >
+        {parts.sign ? <span>{parts.sign}</span> : null}
+        <button
+          type="button"
+          onClick={() => onToggleMenu(menuAnchor)}
+          className={currencySymbolTriggerClass}
+          aria-label={tr('displayCurrency')}
+          aria-haspopup="listbox"
+          aria-expanded={isOpen}
+        >
+          {parts.symbol}
+        </button>
+        <span>{parts.amount}</span>
+      </LtrNumeric>
+      {isOpen && (
+        <div
+          className={`absolute top-full left-1/2 z-50 mt-1.5 w-[min(100vw-2rem,18rem)] -translate-x-1/2 p-1.5 ${filterDropdownWrapperClass}`}
+        >
+          <DisplayCurrencyInlineMenu onSelected={onCurrencyPicked} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function App() {
   const {
     tr,
@@ -2793,14 +2856,6 @@ function App() {
     setSettingsInitialCurrencySections(null);
     setSettingsOpen(true);
   };
-
-  const openSettingsDisplayCurrency = useCallback(() => {
-    settingsReturnTabRef.current = activeTab;
-    setNavOpen(false);
-    setProfileOpen(false);
-    setSettingsInitialCurrencySections(['display']);
-    setSettingsOpen(true);
-  }, [activeTab]);
 
   const openSettingsExchangeRates = useCallback(() => {
     settingsReturnTabRef.current = activeTab;
@@ -3877,14 +3932,65 @@ function App() {
     if (budgetStatusDisplayAmount == null || totalExpensesDisplayAmount == null) return null;
     return roundMoneyAmount(budgetStatusDisplayAmount - totalExpensesDisplayAmount);
   }, [budgetStatusDisplayAmount, totalExpensesDisplayAmount]);
-  const totalExpensesStatusDisplayLabel = useMemo(() => {
-    if (totalExpensesDisplayAmount == null) return formatMoney(totalExpenses);
-    return formatAmountWithSymbol(totalExpensesDisplayAmount, displayCurrency);
-  }, [displayCurrency, formatMoney, totalExpenses, totalExpensesDisplayAmount]);
-  const remainingStatusDisplayLabel = useMemo(() => {
-    if (remainingDisplayAmount == null) return formatMoney(remaining);
-    return formatAmountWithSymbol(remainingDisplayAmount, displayCurrency);
-  }, [displayCurrency, formatMoney, remaining, remainingDisplayAmount]);
+  const selectedBudgetDisplayParts = useMemo(() => {
+    if (selectedBudgetSourceMonthKey) {
+      const original = budgetOriginalByMonth[selectedBudgetSourceMonthKey];
+      if (original && original.currency === displayCurrency) {
+        return formatAmountParts(original.amount, displayCurrency);
+      }
+    }
+    return formatMoneyPartsFromIls(budget, displayCurrency, statusRates);
+  }, [
+    selectedBudgetSourceMonthKey,
+    budgetOriginalByMonth,
+    displayCurrency,
+    budget,
+    statusRates,
+  ]);
+  const totalExpensesDisplayParts = useMemo(() => {
+    if (totalExpensesDisplayAmount != null) {
+      return formatAmountParts(totalExpensesDisplayAmount, displayCurrency);
+    }
+    return formatMoneyPartsFromIls(totalExpenses, displayCurrency, statusRates);
+  }, [totalExpensesDisplayAmount, displayCurrency, totalExpenses, statusRates]);
+  const remainingDisplayParts = useMemo(() => {
+    if (remainingDisplayAmount != null) {
+      return formatAmountParts(remainingDisplayAmount, displayCurrency);
+    }
+    return formatMoneyPartsFromIls(remaining, displayCurrency, statusRates);
+  }, [remainingDisplayAmount, displayCurrency, remaining, statusRates]);
+  const [financialCurrencyMenuAnchor, setFinancialCurrencyMenuAnchor] =
+    useState<FinancialSummaryCurrencyAnchor | null>(null);
+  const financialCurrencyMenuRef = useRef<HTMLDivElement>(null);
+  const toggleFinancialCurrencyMenu = useCallback((anchor: FinancialSummaryCurrencyAnchor) => {
+    setFinancialCurrencyMenuAnchor((prev) => (prev === anchor ? null : anchor));
+  }, []);
+  const closeFinancialCurrencyMenu = useCallback(() => {
+    setFinancialCurrencyMenuAnchor(null);
+  }, []);
+  const handleFinancialCurrencyPicked = useCallback(() => {
+    closeFinancialCurrencyMenu();
+  }, [closeFinancialCurrencyMenu]);
+  useEffect(() => {
+    if (!financialCurrencyMenuAnchor) return;
+
+    const handlePointerDownOutside = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (financialCurrencyMenuRef.current?.contains(target)) return;
+      closeFinancialCurrencyMenu();
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeFinancialCurrencyMenu();
+    };
+
+    document.addEventListener('pointerdown', handlePointerDownOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDownOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [financialCurrencyMenuAnchor, closeFinancialCurrencyMenu]);
 
   // Get category info
   const getCategoryInfo = (categoryValue: string): Category =>
@@ -4150,27 +4256,41 @@ function App() {
                   <tr>
                     <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-[var(--surface-input-border)] px-2 text-center align-middle">
                       <div className="flex h-full min-h-0 items-center justify-center">
-                        <LtrNumeric className={`block w-full truncate text-center text-sm font-bold leading-tight sm:text-base md:text-2xl ${typographyBodyClass}`}>
-                          {selectedBudgetDisplayLabel}
-                        </LtrNumeric>
+                        <FinancialSummaryAmount
+                          parts={selectedBudgetDisplayParts}
+                          className={typographyBodyClass}
+                          menuAnchor="budget"
+                          activeMenuAnchor={financialCurrencyMenuAnchor}
+                          onToggleMenu={toggleFinancialCurrencyMenu}
+                          onCurrencyPicked={handleFinancialCurrencyPicked}
+                          menuContainerRef={financialCurrencyMenuRef}
+                        />
                       </div>
                     </td>
                     <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-[var(--surface-input-border)] px-2 text-center align-middle">
                       <div className="flex h-full min-h-0 items-center justify-center">
-                        <LtrNumeric
-                          className={`block w-full truncate text-center text-sm font-bold leading-tight sm:text-base md:text-2xl ${isOverBudget ? 'text-rose-400' : typographyBodyClass}`}
-                        >
-                          {totalExpensesStatusDisplayLabel}
-                        </LtrNumeric>
+                        <FinancialSummaryAmount
+                          parts={totalExpensesDisplayParts}
+                          className={isOverBudget ? 'text-rose-400' : typographyBodyClass}
+                          menuAnchor="expenses"
+                          activeMenuAnchor={financialCurrencyMenuAnchor}
+                          onToggleMenu={toggleFinancialCurrencyMenu}
+                          onCurrencyPicked={handleFinancialCurrencyPicked}
+                          menuContainerRef={financialCurrencyMenuRef}
+                        />
                       </div>
                     </td>
                     <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] border-x border-[var(--surface-input-border)] px-2 text-center align-middle">
                       <div className="flex h-full min-h-0 items-center justify-center">
-                        <LtrNumeric
-                          className={`block w-full truncate text-center text-sm font-bold leading-tight sm:text-base md:text-2xl ${isOverBudget ? 'text-rose-400' : typographyBodyClass}`}
-                        >
-                          {remainingStatusDisplayLabel}
-                        </LtrNumeric>
+                        <FinancialSummaryAmount
+                          parts={remainingDisplayParts}
+                          className={isOverBudget ? 'text-rose-400' : typographyBodyClass}
+                          menuAnchor="status"
+                          activeMenuAnchor={financialCurrencyMenuAnchor}
+                          onToggleMenu={toggleFinancialCurrencyMenu}
+                          onCurrencyPicked={handleFinancialCurrencyPicked}
+                          menuContainerRef={financialCurrencyMenuRef}
+                        />
                       </div>
                     </td>
                   </tr>
@@ -4257,15 +4377,6 @@ function App() {
                     >
                       <button
                         type="button"
-                        onClick={openSettingsDisplayCurrency}
-                        className={currencyUtilityButtonClass}
-                        title={tr('displayCurrency')}
-                        aria-label={tr('displayCurrency')}
-                      >
-                        {tr('displayCurrency')}
-                      </button>
-                      <button
-                        type="button"
                         onClick={openSettingsManualRate}
                         className={currencyUtilityButtonClass}
                         title={tr('settingsCurrencySubManualRate')}
@@ -4297,7 +4408,7 @@ function App() {
 
           <form onSubmit={handleAddExpense} className="flex flex-col gap-4">
             {/* Row 1: Description + Amount */}
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
               <div className="min-w-0 flex-1">
                 <label className={`block text-sm font-medium mb-2 ${typographyLabelClass}`}>
                   {tr('descriptionOptional')}
@@ -4351,12 +4462,6 @@ function App() {
               </div>
 
               <div className="shrink-0 w-full sm:w-auto">
-                <span
-                  className="mb-2 block text-sm font-medium text-transparent select-none pointer-events-none"
-                  aria-hidden="true"
-                >
-                  {tr('addExpense')}
-                </span>
                 <button
                   type="submit"
                   disabled={expenseSubmitBlocked}

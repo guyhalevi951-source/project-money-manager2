@@ -1,4 +1,6 @@
+import { getCurrencyMeta, type ExpenseCurrency } from '../constants/currencies';
 import { LtrNumeric, useLanguage } from '../LanguageContext';
+import CurrencyFlag from './CurrencyFlag';
 
 interface ExpenseAmountDisplayProps {
   amount: number;
@@ -9,6 +11,38 @@ interface ExpenseAmountDisplayProps {
   showSecondaryLine?: boolean;
 }
 
+/**
+ * Secondary approximation row — flag matches the currency of the evaluated value inside the parens.
+ * Format: `( ≈ L78 [Flag] )`
+ */
+function SecondaryConversionLine({
+  line,
+  flagCurrency,
+  className,
+}: {
+  line: string;
+  flagCurrency?: ExpenseCurrency;
+  className: string;
+}) {
+  const approxMatch = line.match(/^\(≈\s(.+)\)$/);
+
+  if (!approxMatch) {
+    return <LtrNumeric className={`whitespace-nowrap ${className}`}>{line}</LtrNumeric>;
+  }
+
+  const amountText = approxMatch[1];
+  const meta = flagCurrency ? getCurrencyMeta(flagCurrency) : null;
+
+  return (
+    <LtrNumeric className={`inline-flex items-center gap-x-1.5 whitespace-nowrap ${className}`}>
+      <span>(≈</span>
+      <span>{amountText}</span>
+      {meta && <CurrencyFlag countryCode={meta.countryCode} size="text" alt="" />}
+      <span>)</span>
+    </LtrNumeric>
+  );
+}
+
 export default function ExpenseAmountDisplay({
   amount,
   originalAmount,
@@ -17,13 +51,19 @@ export default function ExpenseAmountDisplay({
   showSecondaryLine = true,
 }: ExpenseAmountDisplayProps) {
   const { formatExpenseMoney } = useLanguage();
-  const { primary, secondary } = formatExpenseMoney(amount, originalAmount, originalCurrency);
+  const { primary, secondary, secondaryFlagCode } = formatExpenseMoney(
+    amount,
+    originalAmount,
+    originalCurrency,
+  );
   const equivalentLine = showSecondaryLine ? secondary : undefined;
 
   const mainClass =
     variant === 'card'
       ? 'text-base font-semibold text-neutral-100'
       : 'text-lg font-semibold text-neutral-100';
+
+  const secondaryClass = 'text-xs text-neutral-500';
 
   return (
     <div
@@ -35,7 +75,11 @@ export default function ExpenseAmountDisplay({
     >
       <LtrNumeric className={`${mainClass} whitespace-nowrap`}>{primary}</LtrNumeric>
       {equivalentLine && (
-        <LtrNumeric className="text-xs text-neutral-500 whitespace-nowrap">{equivalentLine}</LtrNumeric>
+        <SecondaryConversionLine
+          line={equivalentLine}
+          flagCurrency={secondaryFlagCode}
+          className={secondaryClass}
+        />
       )}
     </div>
   );

@@ -11,6 +11,8 @@ import { roundMoney } from './money';
 export interface ExpenseDisplayAmount {
   primary: string;
   secondary?: string;
+  /** Currency of the evaluated value inside `secondary` — drives inline flag binding. */
+  secondaryFlagCode?: ExpenseCurrency;
 }
 
 function formatNumeric(amount: number, forceTwoDecimals = false): string {
@@ -20,14 +22,54 @@ function formatNumeric(amount: number, forceTwoDecimals = false): string {
   });
 }
 
+export interface AmountDisplayParts {
+  sign: string;
+  symbol: string;
+  amount: string;
+  currency: ExpenseCurrency;
+}
+
+export function formatAmountParts(
+  amount: number,
+  currency: ExpenseCurrency,
+  options?: { forceTwoDecimals?: boolean },
+): AmountDisplayParts {
+  return {
+    sign: amount < 0 ? '-' : '',
+    symbol: currencySymbol(currency),
+    amount: formatNumeric(Math.abs(amount), options?.forceTwoDecimals ?? false),
+    currency,
+  };
+}
+
 export function formatAmountWithSymbol(
   amount: number,
   currency: ExpenseCurrency,
   options?: { forceTwoDecimals?: boolean },
 ): string {
-  const formatted = formatNumeric(Math.abs(amount), options?.forceTwoDecimals ?? false);
-  const sign = amount < 0 ? '-' : '';
-  return `${sign}${currencySymbol(currency)}${formatted}`;
+  const { sign, symbol, amount: formatted } = formatAmountParts(amount, currency, options);
+  return `${sign}${symbol}${formatted}`;
+}
+
+export function formatMoneyPartsFromIls(
+  ilsAmount: number,
+  displayCurrency: ExpenseCurrency,
+  rates: ExchangeRates | null,
+): AmountDisplayParts {
+  if (displayCurrency === 'ILS') {
+    return formatAmountParts(ilsAmount, 'ILS');
+  }
+
+  if (!rates) {
+    return formatAmountParts(ilsAmount, 'ILS');
+  }
+
+  const converted = convertIlsToForeign(ilsAmount, displayCurrency, rates);
+  if (converted == null) {
+    return formatAmountParts(ilsAmount, 'ILS');
+  }
+
+  return formatAmountParts(roundMoney(converted), displayCurrency, { forceTwoDecimals: true });
 }
 
 export function symbolToCurrency(symbol: string): ExpenseCurrency | null {
@@ -83,6 +125,7 @@ export function resolveExpenseDisplayAmount(
     return {
       primary: formatAmountWithSymbol(ilsAmount, 'ILS'),
       secondary: originalFormatted ? `(≈ ${originalFormatted})` : undefined,
+      secondaryFlagCode: originalCode ?? undefined,
     };
   }
 
@@ -104,17 +147,23 @@ export function resolveExpenseDisplayAmount(
   });
 
   let secondary: string | undefined;
+  let secondaryFlagCode: ExpenseCurrency | undefined;
+
   if (hasOriginal && originalCode === displayCurrency) {
     secondary = `(≈ ${formatAmountWithSymbol(ilsAmount, 'ILS')})`;
+    secondaryFlagCode = 'ILS';
   } else if (hasOriginal && originalFormatted) {
     secondary = `(≈ ${originalFormatted})`;
+    secondaryFlagCode = originalCode ?? undefined;
   } else {
     secondary = `(≈ ${formatAmountWithSymbol(ilsAmount, 'ILS')})`;
+    secondaryFlagCode = 'ILS';
   }
 
   if (secondary && primary === secondary.replace(/^\(≈ /, '').replace(/\)$/, '')) {
     secondary = undefined;
+    secondaryFlagCode = undefined;
   }
 
-  return { primary, secondary };
+  return { primary, secondary, secondaryFlagCode };
 }

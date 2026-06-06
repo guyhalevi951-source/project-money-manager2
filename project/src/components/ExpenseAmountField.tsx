@@ -78,6 +78,7 @@ export default function ExpenseAmountField({
   onOpenExchangeRatesSettings,
 }: ExpenseAmountFieldProps) {
   const { tr, displayCurrency } = useLanguage();
+  const displayMeta = getCurrencyMeta(displayCurrency);
   const inputCurrency = lockToDisplayCurrency ? displayCurrency : currency;
   const pinnedCurrencies = usePinnedCurrencies();
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -342,8 +343,8 @@ export default function ExpenseAmountField({
     <div className="flex w-full shrink-0 flex-col sm:w-auto">
       <label className={`block text-sm font-medium mb-2 ${typographyLabelClass}`}>{tr('amountLabel')}</label>
 
-      <div dir="ltr" className="relative z-10 w-full sm:w-auto">
-        <div className="relative z-10 flex w-full items-center gap-2 sm:w-auto">
+      <div className="flex w-full flex-col sm:w-auto">
+        <div dir="ltr" className="relative z-10 flex w-full items-center gap-2 sm:w-auto">
           <div ref={currencyMenuRef} className="relative z-20 shrink-0">
             {lockToDisplayCurrency ? (
               <div
@@ -464,19 +465,19 @@ export default function ExpenseAmountField({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2, ease: 'easeOut' }}
-              className="absolute start-0 top-full z-20 mt-1 text-xs text-red-500 pointer-events-none whitespace-nowrap"
+              className="mt-1 text-xs text-red-500 whitespace-nowrap"
               role="alert"
             >
               {tr('amountTooLarge')}
             </motion.p>
           ) : showDisplayPreview ? (
-            <motion.p
+            <motion.div
               key={`${inputCurrency}-${displayCurrency}-${amount}`}
               initial={{ opacity: 0, y: -2 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2, ease: 'easeOut' }}
-              className="absolute start-0 top-full z-10 mt-1 max-w-[min(100vw-2rem,20rem)] truncate text-sm leading-snug text-neutral-400 pointer-events-none"
+              className="mt-1.5 max-w-full truncate text-sm leading-snug text-neutral-400"
               aria-live="polite"
             >
               {loading ? (
@@ -487,18 +488,18 @@ export default function ExpenseAmountField({
               ) : error ? (
                 <span className="text-amber-400/80">{tr('exchangeRatesUnavailable')}</span>
               ) : displayPreviewFormatted ? (
-                <span>
-                  {tr('approxIlsPrefix')}{' '}
-                  <LtrNumeric className="font-medium text-neutral-300/90 tabular-nums">
-                    {displayPreviewFormatted}
-                  </LtrNumeric>
-                  {' '}
-                  {tr('convertedToDisplayCurrency')}
-                </span>
+                <LtrNumeric className="inline-flex items-center whitespace-nowrap">
+                  <span>(≈ </span>
+                  <span className="inline-flex items-center gap-x-1.5 font-medium tabular-nums text-neutral-300/90">
+                    <span>{displayPreviewFormatted}</span>
+                    <CurrencyFlag countryCode={displayMeta.countryCode} size="text" alt="" />
+                  </span>
+                  <span>)</span>
+                </LtrNumeric>
               ) : (
                 <span className="text-amber-400/80">{tr('exchangeRatesUnavailable')}</span>
               )}
-            </motion.p>
+            </motion.div>
           ) : null}
         </AnimatePresence>
       </div>
