@@ -2783,6 +2783,30 @@ function useMobileFinancialCurrencyMenu(): boolean {
 const financialSummaryCurrencyMenuScrollClass =
   'overflow-y-auto overscroll-contain touch-pan-y scroll-smooth [-webkit-overflow-scrolling:touch]';
 
+const FINANCIAL_SUMMARY_AMOUNT_CONTAINER_CLASS =
+  '@container [container-type:inline-size] w-full min-w-0 max-w-full';
+
+/** Default size for normal amounts; shrinks only as character count grows. */
+function financialSummaryAmountTypographyClass(amountText: string): string {
+  const charLen = amountText.length;
+  if (charLen <= 9) return 'text-sm sm:text-base md:text-2xl';
+  if (charLen <= 12) return 'text-xs sm:text-sm md:text-xl';
+  if (charLen <= 16) return 'text-[10px] sm:text-xs md:text-lg';
+  if (charLen <= 20) return 'text-[9px] sm:text-[10px] md:text-base';
+  if (charLen <= 24) return 'text-[8px] sm:text-[9px] md:text-sm';
+  return 'text-[8px] sm:text-[9px] md:text-xs';
+}
+
+/** Budget input / placeholder — same length tiers; truncate always applied on the field. */
+function budgetMoneyFieldTypographyClass(visibleCharLen: number): string {
+  if (visibleCharLen <= 8) return 'text-sm sm:text-lg';
+  if (visibleCharLen <= 14) return 'text-xs sm:text-base';
+  if (visibleCharLen <= 20) return 'text-[11px] sm:text-sm';
+  if (visibleCharLen <= 28) return 'text-[10px] sm:text-xs';
+  if (visibleCharLen <= 36) return 'text-[9px] sm:text-[10px]';
+  return 'text-[8px] sm:text-[9px]';
+}
+
 function FinancialSummaryAmount({
   parts,
   amountClassName,
@@ -2837,27 +2861,36 @@ function FinancialSummaryAmount({
   const menuPanel = (
     <DisplayCurrencyInlineMenu onSelected={onCurrencyPicked} className="py-2" />
   );
+  const signedAmountText = parts.sign ? `${parts.sign}${parts.amount}` : parts.amount;
+  const amountTypographyClass = financialSummaryAmountTypographyClass(signedAmountText);
+  const amountContainerFluidClass =
+    signedAmountText.length > 9 ? 'text-[length:clamp(0.5rem,11cqw,1.5rem)]' : '';
 
   return (
     <div
       ref={isOpen ? menuContainerRef : undefined}
-      className="relative inline-flex max-w-full items-center justify-center overflow-visible"
+      className={`relative flex w-full min-w-0 max-w-full items-center justify-center overflow-visible ${FINANCIAL_SUMMARY_AMOUNT_CONTAINER_CLASS}`}
     >
-      <LtrNumeric className="inline-flex max-w-full items-baseline justify-center gap-0 truncate text-center text-sm font-bold leading-tight sm:text-base md:text-2xl">
-        {parts.sign ? <span className={amountClassName}>{parts.sign}</span> : null}
-        <button
-          ref={symbolButtonRef}
-          type="button"
-          onClick={() => onToggleMenu(menuAnchor)}
-          className={currencySymbolTriggerClass}
-          {...themeCategoryProps('currency')}
-          aria-label={tr('displayCurrency')}
-          aria-haspopup="listbox"
-          aria-expanded={isOpen}
-        >
-          {parts.symbol}
-        </button>
-        <span className={amountClassName}>{parts.amount}</span>
+      <LtrNumeric className="inline-flex max-w-full min-w-0 items-baseline justify-center text-center font-bold leading-tight">
+        <span className="inline-flex min-w-0 max-w-full items-center gap-2 overflow-hidden">
+          <button
+            ref={symbolButtonRef}
+            type="button"
+            onClick={() => onToggleMenu(menuAnchor)}
+            className={currencySymbolTriggerClass}
+            {...themeCategoryProps('currency')}
+            aria-label={tr('displayCurrency')}
+            aria-haspopup="listbox"
+            aria-expanded={isOpen}
+          >
+            {parts.symbol}
+          </button>
+          <span
+            className={`block min-w-0 max-w-full truncate tabular-nums ${amountContainerFluidClass} ${amountClassName} ${amountTypographyClass}`}
+          >
+            {signedAmountText}
+          </span>
+        </span>
       </LtrNumeric>
       {isOpen && isMobileMenu && mobileMenuLayout
         ? createPortal(
@@ -2878,7 +2911,7 @@ function FinancialSummaryAmount({
         : null}
       {isOpen && !isMobileMenu ? (
         <div
-          className={`absolute top-full z-50 mt-1.5 w-[min(calc(100vw-1rem),18rem)] max-h-80 px-1.5 ${financialSummaryCurrencyMenuScrollClass} ${financialSummaryCurrencyMenuPositionClass(menuAnchor)} ${filterDropdownWrapperClass}`}
+          className={`absolute top-full z-[60] mt-1.5 w-[min(calc(100vw-1rem),18rem)] max-h-80 px-1.5 ${financialSummaryCurrencyMenuScrollClass} ${financialSummaryCurrencyMenuPositionClass(menuAnchor)} ${filterDropdownWrapperClass}`}
         >
           {menuPanel}
         </div>
@@ -3221,11 +3254,14 @@ function App() {
     if (budget > 0) return `${tr('currentAmountPrefix')}: ${selectedBudgetDisplayLabel}`.length;
     return tr('enterAmount').length;
   }, [budgetInput, budget, tr, selectedBudgetDisplayLabel]);
-  const budgetInputTextClass = useMemo(() => {
-    if (budgetInputVisibleLength <= 8) return 'text-sm';
-    if (budgetInputVisibleLength <= 12) return 'text-xs';
-    return 'text-[11px]';
-  }, [budgetInputVisibleLength]);
+  const budgetInputTextClass = useMemo(
+    () => budgetMoneyFieldTypographyClass(budgetInputVisibleLength),
+    [budgetInputVisibleLength],
+  );
+  const showBudgetCurrentAmountOverlay = useMemo(
+    () => budget > 0 && budgetInput.trim().length === 0,
+    [budget, budgetInput],
+  );
   const updateBudgetLabel = tr('updateBudget');
   const budgetSavedLabel = tr('budgetSaved');
   const subBudgetsButtonLabel = tr('tabSubbudgets');
@@ -4382,7 +4418,7 @@ function App() {
             <div className={`mb-6 ${themeCardClass} p-4 shadow-sm sm:mb-8 sm:p-6`}>
               <h2 className={`mb-4 text-lg font-bold md:text-xl ${typographyTitleClass}`}>{tr('financialSummaryTitle')}</h2>
               <div className={`overflow-visible p-3 sm:p-4 ${filterInsetPanelClass}`}>
-              <table className="w-full table-fixed border-collapse overflow-visible">
+              <table className="w-full table-fixed border-collapse">
                 <tbody>
                   <tr>
                     <td className="w-1/3 border-x border-[var(--surface-input-border)] px-2 pb-2 text-center align-bottom">
@@ -4402,8 +4438,8 @@ function App() {
                     </td>
                   </tr>
                   <tr>
-                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] overflow-visible border-x border-[var(--surface-input-border)] px-2 text-center align-middle">
-                      <div className="flex h-full min-h-0 items-center justify-center overflow-visible">
+                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] overflow-visible border-x border-[var(--surface-input-border)] px-1 text-center align-middle sm:px-2">
+                      <div className={`flex h-full min-h-0 w-full items-center justify-center overflow-visible ${FINANCIAL_SUMMARY_AMOUNT_CONTAINER_CLASS}`}>
                         <FinancialSummaryAmount
                           parts={selectedBudgetDisplayParts}
                           amountClassName={typographyBodyClass}
@@ -4416,8 +4452,8 @@ function App() {
                         />
                       </div>
                     </td>
-                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] overflow-visible border-x border-[var(--surface-input-border)] px-2 text-center align-middle">
-                      <div className="flex h-full min-h-0 items-center justify-center overflow-visible">
+                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] overflow-visible border-x border-[var(--surface-input-border)] px-1 text-center align-middle sm:px-2">
+                      <div className={`flex h-full min-h-0 w-full items-center justify-center overflow-visible ${FINANCIAL_SUMMARY_AMOUNT_CONTAINER_CLASS}`}>
                         <FinancialSummaryAmount
                           parts={totalExpensesDisplayParts}
                           amountClassName={isOverBudget ? 'text-rose-400' : typographyBodyClass}
@@ -4430,8 +4466,8 @@ function App() {
                         />
                       </div>
                     </td>
-                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] overflow-visible border-x border-[var(--surface-input-border)] px-2 text-center align-middle">
-                      <div className="flex h-full min-h-0 items-center justify-center overflow-visible">
+                    <td className="h-[4.5rem] min-h-[4.5rem] max-h-[4.5rem] overflow-visible border-x border-[var(--surface-input-border)] px-1 text-center align-middle sm:px-2">
+                      <div className={`flex h-full min-h-0 w-full items-center justify-center overflow-visible ${FINANCIAL_SUMMARY_AMOUNT_CONTAINER_CLASS}`}>
                         <FinancialSummaryAmount
                           parts={remainingDisplayParts}
                           amountClassName={isOverBudget ? 'text-rose-400' : typographyBodyClass}
@@ -4468,9 +4504,9 @@ function App() {
                   <label className={`mb-2 block text-sm font-medium ${typographyLabelClass}`}>
                     {tr('budgetAmountLabel')} ({currencySymbol(displayCurrency)})
                   </label>
-                  <div className="flex w-full items-center gap-1.5 overflow-hidden sm:gap-2">
+                  <div className="flex w-full min-w-0 items-center gap-1.5 overflow-hidden sm:gap-2">
                     <div
-                      className="min-w-0 basis-0 transition-all duration-200 ease-in-out"
+                      className="relative min-w-0 max-w-full basis-0 overflow-hidden transition-all duration-200 ease-in-out"
                       style={{ flexGrow: budgetInputFlexGrow }}
                     >
                       <input
@@ -4478,13 +4514,29 @@ function App() {
                         inputMode="decimal"
                         value={budgetInput}
                         onChange={(e) => setBudgetInput(sanitizeMoneyInputDraft(e.target.value))}
-                        placeholder={
-                          budget > 0
-                            ? `${tr('currentAmountPrefix')}: ${selectedBudgetDisplayLabel}`
-                            : tr('enterAmount')
-                        }
-                        className={`h-10 w-full min-w-0 px-2 py-1.5 sm:h-12 sm:px-4 sm:py-3 sm:text-lg ${budgetInputTextClass} ${surfaceInputClass}`}
+                        placeholder={showBudgetCurrentAmountOverlay ? '' : tr('enterAmount')}
+                        className={`block h-10 w-full min-w-0 max-w-full truncate px-2 py-1.5 sm:h-12 sm:px-4 sm:py-3 ${budgetInputTextClass} ${surfaceInputClass}`}
                       />
+                      {showBudgetCurrentAmountOverlay && (
+                        <div
+                          aria-hidden
+                          className={`pointer-events-none absolute inset-0 flex min-w-0 items-center gap-1 overflow-hidden px-2 py-1.5 sm:px-4 sm:py-3 ${budgetInputTextClass} text-[var(--surface-input-placeholder,var(--color-category-5-muted))]`}
+                        >
+                          <span className="shrink-0">{tr('currentAmountPrefix')}:</span>
+                          {lang === 'he' ? (
+                            <span
+                              dir="ltr"
+                              className="block min-w-0 max-w-full flex-1 basis-0 truncate text-left tabular-nums [unicode-bidi:isolate]"
+                            >
+                              {selectedBudgetDisplayLabel}
+                            </span>
+                          ) : (
+                            <span className="block min-w-0 max-w-full flex-1 basis-0 truncate tabular-nums">
+                              {selectedBudgetDisplayLabel}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <button
                       type="button"
