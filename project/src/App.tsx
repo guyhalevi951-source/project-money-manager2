@@ -56,6 +56,9 @@ import { auth, signOutUser } from './firebase';
 import AuthPage from './components/AuthPage';
 import UserProfileMenu from './components/UserProfileMenu';
 import ProfilePage from './components/ProfilePage';
+import BudgetDrawerMenu from './components/BudgetDrawerMenu';
+import PersonalBudgetsPage, { type CreatePersonalBudgetInput } from './components/PersonalBudgetsPage';
+import SharedBudgetsPage from './components/SharedBudgetsPage';
 import { SettingsPersistenceProvider } from './context/SettingsPersistenceContext';
 import {
   applyIsolatedCloudSessionSeed,
@@ -148,7 +151,34 @@ import {
   EMPTY_USER_APP_DATA,
   loadFromLocalStorage,
   saveToLocalStorage,
+  type UserAppData,
 } from './userDataStorage';
+import {
+  createBudgetId,
+  DEFAULT_MONTHLY_BUDGET_ID,
+  ensureDefaultPersonalBudget,
+  getBudgetScopedSettings,
+  initializeBudgetSettingsForNewPersonalBudget,
+  loadBudgetFinancialLocal,
+  loadBudgetRegistryLocal,
+  resolveSettingsStorageKey,
+  saveBudgetFinancialLocal,
+  saveBudgetRegistryLocal,
+  saveBudgetSettingsLocal,
+  snapshotUserAppData,
+  type AppShellView,
+  type BudgetRegistryState,
+  type PersonalBudgetMeta,
+} from './services/budgetArchitecture';
+import {
+  loadBudgetFinancialCloud,
+  loadBudgetRegistryCloud,
+  migrateLegacyFinancialToDefaultBudget,
+  saveBudgetFinancialCloud,
+  saveBudgetRegistryCloud,
+  subscribeBudgetFinancial,
+  subscribeBudgetRegistry,
+} from './services/budgetCloudSync';
 import {
   consumePendingAuthLang,
   readGuestLang,
@@ -164,14 +194,11 @@ import {
 import {
   clearRegisteredSessionLocalStorage,
   EMPTY_USER_SETTINGS,
+  type UserSettings,
   ensureCloudDataMigrated,
   pruneExpiredCloudExchangeFees,
-  saveCategoriesToCloud,
-  saveExpensesToCloud,
   subscribeCurrencyCommissions,
   subscribeManualExchangeOverrides,
-  subscribeCategories,
-  subscribeExpenses,
   subscribeSettings,
 } from './services/userFirebaseSync';
 import {
@@ -2948,8 +2975,30 @@ function App() {
   >(null);
   const profileReturnTabRef = useRef<MainTabId>('dashboard');
   const [navOpen, setNavOpen] = useState(false);
+  const [budgetDrawerOpen, setBudgetDrawerOpen] = useState(false);
+  const [appShellView, setAppShellView] = useState<AppShellView>('active-budget');
+  const [activeBudgetId, setActiveBudgetId] = useState<string>(DEFAULT_MONTHLY_BUDGET_ID);
+  const [budgetRegistry, setBudgetRegistry] = useState<BudgetRegistryState>({
+    personal: [],
+    shared: [],
+  });
+  const [budgetSystemReady, setBudgetSystemReady] = useState(false);
+  const budgetFinancialCacheRef = useRef<Record<string, UserAppData>>({});
+  const budgetSettingsCacheRef = useRef<Record<string, UserSettings>>({});
+  const activeBudgetSettingsKeyRef = useRef<string>(`budget:${DEFAULT_MONTHLY_BUDGET_ID}`);
+  const appShellViewRef = useRef<AppShellView>(appShellView);
+  const activeBudgetIdRef = useRef(activeBudgetId);
+  const budgetRegistryRef = useRef(budgetRegistry);
+  const budgetBootstrappedRef = useRef(false);
+  const budgetBootstrapUserIdRef = useRef<string | null>(null);
+  const applySettingsFromCloudRef = useRef(applySettingsFromCloud);
+  const applyActiveBudgetSettingsRef = useRef<
+    (budgetId: string, registry: BudgetRegistryState) => void
+  >(() => {});
+  const setLangRef = useRef(setLang);
   const isProfileView = activeTab === 'profile';
-  const isScrollRoute = isProfileView;
+  const isInsideActiveBudget = appShellView === 'active-budget';
+  const isScrollRoute = isProfileView || appShellView !== 'active-budget';
 
   // Keep new-expense currency aligned with global display currency (Financial Summary shortcuts, Settings, etc.).
   useEffect(() => {
@@ -3017,6 +3066,15 @@ function App() {
       rehydrateIsolatedGuestSession(applySettingsFromCloud);
       setAvatarUrl(getGuestAvatarFromStorage());
       setNavOpen(false);
+      setBudgetDrawerOpen(false);
+      setAppShellView('active-budget');
+      setActiveBudgetId(DEFAULT_MONTHLY_BUDGET_ID);
+      setBudgetRegistry({ personal: [], shared: [] });
+      setBudgetSystemReady(false);
+      budgetFinancialCacheRef.current = {};
+      budgetSettingsCacheRef.current = {};
+      budgetBootstrappedRef.current = false;
+      budgetBootstrapUserIdRef.current = null;
       setActiveTab('dashboard');
       await signOutUser();
     } catch {
@@ -3313,6 +3371,154 @@ function App() {
     setExpenseRatesReady(true);
   };
 
+  const buildCurrentSettingsSnapshot = useCallback(
+    (): UserSettings => ({
+      lang,
+      keepOriginalValues,
+      displayCurrency,
+      saved_colors: savedColors,
+      custom_currencies: customCurrencies,
+      currency_layout: currencyLayout,
+      themePreferences,
+    }),
+    [
+      lang,
+      keepOriginalValues,
+      displayCurrency,
+      savedColors,
+      customCurrencies,
+      currencyLayout,
+      themePreferences,
+    ],
+  );
+
+  const flushActiveBudgetFinancial = useCallback(() => {
+    if (!activeBudgetId) return;
+    const snapshot = snapshotUserAppData({
+      expenses,
+      customCategories,
+      budgetsByMonth,
+      budgetOriginalByMonth,
+      subBudgetsByMonth,
+      autoTransferByMonth,
+    });
+    budgetFinancialCacheRef.current[activeBudgetId] = snapshot;
+    saveBudgetFinancialLocal(activeBudgetId, snapshot);
+  }, [
+    activeBudgetId,
+    expenses,
+    customCategories,
+    budgetsByMonth,
+    budgetOriginalByMonth,
+    subBudgetsByMonth,
+    autoTransferByMonth,
+  ]);
+
+  const flushActiveBudgetSettings = useCallback(() => {
+    if (!activeBudgetId) return;
+    const storageKey = resolveSettingsStorageKey(activeBudgetId, budgetRegistry);
+    const snapshot = buildCurrentSettingsSnapshot();
+    budgetSettingsCacheRef.current[storageKey] = snapshot;
+    saveBudgetSettingsLocal(storageKey, snapshot);
+    activeBudgetSettingsKeyRef.current = storageKey;
+  }, [activeBudgetId, budgetRegistry, buildCurrentSettingsSnapshot]);
+
+  const applyActiveBudgetSettings = useCallback(
+    (budgetId: string, registry: BudgetRegistryState) => {
+      const storageKey = resolveSettingsStorageKey(budgetId, registry);
+      activeBudgetSettingsKeyRef.current = storageKey;
+      const scoped = getBudgetScopedSettings(
+        budgetId,
+        registry,
+        budgetSettingsCacheRef.current,
+        EMPTY_USER_SETTINGS,
+      );
+      skipNextSettingsSaveRef.current = true;
+      applySettingsFromCloud(scoped);
+    },
+    [applySettingsFromCloud],
+  );
+
+  applySettingsFromCloudRef.current = applySettingsFromCloud;
+  applyActiveBudgetSettingsRef.current = applyActiveBudgetSettings;
+  setLangRef.current = setLang;
+  appShellViewRef.current = appShellView;
+  activeBudgetIdRef.current = activeBudgetId;
+  budgetRegistryRef.current = budgetRegistry;
+
+  const enterBudget = useCallback(
+    (budgetId: string) => {
+      flushActiveBudgetFinancial();
+      flushActiveBudgetSettings();
+      const cached = budgetFinancialCacheRef.current[budgetId] ?? loadBudgetFinancialLocal(budgetId);
+      budgetFinancialCacheRef.current[budgetId] = cached;
+      setActiveBudgetId(budgetId);
+      activeBudgetIdRef.current = budgetId;
+      applyAppData(cached);
+      applyActiveBudgetSettings(budgetId, budgetRegistry);
+      appShellViewRef.current = 'active-budget';
+      setAppShellView('active-budget');
+      setActiveTab('dashboard');
+      setBudgetDrawerOpen(false);
+    },
+    [
+      flushActiveBudgetFinancial,
+      flushActiveBudgetSettings,
+      applyActiveBudgetSettings,
+      budgetRegistry,
+    ],
+  );
+
+  const navigateAppShell = useCallback(
+    (view: AppShellView) => {
+      if (view === 'active-budget') return;
+      flushActiveBudgetFinancial();
+      flushActiveBudgetSettings();
+      appShellViewRef.current = view;
+      setAppShellView(view);
+      setBudgetDrawerOpen(false);
+      setNavOpen(false);
+    },
+    [flushActiveBudgetFinancial, flushActiveBudgetSettings],
+  );
+
+  const handleCreatePersonalBudget = useCallback(
+    (input: CreatePersonalBudgetInput) => {
+      const id = createBudgetId('personal');
+      const meta: PersonalBudgetMeta = {
+        id,
+        name: input.name,
+        startDate: input.startDate,
+        endDate: input.endDate,
+        totalAmount: input.totalAmount,
+        settingsMode: input.settingsMode,
+        linkedBudgetId: input.linkedBudgetId,
+        copiedFromBudgetId: input.copiedFromBudgetId,
+        createdAt: Date.now(),
+      };
+      const nextRegistry: BudgetRegistryState = {
+        ...budgetRegistry,
+        personal: [...budgetRegistry.personal, meta],
+      };
+      budgetFinancialCacheRef.current[id] = { ...EMPTY_USER_APP_DATA };
+      saveBudgetFinancialLocal(id, EMPTY_USER_APP_DATA);
+      budgetSettingsCacheRef.current = initializeBudgetSettingsForNewPersonalBudget(
+        meta,
+        nextRegistry,
+        buildCurrentSettingsSnapshot(),
+        budgetSettingsCacheRef.current,
+      );
+      setBudgetRegistry(nextRegistry);
+      saveBudgetRegistryLocal(nextRegistry);
+      if (user && !user.isAnonymous) {
+        void saveBudgetRegistryCloud(user.uid, nextRegistry);
+        void saveBudgetFinancialCloud(user.uid, id, EMPTY_USER_APP_DATA);
+      }
+      enterBudget(id);
+    },
+    [budgetRegistry, buildCurrentSettingsSnapshot, enterBudget, user],
+  );
+
   const expenseDescriptionLabel = useCallback(
     (description: string) => {
       const trimmed = description.trim();
@@ -3326,18 +3532,17 @@ function App() {
     if (!authReady) return;
 
     let cancelled = false;
-    let unsubExpenses: (() => void) | undefined;
-    let unsubCategories: (() => void) | undefined;
+    let unsubBudgetRegistry: (() => void) | undefined;
     let unsubSettings: (() => void) | undefined;
     let unsubManualOverrides: (() => void) | undefined;
     let unsubCurrencyCommissions: (() => void) | undefined;
-    let initialExpenses = false;
-    let initialCategories = false;
+    let initialRegistry = false;
+    let initialFinancial = false;
     let initialSettings = false;
 
     const markReadyIfComplete = () => {
       if (cancelled) return;
-      if (initialExpenses && initialCategories && initialSettings) {
+      if (initialRegistry && initialFinancial && initialSettings) {
         suppressCloudSaveRef.current = true;
         setDataReady(true);
       }
@@ -3345,6 +3550,12 @@ function App() {
 
     const initUserData = async () => {
       suppressCloudSaveRef.current = true;
+      const sessionUserId = user?.uid ?? null;
+      if (sessionUserId !== budgetBootstrapUserIdRef.current) {
+        budgetBootstrappedRef.current = false;
+        budgetBootstrapUserIdRef.current = sessionUserId;
+      }
+      const shouldBootstrapBudget = !budgetBootstrappedRef.current;
 
       if (!user) {
         if (hadAuthenticatedUserRef.current) {
@@ -3362,14 +3573,16 @@ function App() {
         void listActiveCurrencyCommissions();
         void listActiveManualExchangeOverrides();
         skipNextSettingsSaveRef.current = true;
-        rehydrateIsolatedGuestSession(applySettingsFromCloud);
+        rehydrateIsolatedGuestSession(applySettingsFromCloudRef.current);
         setDataReady(true);
         return;
       }
 
       hadAuthenticatedUserRef.current = !user.isAnonymous;
-      setDataReady(false);
-      setSettingsCloudReady(false);
+      if (shouldBootstrapBudget) {
+        setDataReady(false);
+        setSettingsCloudReady(false);
+      }
 
       if (user.isAnonymous) {
         setGuestLangActive(true);
@@ -3378,11 +3591,23 @@ function App() {
         void listActiveManualExchangeOverrides();
         clearCloudManualExchangeOverrides();
         clearCloudCurrencyCommissions();
-        const guestLang = readGuestLang();
-        if (guestLang) {
-          setLang(guestLang, { persist: false });
+        if (shouldBootstrapBudget) {
+          const guestLang = readGuestLang();
+          if (guestLang) {
+            setLangRef.current(guestLang, { persist: false });
+          }
+          const legacy = loadFromLocalStorage();
+          const registryLocal = loadBudgetRegistryLocal();
+          const { registry, financialCache } = ensureDefaultPersonalBudget(registryLocal, legacy);
+          setBudgetRegistry(registry);
+          budgetFinancialCacheRef.current = financialCache;
+          setActiveBudgetId(DEFAULT_MONTHLY_BUDGET_ID);
+          setAppShellView('active-budget');
+          applyAppData(financialCache[DEFAULT_MONTHLY_BUDGET_ID] ?? legacy);
+          applyActiveBudgetSettingsRef.current(DEFAULT_MONTHLY_BUDGET_ID, registry);
+          setBudgetSystemReady(true);
+          budgetBootstrappedRef.current = true;
         }
-        applyAppData(loadFromLocalStorage());
         setDataReady(true);
         return;
       }
@@ -3391,7 +3616,9 @@ function App() {
       pendingAuthLangRef.current = consumePendingAuthLang();
       setSettingsPersistence('cloud');
       skipNextSettingsSaveRef.current = true;
-      applyIsolatedCloudSessionSeed(applySettingsFromCloud);
+      if (shouldBootstrapBudget) {
+        applyIsolatedCloudSessionSeed(applySettingsFromCloudRef.current);
+      }
       const uid = user.uid;
 
       try {
@@ -3400,103 +3627,61 @@ function App() {
         await ensureCloudDataMigrated(uid);
         if (cancelled) return;
 
-        unsubExpenses = subscribeExpenses(
-          uid,
-          (items, meta) => {
-            if (cancelled || meta.hasPendingWrites) return;
-            setExpenses((prev) => {
-              const normalized = items.map((e) => ({ ...e, date: normalizeDate(e.date) }));
-              if (JSON.stringify(prev) === JSON.stringify(normalized)) return prev;
-              return normalized;
-            });
-            if (!initialExpenses) {
-              initialExpenses = true;
-              markReadyIfComplete();
-            }
-          },
-          () => {
-            if (!cancelled) {
-              setExpenses([]);
-              if (!initialExpenses) {
-                initialExpenses = true;
-                markReadyIfComplete();
-              }
-            }
-          },
-        );
+        if (shouldBootstrapBudget) {
+          let registry = await loadBudgetRegistryCloud(uid);
+          if (registry.personal.length === 0) {
+            registry = await migrateLegacyFinancialToDefaultBudget(uid);
+          }
+          if (cancelled) return;
 
-        unsubCategories = subscribeCategories(
+          setBudgetRegistry(registry);
+          saveBudgetRegistryLocal(registry);
+
+          const financial = await loadBudgetFinancialCloud(uid, DEFAULT_MONTHLY_BUDGET_ID);
+          if (cancelled) return;
+
+          budgetFinancialCacheRef.current[DEFAULT_MONTHLY_BUDGET_ID] = financial;
+          setActiveBudgetId(DEFAULT_MONTHLY_BUDGET_ID);
+          setAppShellView('active-budget');
+          applyAppData(financial);
+          applyActiveBudgetSettingsRef.current(DEFAULT_MONTHLY_BUDGET_ID, registry);
+          setBudgetSystemReady(true);
+          budgetBootstrappedRef.current = true;
+          initialRegistry = true;
+          initialFinancial = true;
+          markReadyIfComplete();
+        }
+
+        unsubBudgetRegistry = subscribeBudgetRegistry(
           uid,
-          (data, meta) => {
+          (nextRegistry, meta) => {
             if (cancelled || meta.hasPendingWrites) return;
-            setCustomCategories((prev) =>
-              JSON.stringify(prev) === JSON.stringify(data.customCategories)
-                ? prev
-                : data.customCategories,
-            );
-            setBudgetsByMonth((prev) =>
-              JSON.stringify(prev) === JSON.stringify(data.budgetsByMonth)
-                ? prev
-                : data.budgetsByMonth,
-            );
-            setBudgetOriginalByMonth((prev) =>
-              JSON.stringify(prev) === JSON.stringify(data.budgetOriginalByMonth)
-                ? prev
-                : (data.budgetOriginalByMonth as Record<string, { amount: number; currency: ExpenseCurrency }>),
-            );
-            setAutoTransferByMonth((prev) =>
-              JSON.stringify(prev) === JSON.stringify(data.autoTransferByMonth)
-                ? prev
-                : data.autoTransferByMonth,
-            );
-            setSubBudgetsByMonth((prev) => {
-              const merged = mergeRemoteSubBudgetsByMonth(
-                prev,
-                data.subBudgetsByMonth,
-                locallyEditedSubBudgetMonthsRef.current,
-              );
-              return JSON.stringify(prev) === JSON.stringify(merged) ? prev : merged;
-            });
-            if (!initialCategories) {
-              initialCategories = true;
-              markReadyIfComplete();
-            }
+            setBudgetRegistry(nextRegistry);
+            saveBudgetRegistryLocal(nextRegistry);
           },
           () => {
-            if (!cancelled) {
-              setCustomCategories([]);
-              setBudgetsByMonth({});
-              setBudgetOriginalByMonth({});
-              setAutoTransferByMonth({});
-              setSubBudgetsByMonth({});
-              if (!initialCategories) {
-                initialCategories = true;
-                markReadyIfComplete();
-              }
-            }
+            if (!cancelled) setBudgetRegistry({ personal: [], shared: [] });
           },
         );
 
         unsubSettings = subscribeSettings(
           uid,
-          (settings, meta) => {
+          (_settings, meta) => {
             if (cancelled || meta.hasPendingWrites) return;
-            const pendingLang = pendingAuthLangRef.current;
-            if (pendingLang) {
-              pendingAuthLangRef.current = null;
-              skipNextSettingsSaveRef.current = true;
-              if (meta.exists) {
-                applySettingsFromCloud({ ...settings, lang: pendingLang });
-              } else {
-                applySettingsFromCloud({ ...EMPTY_USER_SETTINGS, lang: pendingLang });
+
+            if (appShellViewRef.current === 'active-budget') {
+              const pendingLang = pendingAuthLangRef.current;
+              if (pendingLang) {
+                pendingAuthLangRef.current = null;
+                setLangRef.current(pendingLang, { persist: false });
               }
-            } else if (meta.exists) {
               skipNextSettingsSaveRef.current = true;
-              applySettingsFromCloud(settings);
-            } else {
-              skipNextSettingsSaveRef.current = true;
-              applySettingsFromCloud({ ...EMPTY_USER_SETTINGS });
+              applyActiveBudgetSettingsRef.current(
+                activeBudgetIdRef.current,
+                budgetRegistryRef.current,
+              );
             }
+
             if (!initialSettings) {
               initialSettings = true;
               setSettingsCloudReady(true);
@@ -3553,13 +3738,12 @@ function App() {
 
     return () => {
       cancelled = true;
-      unsubExpenses?.();
-      unsubCategories?.();
+      unsubBudgetRegistry?.();
       unsubSettings?.();
       unsubManualOverrides?.();
       unsubCurrencyCommissions?.();
     };
-  }, [user, authReady, applySettingsFromCloud, setSettingsPersistence, setLang]);
+  }, [user, authReady, setSettingsPersistence]);
 
   // Purge exchange-fee documents older than 24h while a signed-in user session is active.
   useEffect(() => {
@@ -3583,21 +3767,76 @@ function App() {
     };
   }, [user]);
 
-  // Persist financial changes: localStorage for guests, debounced Firestore for accounts.
+  // Real-time sync for active budget financial data (registered users).
   useEffect(() => {
-    if (!dataReady || !user) return;
+    if (!user || user.isAnonymous || !budgetSystemReady || !dataReady || appShellView !== 'active-budget') {
+      return;
+    }
 
-    const payload = {
+    let cancelled = false;
+    suppressCloudSaveRef.current = true;
+    const unsub = subscribeBudgetFinancial(
+      user.uid,
+      activeBudgetId,
+      (data, meta) => {
+        if (cancelled || meta.hasPendingWrites || appShellViewRef.current !== 'active-budget') return;
+        budgetFinancialCacheRef.current[activeBudgetId] = data;
+        applyAppData(data);
+      },
+      () => {
+        if (!cancelled && appShellViewRef.current === 'active-budget') {
+          const empty = { ...EMPTY_USER_APP_DATA };
+          budgetFinancialCacheRef.current[activeBudgetId] = empty;
+          applyAppData(empty);
+        }
+      },
+    );
+
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [user, budgetSystemReady, dataReady, activeBudgetId, appShellView]);
+
+  // Persist scoped budget settings while inside an active budget.
+  useEffect(() => {
+    if (!isInsideActiveBudget || !activeBudgetId) return;
+    const storageKey = resolveSettingsStorageKey(activeBudgetId, budgetRegistry);
+    const snapshot = buildCurrentSettingsSnapshot();
+    budgetSettingsCacheRef.current[storageKey] = snapshot;
+    saveBudgetSettingsLocal(storageKey, snapshot);
+  }, [
+    lang,
+    keepOriginalValues,
+    displayCurrency,
+    savedColors,
+    customCurrencies,
+    currencyLayout,
+    themePreferences,
+    isInsideActiveBudget,
+    activeBudgetId,
+    budgetRegistry,
+    buildCurrentSettingsSnapshot,
+  ]);
+
+  // Persist financial changes per budgetId: localStorage for guests, debounced Firestore for accounts.
+  useEffect(() => {
+    if (!dataReady || !user || appShellView !== 'active-budget') return;
+
+    const payload = snapshotUserAppData({
       expenses,
       customCategories,
       budgetsByMonth,
       budgetOriginalByMonth,
-      autoTransferByMonth,
       subBudgetsByMonth,
-    };
+      autoTransferByMonth,
+    });
+
+    budgetFinancialCacheRef.current[activeBudgetId] = payload;
 
     if (user.isAnonymous) {
-      saveToLocalStorage(payload);
+      saveBudgetFinancialLocal(activeBudgetId, payload);
+      saveBudgetRegistryLocal(budgetRegistry);
       return;
     }
 
@@ -3607,19 +3846,11 @@ function App() {
     }
 
     const uid = user.uid;
+    const budgetId = activeBudgetId;
     const timer = window.setTimeout(() => {
       const currentUser = auth.currentUser;
       if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) return;
-      void Promise.all([
-        saveExpensesToCloud(uid, expenses),
-        saveCategoriesToCloud(uid, {
-          customCategories,
-          budgetsByMonth,
-          budgetOriginalByMonth,
-          autoTransferByMonth,
-          subBudgetsByMonth,
-        }),
-      ]).catch(() => {
+      void saveBudgetFinancialCloud(uid, budgetId, payload).catch(() => {
         // Non-blocking; next edit will retry.
       });
     }, 400);
@@ -3634,6 +3865,9 @@ function App() {
     subBudgetsByMonth,
     dataReady,
     user,
+    activeBudgetId,
+    appShellView,
+    budgetRegistry,
   ]);
 
   // Budget update entry point. If the active month already has sub-budget
@@ -4165,7 +4399,13 @@ function App() {
           <div className="flex items-center justify-between gap-3">
             <button
               type="button"
-              onClick={() => handleTabSelect('dashboard')}
+              onClick={() => {
+                if (!isInsideActiveBudget) {
+                  enterBudget(activeBudgetId);
+                } else {
+                  handleTabSelect('dashboard');
+                }
+              }}
               aria-label={tr('tabDashboard')}
               className="flex min-w-0 cursor-pointer items-center gap-3 rounded-xl text-start outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-emerald-500/50 active:opacity-80"
             >
@@ -4186,6 +4426,11 @@ function App() {
             </button>
 
             <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+              <BudgetDrawerMenu
+                open={budgetDrawerOpen}
+                onOpenChange={setBudgetDrawerOpen}
+                onNavigate={navigateAppShell}
+              />
               <button
                 type="button"
                 onClick={handleQuickLanguageToggle}
@@ -4201,13 +4446,15 @@ function App() {
                   onOpenProfile={() => openProfile()}
                 />
               </div>
-              <CollapsibleNavMenu
-                variant="desktop"
-                activeTab={activeTab}
-                open={navOpen}
-                onOpenChange={setNavOpen}
-                onTabSelect={handleTabSelect}
-              />
+              {isInsideActiveBudget && (
+                <CollapsibleNavMenu
+                  variant="desktop"
+                  activeTab={activeTab}
+                  open={navOpen}
+                  onOpenChange={setNavOpen}
+                  onTabSelect={handleTabSelect}
+                />
+              )}
             </div>
           </div>
         </div>
@@ -4219,7 +4466,7 @@ function App() {
           'relative z-0 mx-auto w-full max-w-5xl min-h-0 flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8',
           isScrollRoute
             ? `${themeScrollViewportClass} ${themeScrollSafeContentClass}`
-            : `${themeAntiClipVisibleClass} max-md:pb-24 md:pb-10`,
+            : `${themeAntiClipVisibleClass} ${isInsideActiveBudget ? 'max-md:pb-24' : 'max-md:pb-6'} md:pb-10`,
         ].join(' ')}
       >
         {isProfileView ? (
@@ -4234,6 +4481,16 @@ function App() {
             recentExpenseCurrencies={recentExpenseCurrencies}
             initialCurrencySections={profileInitialCurrencySections}
           />
+        ) : appShellView === 'personal-budgets' ? (
+          <PersonalBudgetsPage
+            budgets={budgetRegistry.personal}
+            activeBudgetId={activeBudgetId}
+            displayCurrency={displayCurrency}
+            onEnterBudget={enterBudget}
+            onCreateBudget={handleCreatePersonalBudget}
+          />
+        ) : appShellView === 'shared-budgets' ? (
+          <SharedBudgetsPage />
         ) : (
           <>
         {/* ============================ DASHBOARD ============================ */}
@@ -4944,11 +5201,13 @@ function App() {
         </div>
       )}
 
-      <MobileBottomNav
-        activeTab={activeTab}
-        onOpenProfile={() => openProfile()}
-        onTabSelect={handleTabSelect}
-      />
+      {isInsideActiveBudget && (
+        <MobileBottomNav
+          activeTab={activeTab}
+          onOpenProfile={() => openProfile()}
+          onTabSelect={handleTabSelect}
+        />
+      )}
 
       {/* Footer (desktop only; mobile uses the bottom nav) */}
       <footer className={themeFooterClass}>

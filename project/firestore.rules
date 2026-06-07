@@ -51,6 +51,25 @@ service cloud.firestore {
         && request.resource.data.custom_currencies.size() <= 20;
     }
 
+    function isValidBudgetRegistryDoc() {
+      return request.resource.data.keys().hasAll(['personal', 'shared'])
+        && request.resource.data.personal is list
+        && request.resource.data.shared is list;
+    }
+
+    function isValidBudgetFinancialDoc() {
+      return request.resource.data.keys().hasAll([
+          'expenses',
+          'customCategories',
+          'budgetsByMonth',
+          'subBudgetsByMonth',
+        ])
+        && request.resource.data.expenses is list
+        && request.resource.data.customCategories is list
+        && request.resource.data.budgetsByMonth is map
+        && request.resource.data.subBudgetsByMonth is map;
+    }
+
     function isValidLegacyAppData() {
       return request.resource.data.keys().hasAll([
           'expenses',
@@ -129,6 +148,23 @@ service cloud.firestore {
           && docId == 'app'
           && isValidLegacyAppData();
         allow delete: if isOwner(userId) && isPersistedAccount() && docId == 'app';
+      }
+
+      match /budget_registry/{docId} {
+        allow read: if isOwner(userId) && isPersistedAccount();
+        allow create, update: if isOwner(userId)
+          && isPersistedAccount()
+          && docId == 'data'
+          && isValidBudgetRegistryDoc();
+        allow delete: if isOwner(userId) && isPersistedAccount() && docId == 'data';
+      }
+
+      match /budget_financial/{budgetId} {
+        allow read: if isOwner(userId) && isPersistedAccount();
+        allow create, update: if isOwner(userId)
+          && isPersistedAccount()
+          && isValidBudgetFinancialDoc();
+        allow delete: if isOwner(userId) && isPersistedAccount();
       }
     }
   }
