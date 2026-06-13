@@ -13,6 +13,8 @@ export type AppShellView = 'active-budget' | 'personal-budgets' | 'shared-budget
 
 export type BudgetSettingsInitMode = 'copy-default' | 'linked' | 'copy-from';
 
+export type PersonalBudgetStatus = 'active' | 'archived' | 'trashed';
+
 export interface PersonalBudgetMeta {
   id: string;
   name: string;
@@ -23,6 +25,11 @@ export interface PersonalBudgetMeta {
   settingsMode: BudgetSettingsInitMode;
   linkedBudgetId?: string;
   copiedFromBudgetId?: string;
+  icon?: string;
+  color?: string;
+  isLinkedToMain?: boolean;
+  keepAfterDates?: boolean | null;
+  status?: PersonalBudgetStatus;
   createdAt: number;
 }
 

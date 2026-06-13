@@ -3522,6 +3522,11 @@ function App() {
         settingsMode: input.settingsMode,
         linkedBudgetId: input.linkedBudgetId,
         copiedFromBudgetId: input.copiedFromBudgetId,
+        icon: input.icon,
+        color: input.color,
+        isLinkedToMain: input.isLinkedToMain,
+        keepAfterDates: input.keepAfterDates,
+        status: input.status,
         createdAt: Date.now(),
       };
       const nextRegistry: BudgetRegistryState = {
@@ -3530,10 +3535,13 @@ function App() {
       };
 
       const buildInitialFinancial = async (): Promise<typeof EMPTY_USER_APP_DATA> => {
-        if (!input.startDate || input.totalAmount <= 0) {
+        if (input.totalAmount <= 0) {
           return { ...EMPTY_USER_APP_DATA };
         }
-        const monthKey = input.startDate.slice(0, 7);
+        const now = new Date();
+        const monthKey =
+          input.startDate?.slice(0, 7) ??
+          `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
         let ilsAmount = roundMoneyAmount(input.totalAmount);
         if (displayCurrency !== 'ILS') {
           const rates = getCachedExchangeRates() ?? (await fetchExchangeRates().catch(() => null));

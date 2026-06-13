@@ -1,5 +1,18 @@
-import { useMemo, useState } from 'react';
-import { Calendar, ChevronRight, Plus, Wallet } from 'lucide-react';
+import { useMemo, useState, type ComponentType } from 'react';
+import {
+  Briefcase,
+  Calendar,
+  Car,
+  ChevronRight,
+  Coffee,
+  Gift,
+  Home,
+  Plane,
+  Plus,
+  ShoppingCart,
+  Wallet,
+  type LucideProps,
+} from 'lucide-react';
 import { useLanguage } from '../LanguageContext';
 import {
   primaryActionButtonClass,
@@ -24,8 +37,33 @@ import type { ExpenseCurrency } from '../services/exchangeRateService';
 import {
   type BudgetSettingsInitMode,
   type PersonalBudgetMeta,
+  type PersonalBudgetStatus,
 } from '../services/budgetArchitecture';
 import { parseMoneyInput } from '../services/money';
+
+const BUDGET_COLOR_OPTIONS = [
+  { id: 'emerald', hex: '#10B981' },
+  { id: 'blue', hex: '#3B82F6' },
+  { id: 'indigo', hex: '#6366F1' },
+  { id: 'violet', hex: '#8B5CF6' },
+  { id: 'amber', hex: '#F59E0B' },
+  { id: 'rose', hex: '#F43F5E' },
+  { id: 'teal', hex: '#14B8A6' },
+  { id: 'cyan', hex: '#06B6D4' },
+] as const;
+
+const BUDGET_ICON_OPTIONS: { id: string; Icon: ComponentType<LucideProps> }[] = [
+  { id: 'plane', Icon: Plane },
+  { id: 'car', Icon: Car },
+  { id: 'house', Icon: Home },
+  { id: 'gift', Icon: Gift },
+  { id: 'shopping-cart', Icon: ShoppingCart },
+  { id: 'wallet', Icon: Wallet },
+  { id: 'coffee', Icon: Coffee },
+  { id: 'briefcase', Icon: Briefcase },
+];
+
+const ICON_BY_ID = Object.fromEntries(BUDGET_ICON_OPTIONS.map((o) => [o.id, o.Icon]));
 
 export interface CreatePersonalBudgetInput {
   name: string;
@@ -35,6 +73,11 @@ export interface CreatePersonalBudgetInput {
   settingsMode: BudgetSettingsInitMode;
   linkedBudgetId?: string;
   copiedFromBudgetId?: string;
+  icon: string;
+  color: string;
+  isLinkedToMain: boolean;
+  keepAfterDates: boolean | null;
+  status: PersonalBudgetStatus;
 }
 
 interface PersonalBudgetsPageProps {
@@ -43,6 +86,15 @@ interface PersonalBudgetsPageProps {
   displayCurrency: ExpenseCurrency;
   onEnterBudget: (budgetId: string) => void;
   onCreateBudget: (input: CreatePersonalBudgetInput) => void;
+}
+
+function RequiredMark() {
+  return (
+    <span className="text-rose-500" aria-hidden>
+      {' '}
+      *
+    </span>
+  );
 }
 
 export default function PersonalBudgetsPage({
@@ -58,9 +110,15 @@ export default function PersonalBudgetsPage({
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [totalAmount, setTotalAmount] = useState(0);
+  const [color, setColor] = useState<string>(BUDGET_COLOR_OPTIONS[0].hex);
+  const [icon, setIcon] = useState<string>('wallet');
   const [settingsMode, setSettingsMode] = useState<BudgetSettingsInitMode>('copy-default');
   const [linkedBudgetId, setLinkedBudgetId] = useState('');
   const [copiedFromBudgetId, setCopiedFromBudgetId] = useState('');
+  const [isLinkedToMain, setIsLinkedToMain] = useState(false);
+  const [keepAfterDates, setKeepAfterDates] = useState(true);
+
+  const hasDateRange = startDate.length > 0 && endDate.length > 0;
 
   const sortedBudgets = useMemo(
     () =>
@@ -76,6 +134,9 @@ export default function PersonalBudgetsPage({
     meta.isDefaultMonthly ? tr('monthlyDefaultBudgetName') : meta.name;
 
   const formatDateRange = (meta: PersonalBudgetMeta) => {
+    if (!meta.startDate || !meta.endDate) {
+      return tr('budgetNoDateRange');
+    }
     const fmt = (iso: string) =>
       new Date(iso).toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US', {
         day: 'numeric',
@@ -85,22 +146,28 @@ export default function PersonalBudgetsPage({
     return `${fmt(meta.startDate)} – ${fmt(meta.endDate)}`;
   };
 
+  const resolveBudgetIcon = (iconId?: string) => ICON_BY_ID[iconId ?? 'wallet'] ?? Wallet;
+
   const resetForm = () => {
     setName('');
     setStartDate('');
     setEndDate('');
     setTotalAmount(0);
+    setColor(BUDGET_COLOR_OPTIONS[0].hex);
+    setIcon('wallet');
     setSettingsMode('copy-default');
     setLinkedBudgetId('');
     setCopiedFromBudgetId('');
+    setIsLinkedToMain(false);
+    setKeepAfterDates(true);
     setShowCreateForm(false);
   };
 
   const handleCreate = () => {
     const trimmedName = name.trim();
-    if (!trimmedName || !startDate || !endDate) return;
+    if (!trimmedName) return;
     const amount = parseMoneyInput(String(totalAmount)) ?? totalAmount;
-    if (amount < 0) return;
+    if (amount <= 0) return;
     if (settingsMode === 'linked' && !linkedBudgetId) return;
     if (settingsMode === 'copy-from' && !copiedFromBudgetId) return;
 
@@ -112,14 +179,18 @@ export default function PersonalBudgetsPage({
       settingsMode,
       linkedBudgetId: settingsMode === 'linked' ? linkedBudgetId : undefined,
       copiedFromBudgetId: settingsMode === 'copy-from' ? copiedFromBudgetId : undefined,
+      icon,
+      color,
+      isLinkedToMain,
+      keepAfterDates: hasDateRange ? keepAfterDates : null,
+      status: 'active',
     });
     resetForm();
   };
 
   const canCreate =
     name.trim().length > 0 &&
-    startDate.length > 0 &&
-    endDate.length > 0 &&
+    totalAmount > 0 &&
     (settingsMode !== 'linked' || linkedBudgetId.length > 0) &&
     (settingsMode !== 'copy-from' || copiedFromBudgetId.length > 0);
 
@@ -135,6 +206,8 @@ export default function PersonalBudgetsPage({
       <div className="space-y-3">
         {sortedBudgets.map((budget) => {
           const isActive = activeBudgetId === budget.id;
+          const BudgetIcon = resolveBudgetIcon(budget.icon);
+          const accentColor = budget.color ?? BUDGET_COLOR_OPTIONS[0].hex;
           return (
             <button
               key={budget.id}
@@ -144,8 +217,11 @@ export default function PersonalBudgetsPage({
                 isActive ? 'border-emerald-500/50 bg-[var(--btn-filter-hover)]' : ''
               }`}
             >
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-400">
-                <Wallet className="h-5 w-5" />
+              <span
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
+                style={{ backgroundColor: `${accentColor}22`, color: accentColor }}
+              >
+                <BudgetIcon className="h-5 w-5" />
               </span>
               <span className="min-w-0 flex-1">
                 <span className={`block truncate text-base font-semibold ${themeTextClass}`}>
@@ -183,17 +259,80 @@ export default function PersonalBudgetsPage({
             {tr('createPersonalBudget')}
           </h2>
 
-          <div>
-            <label className={`mb-2 block text-sm font-medium ${typographyLabelClass}`}>
-              {tr('budgetNameLabel')}
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={tr('budgetNamePlaceholder')}
-              className={`w-full ${surfaceInputLgClass}`}
-            />
+          {/* Row: Budget Name → Color → Icon */}
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+            <div className="min-w-0 flex-1">
+              <label className={`mb-2 block text-sm font-medium ${typographyLabelClass}`}>
+                {tr('budgetNameLabel')}
+                <RequiredMark />
+              </label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={tr('budgetNamePlaceholder')}
+                className={`w-full ${surfaceInputLgClass}`}
+                required
+              />
+            </div>
+
+            <div className="shrink-0">
+              <span className={`mb-2 block text-sm font-medium ${typographyLabelClass}`}>
+                {tr('budgetColorLabel')}
+              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                {BUDGET_COLOR_OPTIONS.map((option) => {
+                  const selected = color === option.hex;
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => setColor(option.hex)}
+                      aria-label={option.id}
+                      aria-pressed={selected}
+                      className={[
+                        'h-9 w-9 rounded-full border-2 transition-transform active:scale-95',
+                        selected
+                          ? 'border-white ring-2 ring-offset-2 ring-offset-[var(--main-card-surface-bg)] scale-105'
+                          : 'border-transparent hover:scale-105',
+                      ].join(' ')}
+                      style={{
+                        backgroundColor: option.hex,
+                        ...(selected ? { ringColor: option.hex } : {}),
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="shrink-0">
+              <span className={`mb-2 block text-sm font-medium ${typographyLabelClass}`}>
+                {tr('budgetIconLabel')}
+              </span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {BUDGET_ICON_OPTIONS.map(({ id, Icon }) => {
+                  const selected = icon === id;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => setIcon(id)}
+                      aria-label={id}
+                      aria-pressed={selected}
+                      className={[
+                        'flex h-9 w-9 items-center justify-center rounded-xl border transition-all active:scale-95',
+                        selected
+                          ? 'border-[var(--btn-primary-bg)] bg-[var(--btn-primary-bg)]/15 text-[var(--btn-primary-bg)]'
+                          : 'border-[var(--surface-input-border)] bg-[var(--surface-input-bg)] text-[var(--color-category-5-muted)] hover:border-[var(--btn-primary-bg)]/40',
+                      ].join(' ')}
+                    >
+                      <Icon className="h-4 w-4" />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -224,6 +363,7 @@ export default function PersonalBudgetsPage({
           <div>
             <label className={`mb-2 block text-sm font-medium ${typographyLabelClass}`}>
               {tr('budgetTotalAmountLabel')}
+              <RequiredMark />
             </label>
             <MoneyAmountInput
               value={totalAmount}
@@ -303,6 +443,30 @@ export default function PersonalBudgetsPage({
               )}
             </label>
           </fieldset>
+
+          <div className="space-y-3 border-t border-[var(--color-sub-cards-border)] pt-4">
+            <label className={`flex cursor-pointer items-start gap-3 ${subCardOptionRowClass}`}>
+              <input
+                type="checkbox"
+                checked={isLinkedToMain}
+                onChange={(e) => setIsLinkedToMain(e.target.checked)}
+                className="mt-1 h-4 w-4 shrink-0 rounded border-[var(--surface-input-border)] text-emerald-500 focus:ring-emerald-500/30"
+              />
+              <span className={`text-sm ${themeTextClass}`}>{tr('budgetLinkToMain')}</span>
+            </label>
+
+            {hasDateRange && (
+              <label className={`flex cursor-pointer items-start gap-3 ${subCardOptionRowClass}`}>
+                <input
+                  type="checkbox"
+                  checked={keepAfterDates}
+                  onChange={(e) => setKeepAfterDates(e.target.checked)}
+                  className="mt-1 h-4 w-4 shrink-0 rounded border-[var(--surface-input-border)] text-emerald-500 focus:ring-emerald-500/30"
+                />
+                <span className={`text-sm ${themeTextClass}`}>{tr('budgetKeepAfterDates')}</span>
+              </label>
+            )}
+          </div>
 
           <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
             <button
