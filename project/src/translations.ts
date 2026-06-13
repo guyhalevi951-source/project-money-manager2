@@ -361,6 +361,7 @@ const he: TranslationDict = {
   expenseRemoveFee: 'הסר עמלה מהוצאה זו',
   expenseBaseValuePreview: 'לפי ערך המקור: {amount}',
   expenseCurrentChoicePreview: 'הסכום המוערך לפי הבחירה הנוכחית: {amount}',
+  expenseManualRateActiveReminder: '💡 שער חליפין ידני מופעל',
   actions: 'פעולות',
 
   // Create category
@@ -717,6 +718,7 @@ const en: TranslationDict = {
   expenseRemoveFee: 'Remove fee from this expense',
   expenseBaseValuePreview: 'By source value: {amount}',
   expenseCurrentChoicePreview: 'Estimated amount for current selection: {amount}',
+  expenseManualRateActiveReminder: '💡 Manual exchange rate active',
   actions: 'Actions',
   categoryName: 'Category name',
   categoryNamePlaceholder: 'e.g. Transport, Gifts',

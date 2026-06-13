@@ -15,7 +15,7 @@ import {
   hasExchangeRate,
   type ExchangeRates,
 } from '../services/exchangeRateService';
-import { listActiveManualExchangeOverrides } from '../services/manualExchangeOverrideService';
+import { listActiveManualExchangeOverrides, subscribeManualOverridesUpdated } from '../services/manualExchangeOverrideService';
 import {
   processTransactionWithUserRules,
   toActiveExchangeRatesFromSnapshot,
@@ -30,7 +30,7 @@ import {
   filterFormControlClass,
   primaryActionSelectedChipClass,
 } from '../styles/actionButtonStyles';
-import { typographyLabelClass } from '../styles/themeSurfaceStyles';
+import { typographyLabelClass, typographyMutedClass } from '../styles/themeSurfaceStyles';
 import {
   detectLocalCurrency,
   isDetectedCurrencyAccepted,
@@ -100,6 +100,7 @@ export default function ExpenseAmountField({
   );
   const [error, setError] = useState(false);
   const [commissionVersion, setCommissionVersion] = useState(0);
+  const [manualOverrideVersion, setManualOverrideVersion] = useState(0);
 
   const selectedMeta = useMemo(() => getCurrencyMeta(inputCurrency), [inputCurrency]);
 
@@ -217,6 +218,14 @@ export default function ExpenseAmountField({
     [],
   );
 
+  useEffect(
+    () =>
+      subscribeManualOverridesUpdated(() => {
+        setManualOverrideVersion((version) => version + 1);
+      }),
+    [],
+  );
+
   const parsedAmount = parseFloat(amount);
 
   const isMaxLengthReached = amount.length >= AMOUNT_INPUT_MAX_LENGTH;
@@ -271,14 +280,17 @@ export default function ExpenseAmountField({
   const convertedDisplayAmount = processedPreview?.finalConvertedAmount ?? null;
   const activeCommissionPercent = processedPreview?.appliedFeePercentage ?? 0;
 
-  const displayPreviewFormatted = useMemo(() => {
+  const convertedAmountFormatted = useMemo(() => {
     if (convertedDisplayAmount == null) return null;
-    const base = formatAmountWithSymbol(convertedDisplayAmount, displayCurrency);
-    if (activeCommissionPercent > 0) {
-      return `${base} ${tr('inclFeeShort')}`;
-    }
-    return base;
-  }, [convertedDisplayAmount, displayCurrency, activeCommissionPercent, tr]);
+    return formatAmountWithSymbol(convertedDisplayAmount, displayCurrency);
+  }, [convertedDisplayAmount, displayCurrency]);
+
+  const hasActive24hManualOverride = useMemo(() => {
+    const now = Date.now();
+    return listActiveManualExchangeOverrides().some(
+      (entry) => entry.source === 'local_24h' && entry.expiresAt != null && entry.expiresAt > now,
+    );
+  }, [manualOverrideVersion]);
 
   const amountInputSize = useMemo(() => getAmountInputWidth(amount), [amount]);
 
@@ -477,7 +489,7 @@ export default function ExpenseAmountField({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2, ease: 'easeOut' }}
-              className="mt-1.5 max-w-full truncate text-sm leading-snug text-neutral-400"
+              className="mt-1.5 max-w-full text-sm leading-snug text-neutral-400"
               aria-live="polite"
             >
               {loading ? (
@@ -487,15 +499,30 @@ export default function ExpenseAmountField({
                 </span>
               ) : error ? (
                 <span className="text-amber-400/80">{tr('exchangeRatesUnavailable')}</span>
-              ) : displayPreviewFormatted ? (
-                <LtrNumeric className="inline-flex items-center whitespace-nowrap">
-                  <span>(≈ </span>
-                  <span className="inline-flex items-center gap-x-1.5 font-medium tabular-nums text-neutral-300/90">
-                    <span>{displayPreviewFormatted}</span>
-                    <CurrencyFlag countryCode={displayMeta.countryCode} size="text" alt="" />
-                  </span>
-                  <span>)</span>
-                </LtrNumeric>
+              ) : convertedAmountFormatted ? (
+                <div className="flex flex-col gap-0.5">
+                  <div
+                    dir="rtl"
+                    className="flex flex-wrap items-center justify-end gap-x-1.5 gap-y-0.5 max-w-full"
+                  >
+                    <span className="inline-flex shrink-0 items-center gap-x-1.5" dir="ltr">
+                      <LtrNumeric className="inline-flex font-medium tabular-nums text-neutral-300/90 whitespace-nowrap">
+                        (≈ {convertedAmountFormatted})
+                      </LtrNumeric>
+                      <CurrencyFlag countryCode={displayMeta.countryCode} size="text" alt="" />
+                    </span>
+                    {activeCommissionPercent > 0 && (
+                      <span className="shrink-0 whitespace-nowrap text-neutral-500">
+                        {tr('inclFeeShort')}
+                      </span>
+                    )}
+                  </div>
+                  {hasActive24hManualOverride && (
+                    <p className={`text-xs leading-snug text-amber-400/75 ${typographyMutedClass}`}>
+                      {tr('expenseManualRateActiveReminder')}
+                    </p>
+                  )}
+                </div>
               ) : (
                 <span className="text-amber-400/80">{tr('exchangeRatesUnavailable')}</span>
               )}
