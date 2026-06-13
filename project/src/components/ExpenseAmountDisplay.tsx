@@ -10,6 +10,10 @@ interface ExpenseAmountDisplayProps {
   variant?: 'table' | 'card';
   /** When false, hides the `(≈ …)` equivalent line (e.g. expense currency matches display currency). */
   showSecondaryLine?: boolean;
+  /** Line 3 badge label shown when a manual exchange rate shaped this row (e.g. "✍️ שער ידני"). */
+  manualBadgeLabel?: string;
+  /** Line 3 badge label shown when a conversion fee was applied (e.g. "💳 כולל עמלה"). */
+  feeBadgeLabel?: string;
 }
 
 /**
@@ -44,12 +48,25 @@ function SecondaryConversionLine({
   );
 }
 
+/** Subtle, muted line-3 indicator (manual rate / fee) below the conversion line. */
+function ModifierBadge({ label }: { label: string }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-[var(--color-depth-inner)] px-2 py-0.5 text-[10px] font-medium leading-none ${typographyMutedClass}`}
+    >
+      {label}
+    </span>
+  );
+}
+
 export default function ExpenseAmountDisplay({
   amount,
   originalAmount,
   originalCurrency,
   variant = 'table',
   showSecondaryLine = true,
+  manualBadgeLabel,
+  feeBadgeLabel,
 }: ExpenseAmountDisplayProps) {
   const { formatExpenseMoney } = useLanguage();
   const { primary, secondary, secondaryFlagCode } = formatExpenseMoney(
@@ -58,6 +75,7 @@ export default function ExpenseAmountDisplay({
     originalCurrency,
   );
   const equivalentLine = showSecondaryLine ? secondary : undefined;
+  const hasBadges = Boolean(manualBadgeLabel || feeBadgeLabel);
 
   const mainClass =
     variant === 'card'
@@ -71,7 +89,7 @@ export default function ExpenseAmountDisplay({
       className={[
         'flex flex-col justify-center',
         variant === 'card' ? 'items-end' : 'items-start sm:items-end',
-        equivalentLine ? 'gap-0.5' : 'gap-0',
+        equivalentLine || hasBadges ? 'gap-0.5' : 'gap-0',
       ].join(' ')}
     >
       <LtrNumeric className={`${mainClass} whitespace-nowrap`}>{primary}</LtrNumeric>
@@ -81,6 +99,17 @@ export default function ExpenseAmountDisplay({
           flagCurrency={secondaryFlagCode}
           className={secondaryClass}
         />
+      )}
+      {hasBadges && (
+        <div
+          className={[
+            'mt-0.5 flex flex-wrap items-center gap-1',
+            variant === 'card' ? 'justify-end' : 'justify-start sm:justify-end',
+          ].join(' ')}
+        >
+          {manualBadgeLabel && <ModifierBadge label={manualBadgeLabel} />}
+          {feeBadgeLabel && <ModifierBadge label={feeBadgeLabel} />}
+        </div>
       )}
     </div>
   );

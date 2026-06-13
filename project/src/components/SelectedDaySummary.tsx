@@ -1,8 +1,10 @@
-import { LtrNumeric, useLanguage } from '../LanguageContext';
+import { useLanguage } from '../LanguageContext';
+import { DisplayCurrencyAmount } from './DisplayMoney';
 import { subCardClass, typographyBodyClass, typographyMutedClass } from '../styles/themeSurfaceStyles';
 
 export interface SelectedDaySummaryPoint {
   iso: string;
+  /** Amount ALREADY projected into the active display currency. */
   amount: number;
 }
 
@@ -13,7 +15,7 @@ interface SelectedDaySummaryProps {
 
 /** Fixed summary below the insights trend chart (replaces floating Recharts tooltip). */
 export default function SelectedDaySummary({ point, formatDate }: SelectedDaySummaryProps) {
-  const { tr, lang, dir, formatMoney } = useLanguage();
+  const { tr, lang, dir } = useLanguage();
 
   return (
     <div
@@ -28,7 +30,7 @@ export default function SelectedDaySummary({ point, formatDate }: SelectedDaySum
       </p>
       <p className={`mt-1.5 text-sm leading-relaxed ${typographyMutedClass}`}>
         {tr('amountIls')}:{' '}
-        <LtrNumeric className={`font-bold ${typographyBodyClass}`}>{formatMoney(point.amount)}</LtrNumeric>
+        <DisplayCurrencyAmount amount={point.amount} className={`font-bold ${typographyBodyClass}`} />
       </p>
     </div>
   );

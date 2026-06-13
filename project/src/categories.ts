@@ -8,6 +8,11 @@ import {
   ShoppingBag,
   Car,
   Gift,
+  Plane,
+  ShoppingCart,
+  Wallet,
+  Coffee,
+  Briefcase,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -17,6 +22,8 @@ export interface Category {
   label: string;
   icon: LucideIcon;
   color: string;
+  isLinkedBudget?: boolean;
+  sourceBudgetId?: string;
 }
 
 /** Built-in Hebrew categories — single source of truth for colors and icons. */
@@ -48,6 +55,22 @@ const ICON_MAP: Record<string, LucideIcon> = Object.fromEntries(
 );
 
 export const resolveIcon = (name: string): LucideIcon => ICON_MAP[name] ?? Tag;
+
+/** Personal-budget form icon ids (PersonalBudgetsPage) → Lucide components. */
+const BUDGET_FORM_ICON_MAP: Record<string, LucideIcon> = {
+  plane: Plane,
+  car: Car,
+  house: Home,
+  gift: Gift,
+  'shopping-cart': ShoppingCart,
+  wallet: Wallet,
+  coffee: Coffee,
+  briefcase: Briefcase,
+};
+
+export function resolveBudgetFormIcon(iconId: string): LucideIcon {
+  return BUDGET_FORM_ICON_MAP[iconId] ?? resolveIcon(iconId);
+}
 
 export const COLOR_OPTIONS: { name: string; class: string }[] = [
   { name: 'אמרלד', class: 'bg-emerald-500' },

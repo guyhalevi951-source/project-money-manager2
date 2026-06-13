@@ -10,6 +10,7 @@ import {
   type ReactNode,
   type TouchEvent,
 } from 'react';
+import { flushSync } from 'react-dom';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, type PanInfo } from 'framer-motion';
 import {
@@ -41,6 +42,7 @@ import {
   CATEGORIES,
   ICON_OPTIONS,
   resolveIcon,
+  resolveBudgetFormIcon,
   DEFAULT_CATEGORY_COLOR,
   hexForColor,
   aggregateByCategory,
@@ -67,7 +69,9 @@ import {
 import ExpenseAmountField from './components/ExpenseAmountField';
 import SelectedDaySummary from './components/SelectedDaySummary';
 import ExpenseAmountDisplay from './components/ExpenseAmountDisplay';
-import DisplayMoney from './components/DisplayMoney';
+import DisplayMoney, { DisplayCurrencyAmount } from './components/DisplayMoney';
+import { useDisplayProjection } from './hooks/useDisplayProjection';
+import { useRateCacheSync } from './hooks/useRateCacheSync';
 import CategoryColorChip from './components/CategoryColorChip';
 import { LocalizedUserText, LtrNumeric, useLanguage } from './LanguageContext';
 import { formatTranslation, localizeCategoryLabel } from './translations';
@@ -78,6 +82,11 @@ import {
   symbolToCurrency,
   type AmountDisplayParts,
 } from './services/displayCurrencyUtils';
+import {
+  buildMoneyProjectionContext,
+  immutableFromExpense,
+  sumMoneyProjections,
+} from './services/immutableMoney';
 import { DisplayCurrencyInlineMenu } from './components/DisplayCurrencySelector';
 import { themeCategoryProps } from './services/buttonThemeService';
 import {
@@ -86,7 +95,10 @@ import {
   listActiveCurrencyCommissions,
   replaceCloudCurrencyCommissions,
 } from './services/currencyCommissionService';
-import { convertExpenseAmountToIls } from './services/expenseConversionService';
+import {
+  previewExpenseDisplayAmount,
+  recordExpenseConversionToIlsAsync,
+} from './services/expenseConversionService';
 import {
   currencySymbolTriggerClass,
   currencyUtilityButtonClass,
@@ -117,6 +129,10 @@ import {
   subCardNestedListStackClass,
   subCardRowClass,
   subCardTableHeadClass,
+  subCardAccordionShellClass,
+  subCardAccordionShellTriggerClass,
+  subCardAccordionBodyClass,
+  subCardAccordionContentClass,
   themeCardClass,
   themeFooterClass,
   themeHeaderClass,
@@ -145,7 +161,6 @@ import {
 } from './services/manualExchangeOverrideService';
 import {
   convertForeignToIls,
-  convertIlsToForeign,
   currencySymbol,
   fetchExchangeRates,
   getCachedExchangeRates,
@@ -155,6 +170,7 @@ import {
   EMPTY_USER_APP_DATA,
   loadFromLocalStorage,
   saveToLocalStorage,
+  type StoredCustomCategory,
   type UserAppData,
 } from './userDataStorage';
 import {
@@ -163,8 +179,11 @@ import {
   ensureDefaultPersonalBudget,
   getBudgetScopedSettings,
   initializeBudgetSettingsForNewPersonalBudget,
+  finalizePersonalBudgetDisplayCurrency,
   loadBudgetFinancialLocal,
   loadBudgetRegistryLocal,
+  patchPersonalBudgetRegistryTotal,
+  mergeRegistryWithRecentLocalPatches,
   resolveSettingsStorageKey,
   saveBudgetFinancialLocal,
   saveBudgetRegistryLocal,
@@ -175,6 +194,23 @@ import {
   type PersonalBudgetMeta,
 } from './services/budgetArchitecture';
 import {
+  buildInitialPersonalBudgetFinancial,
+  convertBudgetFinancialToDisplayCurrency,
+  convertTargetBudgetFinancialForCurrencyChange,
+  convertRegistryBudgetTotalAmount,
+  armFinancialConversionGuard,
+  clearFinancialConversionGuard,
+  deriveRegistryTotalFromFinancialMonth,
+  projectBudgetMonthDisplayAmount,
+  ensurePersonalBudgetFinancialSeeded,
+  overlayFormMonthlySeed,
+  isFinancialConversionGuardActive,
+  resolveBudgetFinancialForEntry,
+  resolveFinancialViewMonthDate,
+  shouldRejectEmptyIncomingFinancial,
+  shouldRejectStaleIncomingFinancial,
+} from './services/budgetFinancialCurrencyService';
+import {
   loadBudgetFinancialCloud,
   loadBudgetRegistryCloud,
   migrateLegacyFinancialToDefaultBudget,
@@ -182,7 +218,21 @@ import {
   saveBudgetRegistryCloud,
   subscribeBudgetFinancial,
   subscribeBudgetRegistry,
+  dualWriteLinkedBudgetCreationCloud,
+  dualWriteMirroredExpenseCloud,
 } from './services/budgetCloudSync';
+import {
+  budgetDebug,
+  snapshotFinancialForLog,
+  snapshotRegistryTotalsForLog,
+} from './services/budgetDebugTrace';
+import {
+  injectLinkedBudgetIntoMainFinancial,
+  buildMirroredExpense,
+  loadMainBudgetFinancial,
+  mirrorExpenseIntoMainFinancial,
+  resolveLinkedBudgetMeta,
+} from './services/linkedBudgetSync';
 import {
   consumePendingAuthLang,
   readGuestLang,
@@ -197,10 +247,14 @@ import {
 } from './services/avatarService';
 import {
   clearRegisteredSessionLocalStorage,
+  DEFAULT_UI_PREFERENCES,
   EMPTY_USER_SETTINGS,
   type UserSettings,
+  type UiPreferences,
   ensureCloudDataMigrated,
   pruneExpiredCloudExchangeFees,
+  saveSettingsToCloud,
+  shouldSyncToFirestore,
   subscribeCurrencyCommissions,
   subscribeManualExchangeOverrides,
   subscribeSettings,
@@ -217,7 +271,7 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from 'recharts';
-import { parseMoneyInput, roundMoney, sanitizeMoneyInputDraft, sumMoney } from './services/money';
+import { parseMoneyInput, smartRoundMoney, sanitizeMoneyInputDraft, sumMoney } from './services/money';
 import MoneyAmountInput from './components/MoneyAmountInput';
 
 interface Expense {
@@ -229,6 +283,14 @@ interface Expense {
   date: string;
   originalAmount?: number;
   originalCurrency?: string;
+  /** Commission % baked into `amount` when converted (0 = none). */
+  appliedFeePercent?: number;
+  /** True when a manual exchange-rate override was used to convert this record. */
+  manualRateUsed?: boolean;
+  /** Per-expense override: ignore manual rates, resolve to the historical base. */
+  disableManualRate?: boolean;
+  /** Per-expense override: drop any conversion fee multiplier for this record. */
+  disableFee?: boolean;
 }
 
 // Sentinel value used by the category <select> to trigger the "add custom" flow
@@ -383,38 +445,11 @@ const previousMonthKey = (monthKey: string): string => {
   return monthKeyOfDate(prev);
 };
 
-const roundMoneyAmount = (value: number): number => roundMoney(value);
+/** ILS ledger writes use smartRoundMoney to snap conversion drift (e.g. 499.99 → 500). */
+const roundMoneyAmount = (value: number): number => smartRoundMoney(value);
 
 const compareSubBudgetCategoryKeys = (a: string, b: string): number =>
   a.localeCompare(b, undefined, { sensitivity: 'base' });
-
-const mergeRemoteSubBudgetsByMonth = (
-  local: Record<string, Record<string, number>>,
-  remote: Record<string, Record<string, number>>,
-  editedMonths: Set<string>,
-): Record<string, Record<string, number>> => {
-  if (editedMonths.size === 0) {
-    return remote;
-  }
-  const merged = { ...remote };
-  for (const monthKey of editedMonths) {
-    if (!monthHasSubBudgetRecord(local, monthKey)) continue;
-    const localMonth = local[monthKey];
-    const remoteMonth = remote[monthKey] ?? {};
-    if (JSON.stringify(localMonth) !== JSON.stringify(remoteMonth)) {
-      merged[monthKey] = localMonth;
-    }
-  }
-  for (const monthKey of [...editedMonths]) {
-    if (
-      monthHasSubBudgetRecord(local, monthKey) &&
-      JSON.stringify(local[monthKey]) === JSON.stringify(remote[monthKey] ?? {})
-    ) {
-      editedMonths.delete(monthKey);
-    }
-  }
-  return merged;
-};
 
 const findNearestPriorMonthWithSubBudgets = (
   targetMonthKey: string,
@@ -466,7 +501,7 @@ function shouldShowExpenseEquivalentLine(
   if (!hasOriginal) {
     return displayCurrency !== 'ILS';
   }
-  const expenseCurrency = symbolToCurrency(expense.originalCurrency!);
+  const expenseCurrency = symbolToCurrency(expense.originalCurrency!, displayCurrency);
   if (!expenseCurrency) {
     return true;
   }
@@ -953,7 +988,8 @@ function AnalyticsDonutPanel({
   chartKey: string;
   donutSize?: number;
 }) {
-  const { tr, formatMoney } = useLanguage();
+  const { tr } = useLanguage();
+  const projection = useDisplayProjection();
   return (
     <div className="flex items-center gap-4 w-full h-full min-h-0">
       <div
@@ -981,7 +1017,7 @@ function AnalyticsDonutPanel({
           </PieChart>
         </ResponsiveContainer>
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-          <DisplayMoney amount={total} className="text-xl sm:text-2xl font-bold leading-none" />
+          <DisplayCurrencyAmount amount={total} className="text-xl sm:text-2xl font-bold leading-none" />
           <span className={`text-[11px] mt-1 ${typographyMutedClass}`}>{tr('totalShort')}</span>
         </div>
       </div>
@@ -1017,7 +1053,7 @@ function AnalyticsDonutPanel({
                 {item.percentage > 0 ? (
                   `${item.percentage.toFixed(2)}%`
                 ) : (
-                  formatMoney(item.amount)
+                  projection.format(item.amount)
                 )}
               </span>
             </div>
@@ -1224,6 +1260,9 @@ function trendPointFromChartState(
 // Dark-themed analytics: swipeable category / daily donuts + daily trend line.
 function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
   const { tr, lang } = useLanguage();
+  // Every analytics aggregation below is computed from amounts projected from each
+  // expense's immutable baseline into the active display currency.
+  const projection = useDisplayProjection();
   const [view, setView] = useState<SummaryView>('month');
   const [anchor, setAnchor] = useState<Date>(() => new Date());
   const [chartSlide, setChartSlide] = useState(0);
@@ -1233,6 +1272,8 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
   const touchStartXRef = useRef<number | null>(null);
   const showMultiChartViews = view !== 'daily';
   const maxChartSlideIndex = showMultiChartViews ? ANALYTICS_SLIDE_COUNT - 1 : 0;
+  const trendXAxisInterval =
+    view === 'month' ? 6 : view === 'year' ? 1 : view === 'daily' ? 3 : 0;
 
   const goToChartSlide = useCallback((nextIndex: number) => {
     const clampedNextIndex = Math.max(0, Math.min(maxChartSlideIndex, nextIndex));
@@ -1295,16 +1336,24 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
     [expenses, view, anchor, anchorMonthKey]
   );
 
+  // Project each expense's baseline into the active display currency ONCE, then
+  // drive every chart/legend/trend total from these `amount`s so the whole
+  // analytics screen stays consistent across ILS / USD / GBP / EUR.
+  const periodExpensesDisplay = useMemo(
+    () => periodExpenses.map((e) => ({ ...e, amount: projection.projectExpense(e) })),
+    [periodExpenses, projection],
+  );
+
   const chartPeriodKey =
     view === 'daily'
       ? `${view}-${toISODate(anchor)}`
       : `${view}-${anchorMonthKey}-${anchor.getFullYear()}-${anchor.getMonth()}-${weekNumber(anchor)}`;
 
-  const total = periodExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const total = periodExpensesDisplay.reduce((sum, e) => sum + e.amount, 0);
 
   const breakdown = useMemo(
-    () => aggregateByCategory(periodExpenses, categories),
-    [periodExpenses, categories]
+    () => aggregateByCategory(periodExpensesDisplay, categories),
+    [periodExpensesDisplay, categories]
   );
 
   const categoryDonutData =
@@ -1314,7 +1363,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
 
   const dailyBreakdown = useMemo(() => {
     if (view === 'daily') {
-      return periodExpenses
+      return periodExpensesDisplay
         .map((e, i) => {
           const cat = lookupCategory(e.category, categories);
           const label = e.description.trim() || cat.label;
@@ -1329,7 +1378,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
         .sort((a, b) => b.amount - a.amount);
     }
 
-    const grouped = periodExpenses.reduce<Record<string, number>>((acc, e) => {
+    const grouped = periodExpensesDisplay.reduce<Record<string, number>>((acc, e) => {
       const iso = normalizeDate(e.date);
       acc[iso] = (acc[iso] || 0) + e.amount;
       return acc;
@@ -1343,7 +1392,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
         percentage: total > 0 ? (amount / total) * 100 : 0,
       }))
       .sort((a, b) => b.amount - a.amount);
-  }, [view, periodExpenses, categories, total, lang]);
+  }, [view, periodExpensesDisplay, categories, total, lang]);
 
   const dailyDonutData =
     dailyBreakdown.length > 0
@@ -1352,23 +1401,23 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
 
   const amountByDate = useMemo(
     () =>
-      periodExpenses.reduce<Record<string, number>>((acc, e) => {
+      periodExpensesDisplay.reduce<Record<string, number>>((acc, e) => {
         const iso = normalizeDate(e.date);
         acc[iso] = (acc[iso] || 0) + e.amount;
         return acc;
       }, {}),
-    [periodExpenses],
+    [periodExpensesDisplay],
   );
 
   const hourlyAmounts = useMemo(() => {
     if (view !== 'daily') return undefined;
     const buckets = Array(24).fill(0);
-    periodExpenses.forEach((e, i) => {
+    periodExpensesDisplay.forEach((e, i) => {
       const hour = 8 + (i % 12);
       buckets[hour] += e.amount;
     });
     return buckets;
-  }, [view, periodExpenses]);
+  }, [view, periodExpensesDisplay]);
 
   const { dailySeries, periodDayCount } = useMemo(
     () => buildContinuousTrendSeries(view, anchor, amountByDate, lang, hourlyAmounts),
@@ -1376,7 +1425,10 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
   );
 
   const average = periodDayCount > 0 ? total / periodDayCount : 0;
-  const trendMax = Math.max(250, ...dailySeries.map((d) => d.amount), 1);
+  // Floor the Y-axis at ~250 ILS projected into the active display currency so the
+  // trend keeps a sensible baseline scale regardless of the selected currency.
+  const trendFloor = projection.projectOriginalOrIls(null, 250);
+  const trendMax = Math.max(trendFloor, ...dailySeries.map((d) => d.amount), 1);
 
   useEffect(() => {
     const nextIso = defaultTrendSelectionIso(dailySeries, view, anchor);
@@ -1728,11 +1780,11 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                   <div className={`space-y-0.5 text-sm ${typographyLabelClass}`}>
                     <p>
                       <span className="text-neutral-500">{tr('totalShort')}: </span>
-                      <DisplayMoney amount={total} className={`font-semibold inline-block ${typographyBodyClass}`} />
+                      <DisplayCurrencyAmount amount={total} className={`font-semibold inline-block ${typographyBodyClass}`} />
                     </p>
                     <p>
                       <span className="text-neutral-500">{tr('average')}: </span>
-                      <DisplayMoney amount={average} className={`font-semibold inline-block ${typographyBodyClass}`} />
+                      <DisplayCurrencyAmount amount={average} className={`font-semibold inline-block ${typographyBodyClass}`} />
                     </p>
                   </div>
                 </div>
@@ -1800,7 +1852,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                           tick={{ fill: '#525252', fontSize: 11 }}
                           axisLine={false}
                           tickLine={false}
-                          interval={view === 'month' ? 6 : view === 'year' ? 1 : view === 'daily' ? 3 : 0}
+                          interval={trendXAxisInterval}
                           tickFormatter={(value) => {
                             if (view !== 'year') return String(value);
                             if (typeof value !== 'string') return '';
@@ -1938,7 +1990,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                         </span>
                       </div>
                       <LtrNumeric className="font-semibold shrink-0">
-                        <DisplayMoney amount={b.amount} className="inline-block" />
+                        <DisplayCurrencyAmount amount={b.amount} className="inline-block" />
                       </LtrNumeric>
                     </div>
                     <div className={`h-2 ${progressTrackClass}`}>
@@ -1974,8 +2026,115 @@ interface SubBudgetTrackerProps {
   monthLabel: string;
   monthExpenses: Expense[];
   categories: Category[];
+  /** Immutable budget baseline (Source of Truth) for lossless display projection. */
+  budgetOriginal?: { amount: number; currency: ExpenseCurrency };
   subBudgets: Record<string, number>;
-  onSaveSubBudgets: (draft: Record<string, number>) => Promise<void>;
+  /** Immutable per-category baselines (Source of Truth) for lossless display. */
+  subBudgetsOriginal: Record<string, { amount: number; currency: ExpenseCurrency }>;
+  onSaveSubBudgets: (
+    draft: Record<string, number>,
+    draftOriginal: Record<string, { amount: number; currency: ExpenseCurrency }>,
+  ) => Promise<void>;
+  isMainBudget: boolean;
+  linkedBudgetsExpanded: boolean;
+  regularBudgetsExpanded: boolean;
+  onLinkedBudgetsExpandedChange: (expanded: boolean) => void;
+  onRegularBudgetsExpandedChange: (expanded: boolean) => void;
+}
+
+function SubBudgetCollapsibleSection({
+  title,
+  expanded,
+  onExpandedChange,
+  children,
+}: {
+  title: string;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className={`${subCardAccordionShellClass} overflow-visible`}>
+      <button
+        type="button"
+        onClick={() => onExpandedChange(!expanded)}
+        aria-expanded={expanded}
+        className={`flex w-full items-center justify-between gap-2 ${subCardAccordionShellTriggerClass}`}
+      >
+        <span className={`text-sm font-semibold sm:text-base ${typographyTitleClass}`}>{title}</span>
+        <ChevronUp
+          className={`h-4 w-4 shrink-0 transition-transform duration-200 ${expanded ? '' : 'rotate-180'}`}
+        />
+      </button>
+      <AnimatePresence initial={false}>
+        {expanded ? (
+          <motion.div
+            key="body"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className={`${subCardAccordionBodyClass} p-4 sm:p-5`}>
+              <div className={subCardAccordionContentClass}>{children}</div>
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function SubBudgetCategoryRows({
+  categories,
+  draftSubBudgets,
+  draftSubBudgetsOriginal,
+  displayCurrency,
+  onCommit,
+  onCommitOriginal,
+}: {
+  categories: Category[];
+  draftSubBudgets: Record<string, number>;
+  draftSubBudgetsOriginal: Record<string, { amount: number; currency: ExpenseCurrency }>;
+  displayCurrency: ExpenseCurrency;
+  onCommit: (categoryValue: string, amount: number | null) => void;
+  onCommitOriginal: (
+    categoryValue: string,
+    original: { amount: number; currency: ExpenseCurrency } | null,
+  ) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      {categories.map((cat) => {
+        const catHex = hexForColor(cat.color);
+        const allocated = draftSubBudgets[cat.value] ?? 0;
+        const baseline = draftSubBudgetsOriginal[cat.value] ?? null;
+        return (
+          <div key={cat.value} className="flex items-center gap-2">
+            <span
+              className="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white/20"
+              style={{ backgroundColor: catHex }}
+            />
+            <span className={`flex-1 truncate text-sm ${typographyLabelClass}`}>
+              <LocalizedUserText text={cat.value} />
+            </span>
+            <LtrNumeric className="text-sm text-neutral-500">
+              {currencySymbol(displayCurrency)}
+            </LtrNumeric>
+            <MoneyAmountInput
+              value={allocated}
+              baseline={baseline}
+              displayCurrency={displayCurrency}
+              onCommit={(amount) => onCommit(cat.value, amount)}
+              onCommitOriginal={(original) => onCommitOriginal(cat.value, original)}
+              className={`w-24 text-left ${surfaceInputSmClass}`}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function BudgetOverLimitBanner({ label }: { label: string }) {
@@ -2058,24 +2217,44 @@ function SubBudgetTracker({
   monthLabel,
   monthExpenses,
   categories,
+  budgetOriginal,
   subBudgets,
+  subBudgetsOriginal,
   onSaveSubBudgets,
+  isMainBudget,
+  linkedBudgetsExpanded,
+  regularBudgetsExpanded,
+  onLinkedBudgetsExpandedChange,
+  onRegularBudgetsExpandedChange,
 }: SubBudgetTrackerProps) {
-  const { tr, ensureUserContents, formatMoney, dir, lang, displayCurrency } = useLanguage();
+  const { tr, ensureUserContents, dir, lang, displayCurrency } = useLanguage();
+  // Visualization projection layer: every chart/stat below is computed from each
+  // entity's immutable baseline projected into the active display currency, so the
+  // donut slices, progress bars and labels stay 100% consistent with the text.
+  const projection = useDisplayProjection();
 
   const [subChartSlide, setSubChartSlide] = useState(0);
   const [subChartDirection, setSubChartDirection] = useState<'forward' | 'backward'>('forward');
   const [draftSubBudgets, setDraftSubBudgets] = useState<Record<string, number>>(() => ({ ...subBudgets }));
+  const [draftSubBudgetsOriginal, setDraftSubBudgetsOriginal] = useState<
+    Record<string, { amount: number; currency: ExpenseCurrency }>
+  >(() => ({ ...subBudgetsOriginal }));
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     setDraftSubBudgets({ ...subBudgets });
-  }, [subBudgets, monthLabel]);
+    setDraftSubBudgetsOriginal({ ...subBudgetsOriginal });
+  }, [subBudgets, subBudgetsOriginal, monthLabel]);
 
-  const spentByCat = monthExpenses.reduce<Record<string, number>>((acc, e) => {
-    acc[e.category] = (acc[e.category] || 0) + e.amount;
+  // Spent per category, projected from EACH expense's immutable baseline into the
+  // active display currency (single hop), then summed — never chained through ILS.
+  const spentByCatDisplay = useMemo(() => {
+    const acc: Record<string, number> = {};
+    for (const e of monthExpenses) {
+      acc[e.category] = roundMoneyAmount((acc[e.category] ?? 0) + projection.projectExpense(e));
+    }
     return acc;
-  }, {});
+  }, [monthExpenses, projection]);
 
   const categoryValues = useMemo(
     () => categories.map((c) => c.value).sort(compareSubBudgetCategoryKeys),
@@ -2107,25 +2286,62 @@ function SubBudgetTracker({
     });
   }, []);
 
+  const updateDraftSubBudgetOriginal = useCallback(
+    (categoryValue: string, original: { amount: number; currency: ExpenseCurrency } | null) => {
+      setDraftSubBudgetsOriginal((prev) => {
+        const next = { ...prev };
+        if (original === null || !(original.amount > 0)) {
+          delete next[categoryValue];
+        } else {
+          next[categoryValue] = original;
+        }
+        return next;
+      });
+    },
+    [],
+  );
+
   const handleSaveChanges = useCallback(async () => {
     if (!hasChanges || isSaving) return;
     setIsSaving(true);
     try {
-      await onSaveSubBudgets(draftSubBudgets);
+      await onSaveSubBudgets(draftSubBudgets, draftSubBudgetsOriginal);
     } finally {
       setIsSaving(false);
     }
-  }, [draftSubBudgets, hasChanges, isSaving, onSaveSubBudgets]);
+  }, [draftSubBudgets, draftSubBudgetsOriginal, hasChanges, isSaving, onSaveSubBudgets]);
 
-  const allocatedTotal = sumMoney(categoryValues.map((value) => draftSubBudgets[value] ?? 0));
-  const generalAllocated = roundMoneyAmount(Math.max(0, budget - allocatedTotal));
+  // Budget limit projected from its immutable baseline (zero-math when the view
+  // currency matches what the user typed); legacy budgets fall back to the ILS ledger.
+  const budgetDisplay = useMemo(
+    () => roundMoneyAmount(projection.projectOriginalOrIls(budgetOriginal, budget)),
+    [projection, budgetOriginal, budget],
+  );
+
+  // Per-category allocation projected from each sub-budget's own baseline.
+  const allocatedByCatDisplay = useMemo(() => {
+    const acc: Record<string, number> = {};
+    for (const value of categoryValues) {
+      const ils = draftSubBudgets[value] ?? 0;
+      if (!(ils > 0)) continue;
+      acc[value] = roundMoneyAmount(
+        projection.projectOriginalOrIls(draftSubBudgetsOriginal[value], ils),
+      );
+    }
+    return acc;
+  }, [categoryValues, draftSubBudgets, draftSubBudgetsOriginal, projection]);
+
+  const allocatedTotal = roundMoneyAmount(
+    categoryValues.reduce((sum, value) => sum + (allocatedByCatDisplay[value] ?? 0), 0),
+  );
+  const generalAllocated = roundMoneyAmount(Math.max(0, budgetDisplay - allocatedTotal));
 
   // Spending that falls outside any budgeted category draws from the General pool.
-  const unbudgetedSpent = Object.entries(spentByCat)
+  const unbudgetedSpent = Object.entries(spentByCatDisplay)
     .filter(([v]) => !categoryValues.includes(v))
     .reduce((s, [, amt]) => roundMoneyAmount(s + amt), 0);
 
-  const totalSpent = sumMoney(monthExpenses.map((expense) => expense.amount));
+  const totalSpent = projection.sumExpenses(monthExpenses);
 
   const envelopes: Envelope[] = useMemo(() => {
     const list: Envelope[] = categoryValues.map((v) => {
@@ -2136,8 +2352,8 @@ function SubBudgetTracker({
         icon: cat.icon,
         color: cat.color,
         hex: hexForColor(cat.color),
-        allocated: draftSubBudgets[v] ?? 0,
-        spent: spentByCat[v] || 0,
+        allocated: allocatedByCatDisplay[v] ?? 0,
+        spent: spentByCatDisplay[v] || 0,
         isGeneral: false,
       };
     });
@@ -2159,18 +2375,18 @@ function SubBudgetTracker({
   }, [
     categoryValues,
     categories,
-    draftSubBudgets,
-    spentByCat,
+    allocatedByCatDisplay,
+    spentByCatDisplay,
     generalAllocated,
     unbudgetedSpent,
     tr,
   ]);
-  const usedOverviewAmount = Math.min(totalSpent, budget);
-  const remainingOverviewAmount = Math.max(0, budget - totalSpent);
-  const isBudgetStatusOver = budget > 0 && totalSpent > budget;
-  const budgetStatusExceededAmount = roundMoneyAmount(Math.max(0, totalSpent - budget));
+  const usedOverviewAmount = Math.min(totalSpent, budgetDisplay);
+  const remainingOverviewAmount = Math.max(0, budgetDisplay - totalSpent);
+  const isBudgetStatusOver = budgetDisplay > 0 && totalSpent > budgetDisplay;
+  const budgetStatusExceededAmount = roundMoneyAmount(Math.max(0, totalSpent - budgetDisplay));
   const budgetStatusOverLabel = formatTranslation(lang, 'overBudgetExceededBy', {
-    amount: formatMoney(budgetStatusExceededAmount),
+    amount: projection.format(budgetStatusExceededAmount),
   });
   const overviewChartData = (
     [
@@ -2212,7 +2428,7 @@ function SubBudgetTracker({
   const activeSubChart = subCategoryCharts[subChartSlide] ?? null;
   const activeSubOverLabel =
     activeSubChart && activeSubChart.isOverBudget
-      ? formatTranslation(lang, 'overBudgetExceededBy', { amount: formatMoney(activeSubChart.exceededAmount) })
+      ? formatTranslation(lang, 'overBudgetExceededBy', { amount: projection.format(activeSubChart.exceededAmount) })
       : '';
 
   const subChartVariants = useMemo(
@@ -2231,6 +2447,16 @@ function SubBudgetTracker({
     }),
     [],
   );
+
+  const linkedCategories = useMemo(
+    () => categories.filter((category) => category.isLinkedBudget),
+    [categories],
+  );
+  const regularCategories = useMemo(
+    () => categories.filter((category) => !category.isLinkedBudget),
+    [categories],
+  );
+  const sectionActionLabel = isMainBudget ? tr('addOrUpdateSubBudget') : tr('changeBudget');
 
   return (
     <div className={`${themeCardClass} p-4 sm:p-6 mb-6 sm:mb-8`}>
@@ -2282,9 +2508,9 @@ function SubBudgetTracker({
                     </PieChart>
                   </ResponsiveContainer>
                   <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                    <DisplayMoney amount={usedOverviewAmount} className={`text-xl font-bold ${typographyTitleClass}`} />
+                    <DisplayCurrencyAmount amount={usedOverviewAmount} className={`text-xl font-bold ${typographyTitleClass}`} />
                     <span className="mt-1 text-[11px] text-neutral-500">
-                      <LtrNumeric>{tr('outOf')} {formatMoney(budget)}</LtrNumeric>
+                      <LtrNumeric>{tr('outOf')} {projection.format(budgetDisplay)}</LtrNumeric>
                     </span>
                   </div>
                 </div>
@@ -2299,21 +2525,21 @@ function SubBudgetTracker({
                 >
                   <div className="space-y-1">
                     <p className="text-xs text-neutral-400">
-                      {tr('spentLabel')}: <DisplayMoney amount={totalSpent} className="inline-block" />
+                      {tr('spentLabel')}: <DisplayCurrencyAmount amount={totalSpent} className="inline-block" />
                     </p>
                     <p className="text-xs text-neutral-400">
-                      {tr('remainingLabel')}: <DisplayMoney amount={remainingOverviewAmount} className="inline-block" />
+                      {tr('remainingLabel')}: <DisplayCurrencyAmount amount={remainingOverviewAmount} className="inline-block" />
                     </p>
                     <p className="text-xs text-neutral-500">
-                      {tr('totalBudgetLabel')}: <DisplayMoney amount={budget} className="inline-block" />
+                      {tr('totalBudgetLabel')}: <DisplayCurrencyAmount amount={budgetDisplay} className="inline-block" />
                     </p>
                     <p className={`text-xs ${isBudgetStatusOver ? 'text-rose-300' : 'text-emerald-300'}`}>
                       {tr('spentLabel')}{' '}
-                      {budget > 0 ? `${((totalSpent / budget) * 100).toFixed(0)}%` : '0%'}
+                      {budgetDisplay > 0 ? `${((totalSpent / budgetDisplay) * 100).toFixed(0)}%` : '0%'}
                     </p>
                     <p className="text-xs text-emerald-200">
                       {tr('remainingLabel')}{' '}
-                      {budget > 0 ? `${((remainingOverviewAmount / budget) * 100).toFixed(0)}%` : '0%'}
+                      {budgetDisplay > 0 ? `${((remainingOverviewAmount / budgetDisplay) * 100).toFixed(0)}%` : '0%'}
                     </p>
                   </div>
                   <BudgetChartLegend
@@ -2436,13 +2662,13 @@ function SubBudgetTracker({
                           >
                             <div className="space-y-1">
                               <p className="text-xs text-neutral-400">
-                                {tr('spentLabel')}: <DisplayMoney amount={activeSubChart.spent} className="inline-block" />
+                                {tr('spentLabel')}: <DisplayCurrencyAmount amount={activeSubChart.spent} className="inline-block" />
                               </p>
                               <p className="text-xs text-neutral-400">
-                                {tr('remainingLabel')}: <DisplayMoney amount={activeSubChart.remainingAmount} className="inline-block" />
+                                {tr('remainingLabel')}: <DisplayCurrencyAmount amount={activeSubChart.remainingAmount} className="inline-block" />
                               </p>
                               <p className="text-xs text-neutral-500">
-                                {tr('totalBudgetLabel')}: <DisplayMoney amount={activeSubChart.allocated} className="inline-block" />
+                                {tr('totalBudgetLabel')}: <DisplayCurrencyAmount amount={activeSubChart.allocated} className="inline-block" />
                               </p>
                               <p className={`text-xs ${activeSubChart.isOverBudget ? 'text-rose-300' : 'text-emerald-300'}`}>
                                 {tr('spentLabel')}{' '}
@@ -2479,55 +2705,98 @@ function SubBudgetTracker({
 
           {/* Per-category budget limits (1:1 with categories list) */}
           <div className="mt-6 border-t border-neutral-800 pt-5">
-            <p className="mb-2 text-xs font-medium text-neutral-400">{tr('addOrUpdateSubBudget')}</p>
-            <div className="space-y-2">
-              {categories.map((cat) => {
-                const catHex = hexForColor(cat.color);
-                const allocated = draftSubBudgets[cat.value] ?? 0;
-                return (
-                  <div key={cat.value} className="flex items-center gap-2">
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white/20"
-                      style={{ backgroundColor: catHex }}
-                    />
-                    <span className={`flex-1 truncate text-sm ${typographyLabelClass}`}>
-                      <LocalizedUserText text={cat.value} />
-                    </span>
-                    <LtrNumeric className="text-sm text-neutral-500">
-                      {currencySymbol(displayCurrency)}
-                    </LtrNumeric>
-                    <MoneyAmountInput
-                      value={allocated}
-                      displayCurrency={displayCurrency}
-                      onCommit={(amount) => updateDraftSubBudget(cat.value, amount)}
-                      className={`w-24 text-left ${surfaceInputSmClass}`}
-                    />
-                  </div>
-                );
-              })}
-              <div className="flex items-center justify-between pt-1 text-xs">
+            {isMainBudget ? (
+              <div className="space-y-4">
+                <SubBudgetCollapsibleSection
+                  title={tr('linkedBudgetsSectionTitle')}
+                  expanded={linkedBudgetsExpanded}
+                  onExpandedChange={onLinkedBudgetsExpandedChange}
+                >
+                  {linkedCategories.length === 0 ? (
+                    <p className={`text-center text-sm ${themeTextMutedClass}`}>
+                      {tr('noData')}
+                    </p>
+                  ) : (
+                    <>
+                      <p className={`mb-2 text-xs font-medium ${typographyMutedClass}`}>
+                        {sectionActionLabel}
+                      </p>
+                      <SubBudgetCategoryRows
+                        categories={linkedCategories}
+                        draftSubBudgets={draftSubBudgets}
+                        draftSubBudgetsOriginal={draftSubBudgetsOriginal}
+                        displayCurrency={displayCurrency}
+                        onCommit={updateDraftSubBudget}
+                        onCommitOriginal={updateDraftSubBudgetOriginal}
+                      />
+                    </>
+                  )}
+                </SubBudgetCollapsibleSection>
+
+                <SubBudgetCollapsibleSection
+                  title={tr('regularSubBudgetsSectionTitle')}
+                  expanded={regularBudgetsExpanded}
+                  onExpandedChange={onRegularBudgetsExpandedChange}
+                >
+                  {regularCategories.length === 0 ? (
+                    <p className={`text-center text-sm ${themeTextMutedClass}`}>
+                      {tr('noData')}
+                    </p>
+                  ) : (
+                    <>
+                      <p className={`mb-2 text-xs font-medium ${typographyMutedClass}`}>
+                        {sectionActionLabel}
+                      </p>
+                      <SubBudgetCategoryRows
+                        categories={regularCategories}
+                        draftSubBudgets={draftSubBudgets}
+                        draftSubBudgetsOriginal={draftSubBudgetsOriginal}
+                        displayCurrency={displayCurrency}
+                        onCommit={updateDraftSubBudget}
+                        onCommitOriginal={updateDraftSubBudgetOriginal}
+                      />
+                    </>
+                  )}
+                </SubBudgetCollapsibleSection>
+              </div>
+            ) : (
+              <>
+                <p className={`mb-2 text-xs font-medium ${typographyMutedClass}`}>
+                  {sectionActionLabel}
+                </p>
+                <SubBudgetCategoryRows
+                  categories={categories}
+                  draftSubBudgets={draftSubBudgets}
+                  draftSubBudgetsOriginal={draftSubBudgetsOriginal}
+                  displayCurrency={displayCurrency}
+                  onCommit={updateDraftSubBudget}
+                  onCommitOriginal={updateDraftSubBudgetOriginal}
+                />
+              </>
+            )}
+            <div className="flex items-center justify-between pt-4 text-xs">
                 <LtrNumeric className="text-neutral-500">
                   {tr('allocated')}:{' '}
-                  <DisplayMoney amount={allocatedTotal} className="inline-block" /> /{' '}
-                  <DisplayMoney amount={budget} className="inline-block" />
+                  <DisplayCurrencyAmount amount={allocatedTotal} className="inline-block" /> /{' '}
+                  <DisplayCurrencyAmount amount={budgetDisplay} className="inline-block" />
                 </LtrNumeric>
                 <LtrNumeric
                   className={
-                    allocatedTotal > budget ? 'text-rose-400 font-medium' : 'text-neutral-500'
+                    allocatedTotal > budgetDisplay ? 'text-rose-400 font-medium' : 'text-neutral-500'
                   }
                 >
-                  {allocatedTotal > budget ? (
+                  {allocatedTotal > budgetDisplay ? (
                     <>
                       {tr('overBudget')}:{' '}
-                      <DisplayMoney
-                        amount={allocatedTotal - budget}
+                      <DisplayCurrencyAmount
+                        amount={allocatedTotal - budgetDisplay}
                         className="inline-block font-medium"
                       />
                     </>
                   ) : (
                     <>
                       {tr('unallocated')}:{' '}
-                      <DisplayMoney amount={generalAllocated} className="inline-block" />
+                      <DisplayCurrencyAmount amount={generalAllocated} className="inline-block" />
                     </>
                   )}
                 </LtrNumeric>
@@ -2542,7 +2811,6 @@ function SubBudgetTracker({
                   {isSaving ? tr('subBudgetSaving') : tr('subBudgetSaveChanges')}
                 </button>
               </div>
-            </div>
           </div>
         </>
       )}
@@ -2918,10 +3186,25 @@ function App() {
   const [avatarUrl, setAvatarUrl] = useState('');
   const [authReady, setAuthReady] = useState(false);
   const [dataReady, setDataReady] = useState(false);
+
+  // Offline-first exchange-rate cache: localStorage for guests, Firebase for
+  // members; background-refreshes stale live rates even under manual overrides.
+  useRateCacheSync({ user, authReady });
   const [settingsCloudReady, setSettingsCloudReady] = useState(false);
   const suppressCloudSaveRef = useRef(true);
+  const financialLocalVersionRef = useRef<Record<string, number>>({});
+  const registryPatchedAtRef = useRef<Record<string, number>>({});
+  const financialPersistTimerRef = useRef<number | null>(null);
+  const currencyConversionGenerationRef = useRef(0);
+  const selectedMonthKeyRef = useRef<string>(monthKeyOfDate(new Date()));
+  const activeFinancialSnapshotRef = useRef<{
+    budgetId: string | null;
+    data: UserAppData;
+  }>({ budgetId: null, data: { ...EMPTY_USER_APP_DATA } });
   const locallyEditedSubBudgetMonthsRef = useRef<Set<string>>(new Set());
   const skipNextSettingsSaveRef = useRef(false);
+  const skipDisplayCurrencyConversionRef = useRef(false);
+  const scopedDisplayCurrencyRef = useRef<ExpenseCurrency>('ILS');
   const pendingAuthLangRef = useRef<'he' | 'en' | null>(null);
   const hadAuthenticatedUserRef = useRef(false);
   useEffect(() => {
@@ -2969,7 +3252,10 @@ function App() {
     currency: ExpenseCurrency;
     category: string;
     date: string;
+    disableManualRate: boolean;
+    disableFee: boolean;
   } | null>(null);
+  const [editPreviewAmount, setEditPreviewAmount] = useState<number | null>(null);
   const [editExpenseRatesReady, setEditExpenseRatesReady] = useState(true);
   const [recentlyUpdatedExpenseId, setRecentlyUpdatedExpenseId] = useState<string | null>(null);
   const [expenseRatesReady, setExpenseRatesReady] = useState(true);
@@ -2986,12 +3272,21 @@ function App() {
   const [budgetDrawerOpen, setBudgetDrawerOpen] = useState(false);
   const [appShellView, setAppShellView] = useState<AppShellView>('active-budget');
   const [activeBudgetId, setActiveBudgetId] = useState<string>(DEFAULT_MONTHLY_BUDGET_ID);
+  const [uiPreferences, setUiPreferences] = useState<UiPreferences>(DEFAULT_UI_PREFERENCES);
   const [budgetRegistry, setBudgetRegistry] = useState<BudgetRegistryState>({
     personal: [],
     shared: [],
   });
+
+  useEffect(() => {
+    if (!shouldSyncToFirestore(user)) {
+      setUiPreferences(DEFAULT_UI_PREFERENCES);
+    }
+  }, [user]);
   const [budgetSystemReady, setBudgetSystemReady] = useState(false);
   const budgetFinancialCacheRef = useRef<Record<string, UserAppData>>({});
+  /** Expires-at timestamps; only blocks stale empty snapshots during currency conversion. */
+  const financialConversionGuardRef = useRef<Record<string, number>>({});
   const budgetSettingsCacheRef = useRef<Record<string, UserSettings>>({});
   const activeBudgetSettingsKeyRef = useRef<string>(`budget:${DEFAULT_MONTHLY_BUDGET_ID}`);
   const appShellViewRef = useRef<AppShellView>(appShellView);
@@ -3085,6 +3380,7 @@ function App() {
       setBudgetRegistry({ personal: [], shared: [] });
       setBudgetSystemReady(false);
       budgetFinancialCacheRef.current = {};
+      financialConversionGuardRef.current = {};
       budgetSettingsCacheRef.current = {};
       budgetBootstrappedRef.current = false;
       budgetBootstrapUserIdRef.current = null;
@@ -3127,9 +3423,7 @@ function App() {
 
   // Custom (user-created) categories, persisted separately from the built-in ones.
   // Icon components can't be serialized, so we store an icon *name* + color class.
-  const [customCategories, setCustomCategories] = useState<
-    { value: string; label: string; color: string; iconName: string }[]
-  >([]);
+  const [customCategories, setCustomCategories] = useState<StoredCustomCategory[]>([]);
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newCategoryColor, setNewCategoryColor] = useState(DEFAULT_CATEGORY_COLOR);
@@ -3142,6 +3436,14 @@ function App() {
     Record<string, Record<string, number>>
   >({});
 
+  // Immutable per-category sub-budget baselines (Source of Truth):
+  // monthKey -> categoryKey -> { amount, currency } captured exactly as typed.
+  // `subBudgetsByMonth` above stays the ILS canonical ledger used for allocation
+  // math; this map drives lossless display projection (zero-math reversion).
+  const [subBudgetsOriginalByMonth, setSubBudgetsOriginalByMonth] = useState<
+    Record<string, Record<string, { amount: number; currency: ExpenseCurrency }>>
+  >({});
+
   // The full list of selectable categories: built-ins + user-created.
   const allCategories: Category[] = [
     ...CATEGORIES.map((c) => ({ ...c, label: localizeCategoryLabel(c.value, lang) })),
@@ -3149,7 +3451,9 @@ function App() {
       value: c.value,
       label: getUserContent(c.label),
       color: c.color,
-      icon: resolveIcon(c.iconName),
+      icon: c.isLinkedBudget ? resolveBudgetFormIcon(c.iconName) : resolveIcon(c.iconName),
+      isLinkedBudget: c.isLinkedBudget,
+      sourceBudgetId: c.sourceBudgetId,
     })),
   ];
 
@@ -3244,6 +3548,22 @@ function App() {
     () => budgetMoneyFieldTypographyClass(budgetInputVisibleLength),
     [budgetInputVisibleLength],
   );
+
+  const activePersonalBudgetMeta = useMemo(
+    () => budgetRegistry.personal.find((b) => b.id === activeBudgetId) ?? null,
+    [budgetRegistry.personal, activeBudgetId],
+  );
+
+  /** Dashboard budget card title: monthly default vs. named personal budget. */
+  const budgetSetterTitle = useMemo(() => {
+    const isMainBudget =
+      activeBudgetId === DEFAULT_MONTHLY_BUDGET_ID ||
+      activePersonalBudgetMeta?.isDefaultMonthly === true;
+    if (isMainBudget) return tr('addMonthlyBudget');
+    return formatTranslation(lang, 'addBudgetFor', {
+      name: activePersonalBudgetMeta?.name ?? '',
+    });
+  }, [activeBudgetId, activePersonalBudgetMeta, lang, tr]);
   const showBudgetCurrentAmountOverlay = useMemo(
     () => budget > 0 && budgetInput.trim().length === 0,
     [budget, budgetInput],
@@ -3284,13 +3604,28 @@ function App() {
     [getAutoTransferStatusForMonth, selectedMonthKey],
   );
   const subBudgets = subBudgetsByMonth[selectedMonthKey] ?? {};
+  const subBudgetsOriginal = subBudgetsOriginalByMonth[selectedMonthKey] ?? {};
 
   const patchSubBudgetsByMonth = useCallback(
     (
       monthKey: string,
       patch: (monthMap: Record<string, number>) => Record<string, number>,
+      // Optional immutable-baseline patch applied to subBudgetsOriginalByMonth in
+      // lockstep with the ILS ledger patch so both persist atomically.
+      originalPatch?: (
+        monthMap: Record<string, { amount: number; currency: ExpenseCurrency }>,
+      ) => Record<string, { amount: number; currency: ExpenseCurrency }>,
     ) => {
       locallyEditedSubBudgetMonthsRef.current.add(monthKey);
+      const nextOriginal = originalPatch
+        ? {
+            ...subBudgetsOriginalByMonth,
+            [monthKey]: originalPatch(subBudgetsOriginalByMonth[monthKey] ?? {}),
+          }
+        : subBudgetsOriginalByMonth;
+      if (originalPatch) {
+        setSubBudgetsOriginalByMonth(nextOriginal);
+      }
       setSubBudgetsByMonth((prev) => {
         const currentMonth = prev[monthKey] ?? {};
         const patchedMonth = patch(currentMonth);
@@ -3303,12 +3638,22 @@ function App() {
             budgetOriginalByMonth,
             autoTransferByMonth,
             subBudgetsByMonth: next,
+            subBudgetsOriginalByMonth: nextOriginal,
           });
         }
         return next;
       });
     },
-    [budgetsByMonth, budgetOriginalByMonth, autoTransferByMonth, customCategories, dataReady, expenses, user],
+    [
+      subBudgetsOriginalByMonth,
+      budgetsByMonth,
+      budgetOriginalByMonth,
+      autoTransferByMonth,
+      customCategories,
+      dataReady,
+      expenses,
+      user,
+    ],
   );
 
   useEffect(() => {
@@ -3327,10 +3672,10 @@ function App() {
     void ensureUserContents(Array.from(texts));
   }, [customCategories, expenses, subBudgetsByMonth, ensureUserContents, lang, keepOriginalValues]);
 
-  // Automatic month inheritance:
-  // When user navigates to a month with no explicit values yet, copy budget +
-  // sub-budgets from the nearest prior month that has data.
+  // Automatic month inheritance — only while inside an active budget (prevents stale writes on registry routes).
   useEffect(() => {
+    if (appShellView !== 'active-budget') return;
+
     const hasExplicitSubBudgetMonth = monthHasSubBudgetRecord(
       subBudgetsByMonth,
       selectedMonthKey,
@@ -3349,11 +3694,47 @@ function App() {
           ...prev,
           [selectedMonthKey]: inheritedSubBudgets,
         }));
+        // Carry the immutable baselines forward in lockstep so the inherited
+        // month projects losslessly instead of re-deriving from the ILS ledger.
+        const inheritedOriginal = { ...(subBudgetsOriginalByMonth[subSourceMonthKey] ?? {}) };
+        delete inheritedOriginal[SUB_BUDGET_MONTH_MARKER];
+        setSubBudgetsOriginalByMonth((prev) => ({
+          ...prev,
+          [selectedMonthKey]: inheritedOriginal,
+        }));
       }
     }
-  }, [selectedMonthKey, subBudgetsByMonth]);
+  }, [appShellView, selectedMonthKey, subBudgetsByMonth, subBudgetsOriginalByMonth]);
 
-  const applyAppData = (data: typeof EMPTY_USER_APP_DATA) => {
+  const writeFinancialToCache = useCallback((budgetId: string, snapshot: UserAppData) => {
+    budgetFinancialCacheRef.current[budgetId] = snapshot;
+    saveBudgetFinancialLocal(budgetId, snapshot);
+    financialLocalVersionRef.current[budgetId] = Date.now();
+  }, []);
+
+  const applyAppData = (
+    data: typeof EMPTY_USER_APP_DATA,
+    source = 'unspecified',
+    budgetIdOverride?: string | null,
+  ) => {
+    const snapshot = snapshotUserAppData({
+      expenses: data.expenses,
+      customCategories: data.customCategories,
+      budgetsByMonth: data.budgetsByMonth,
+      budgetOriginalByMonth: data.budgetOriginalByMonth,
+      subBudgetsByMonth: data.subBudgetsByMonth,
+      autoTransferByMonth: data.autoTransferByMonth,
+    });
+    const budgetId = budgetIdOverride ?? activeBudgetIdRef.current;
+    budgetDebug('applyAppData', {
+      source,
+      budgetId: budgetId?.slice(-10) ?? null,
+      ...snapshotFinancialForLog(snapshot),
+    });
+    if (budgetId) {
+      activeFinancialSnapshotRef.current = { budgetId, data: snapshot };
+      writeFinancialToCache(budgetId, snapshot);
+    }
     setExpenses(data.expenses.map((e) => ({ ...e, date: normalizeDate(e.date) })));
     setCustomCategories(data.customCategories);
     setBudgetsByMonth(data.budgetsByMonth);
@@ -3363,7 +3744,40 @@ function App() {
     );
     setAutoTransferByMonth(data.autoTransferByMonth ?? {});
     setSubBudgetsByMonth(data.subBudgetsByMonth);
+    setSubBudgetsOriginalByMonth(
+      (data.subBudgetsOriginalByMonth as
+        | Record<string, Record<string, { amount: number; currency: ExpenseCurrency }>>
+        | undefined) ?? {},
+    );
   };
+
+  useLayoutEffect(() => {
+    selectedMonthKeyRef.current = selectedMonthKey;
+    if (appShellView !== 'active-budget' || !activeBudgetId) return;
+    activeFinancialSnapshotRef.current = {
+      budgetId: activeBudgetId,
+      data: snapshotUserAppData({
+        expenses,
+        customCategories,
+        budgetsByMonth,
+        budgetOriginalByMonth,
+        subBudgetsByMonth,
+        subBudgetsOriginalByMonth,
+        autoTransferByMonth,
+      }),
+    };
+  }, [
+    appShellView,
+    activeBudgetId,
+    selectedMonthKey,
+    expenses,
+    customCategories,
+    budgetsByMonth,
+    budgetOriginalByMonth,
+    subBudgetsByMonth,
+    subBudgetsOriginalByMonth,
+    autoTransferByMonth,
+  ]);
 
   const resetAppData = () => {
     locallyEditedSubBudgetMonthsRef.current.clear();
@@ -3373,6 +3787,7 @@ function App() {
     setBudgetOriginalByMonth({});
     setAutoTransferByMonth({});
     setSubBudgetsByMonth({});
+    setSubBudgetsOriginalByMonth({});
     setBudgetInput('');
     setSearch('');
     setNewExpense({
@@ -3406,27 +3821,62 @@ function App() {
     ],
   );
 
-  const flushActiveBudgetFinancial = useCallback(() => {
-    if (!activeBudgetId) return;
-    const snapshot = snapshotUserAppData({
-      expenses,
-      customCategories,
-      budgetsByMonth,
-      budgetOriginalByMonth,
-      subBudgetsByMonth,
-      autoTransferByMonth,
-    });
-    budgetFinancialCacheRef.current[activeBudgetId] = snapshot;
-    saveBudgetFinancialLocal(activeBudgetId, snapshot);
-  }, [
-    activeBudgetId,
-    expenses,
-    customCategories,
-    budgetsByMonth,
-    budgetOriginalByMonth,
-    subBudgetsByMonth,
-    autoTransferByMonth,
-  ]);
+  const buildGlobalSettingsForCloud = useCallback(
+    (nextUiPreferences?: UiPreferences): UserSettings => ({
+      ...buildCurrentSettingsSnapshot(),
+      uiPreferences: nextUiPreferences ?? uiPreferences,
+    }),
+    [buildCurrentSettingsSnapshot, uiPreferences],
+  );
+
+  const persistUiPreferences = useCallback(
+    (patch: Partial<UiPreferences>) => {
+      setUiPreferences((prev) => {
+        const next = { ...prev, ...patch };
+        if (user && shouldSyncToFirestore(user)) {
+          void saveSettingsToCloud(user.uid, buildGlobalSettingsForCloud(next));
+        }
+        return next;
+      });
+    },
+    [buildGlobalSettingsForCloud, user],
+  );
+
+  const flushBudgetFinancialById = useCallback(
+    (budgetId: string | null, options?: { cloud?: boolean }) => {
+      if (!budgetId) return;
+
+      const snapshot =
+        activeFinancialSnapshotRef.current.budgetId === budgetId
+          ? activeFinancialSnapshotRef.current.data
+          : budgetFinancialCacheRef.current[budgetId] ?? loadBudgetFinancialLocal(budgetId);
+
+      writeFinancialToCache(budgetId, snapshot);
+
+      if (options?.cloud) {
+        const currentUser = auth.currentUser;
+        if (currentUser && !currentUser.isAnonymous) {
+          void saveBudgetFinancialCloud(currentUser.uid, budgetId, snapshot).catch(() => {});
+        }
+      }
+    },
+    [writeFinancialToCache],
+  );
+
+  const cancelPendingFinancialCloudSave = useCallback(() => {
+    if (financialPersistTimerRef.current != null) {
+      window.clearTimeout(financialPersistTimerRef.current);
+      financialPersistTimerRef.current = null;
+    }
+  }, []);
+
+  const flushActiveBudgetFinancial = useCallback(
+    (options?: { cloud?: boolean }) => {
+      cancelPendingFinancialCloudSave();
+      flushBudgetFinancialById(activeBudgetIdRef.current, options);
+    },
+    [cancelPendingFinancialCloudSave, flushBudgetFinancialById],
+  );
 
   const flushActiveBudgetSettings = useCallback(() => {
     if (!activeBudgetId) return;
@@ -3448,7 +3898,9 @@ function App() {
         EMPTY_USER_SETTINGS,
       );
       skipNextSettingsSaveRef.current = true;
+      skipDisplayCurrencyConversionRef.current = true;
       applySettingsFromCloud(scoped);
+      scopedDisplayCurrencyRef.current = scoped.displayCurrency as ExpenseCurrency;
     },
     [applySettingsFromCloud],
   );
@@ -3461,25 +3913,141 @@ function App() {
   activeBudgetIdRef.current = activeBudgetId;
   budgetRegistryRef.current = budgetRegistry;
 
+  const commitPersonalBudgetRegistryTotal = useCallback(
+    (budgetId: string, displayTotal: number) => {
+      const nextRegistry = patchPersonalBudgetRegistryTotal(
+        budgetRegistryRef.current,
+        budgetId,
+        displayTotal,
+      );
+      if (nextRegistry === budgetRegistryRef.current) return;
+      budgetRegistryRef.current = nextRegistry;
+      registryPatchedAtRef.current[budgetId] = Date.now();
+      setBudgetRegistry(nextRegistry);
+      saveBudgetRegistryLocal(nextRegistry);
+      const currentUser = auth.currentUser;
+      if (currentUser && !currentUser.isAnonymous) {
+        void saveBudgetRegistryCloud(currentUser.uid, nextRegistry).catch(() => {});
+      }
+    },
+    [],
+  );
+
+  const invalidateInFlightCurrencyConversion = useCallback(() => {
+    currencyConversionGenerationRef.current += 1;
+  }, []);
+
+  const syncRegistryTotalFromFinancialSnapshot = useCallback(
+    (budgetId: string | null) => {
+      if (!budgetId) return;
+      const meta = budgetRegistryRef.current.personal.find((b) => b.id === budgetId);
+      if (!meta || meta.isDefaultMonthly) return;
+
+      const financial =
+        activeFinancialSnapshotRef.current.budgetId === budgetId
+          ? activeFinancialSnapshotRef.current.data
+          : budgetFinancialCacheRef.current[budgetId];
+      if (!financial) return;
+
+      const scopedCurrency = getBudgetScopedSettings(
+        budgetId,
+        budgetRegistryRef.current,
+        budgetSettingsCacheRef.current,
+        {
+          ...EMPTY_USER_SETTINGS,
+          displayCurrency: scopedDisplayCurrencyRef.current,
+        },
+      ).displayCurrency as ExpenseCurrency;
+
+      const registryTotal = deriveRegistryTotalFromFinancialMonth(
+        financial,
+        selectedMonthKeyRef.current,
+        scopedCurrency,
+        getCachedExchangeRates(),
+      );
+      if (registryTotal != null && registryTotal > 0) {
+        commitPersonalBudgetRegistryTotal(budgetId, registryTotal);
+      }
+    },
+    [commitPersonalBudgetRegistryTotal],
+  );
+
   const enterBudget = useCallback(
-    (budgetId: string, registryOverride?: BudgetRegistryState) => {
+    (
+      budgetId: string,
+      registryOverride?: BudgetRegistryState,
+      options?: { skipSettingsFlush?: boolean; initialSelectedDate?: Date },
+    ) => {
       userBudgetChoiceClaimedRef.current = true;
-      flushActiveBudgetFinancial();
-      flushActiveBudgetSettings();
+      budgetDebug('enterBudget:start', {
+        budgetId: budgetId.slice(-10),
+        hasRegistryOverride: Boolean(registryOverride),
+        skipSettingsFlush: options?.skipSettingsFlush ?? false,
+        initialSelectedDate: options?.initialSelectedDate?.toISOString() ?? null,
+        activeBudgetIdBefore: activeBudgetIdRef.current?.slice(-10) ?? null,
+        reactStateBefore: snapshotFinancialForLog({
+          budgetsByMonth,
+          budgetOriginalByMonth,
+          autoTransferByMonth,
+        }),
+      });
+      invalidateInFlightCurrencyConversion();
+      syncRegistryTotalFromFinancialSnapshot(activeBudgetIdRef.current);
+      flushActiveBudgetFinancial({ cloud: true });
+      if (!options?.skipSettingsFlush) {
+        flushActiveBudgetSettings();
+      }
       const registry = registryOverride ?? budgetRegistry;
-      const cached = budgetFinancialCacheRef.current[budgetId] ?? loadBudgetFinancialLocal(budgetId);
-      budgetFinancialCacheRef.current[budgetId] = cached;
-      setActiveBudgetId(budgetId);
-      activeBudgetIdRef.current = budgetId;
-      applyAppData(cached);
-      applyActiveBudgetSettings(budgetId, registry);
+      let cached = resolveBudgetFinancialForEntry(
+        budgetId,
+        budgetFinancialCacheRef.current,
+        loadBudgetFinancialLocal,
+      );
       const meta = registry.personal.find((b) => b.id === budgetId);
-      if (meta?.startDate) {
-        const [y, m, d] = meta.startDate.split('-').map(Number);
-        if (y && m) {
-          setSelectedDate(new Date(y, m - 1, d || 1));
+      if (meta && !meta.isDefaultMonthly) {
+        const scopedCurrency = getBudgetScopedSettings(
+          budgetId,
+          registry,
+          budgetSettingsCacheRef.current,
+          buildCurrentSettingsSnapshot(),
+        ).displayCurrency as ExpenseCurrency;
+        const seeded = ensurePersonalBudgetFinancialSeeded(
+          cached,
+          meta,
+          scopedCurrency,
+          getCachedExchangeRates(),
+        );
+        if (seeded !== cached) {
+          cached = seeded;
+          writeFinancialToCache(budgetId, cached);
         }
       }
+      writeFinancialToCache(budgetId, cached);
+
+      const viewDate =
+        options?.initialSelectedDate ?? resolveFinancialViewMonthDate(cached, meta);
+      if (viewDate) {
+        flushSync(() => setSelectedDate(viewDate));
+      }
+
+      budgetDebug('enterBudget:resolved', {
+        budgetId: budgetId.slice(-10),
+        metaTotalAmount: meta?.totalAmount ?? null,
+        settingsMode: meta?.settingsMode ?? null,
+        viewDate: viewDate?.toISOString() ?? null,
+        cached: snapshotFinancialForLog(cached),
+        cacheRef: snapshotFinancialForLog(budgetFinancialCacheRef.current[budgetId]),
+        localStorage: snapshotFinancialForLog(loadBudgetFinancialLocal(budgetId)),
+      });
+
+      setActiveBudgetId(budgetId);
+      activeBudgetIdRef.current = budgetId;
+      budgetDebug('enterBudget:preApply', {
+        budgetId: budgetId.slice(-10),
+        selectedMonthKeyAfterFlushSync: monthKeyOfDate(viewDate ?? selectedDate),
+      });
+      applyAppData(cached, 'enterBudget', budgetId);
+      applyActiveBudgetSettings(budgetId, registry);
       appShellViewRef.current = 'active-budget';
       setAppShellView('active-budget');
       setActiveTab('dashboard');
@@ -3490,14 +4058,23 @@ function App() {
       flushActiveBudgetSettings,
       applyActiveBudgetSettings,
       budgetRegistry,
+      buildCurrentSettingsSnapshot,
+      invalidateInFlightCurrencyConversion,
+      syncRegistryTotalFromFinancialSnapshot,
     ],
   );
 
   const navigateAppShell = useCallback(
     (view: AppShellView) => {
       if (view === 'active-budget') return;
-      flushActiveBudgetFinancial();
+      invalidateInFlightCurrencyConversion();
+      syncRegistryTotalFromFinancialSnapshot(activeBudgetIdRef.current);
+      flushActiveBudgetFinancial({ cloud: true });
       flushActiveBudgetSettings();
+      activeFinancialSnapshotRef.current = {
+        budgetId: null,
+        data: { ...EMPTY_USER_APP_DATA },
+      };
       if (activeTab === 'profile') {
         setProfileInitialCurrencySections(null);
         setActiveTab(profileReturnTabRef.current);
@@ -3507,7 +4084,18 @@ function App() {
       setBudgetDrawerOpen(false);
       setNavOpen(false);
     },
-    [flushActiveBudgetFinancial, flushActiveBudgetSettings, activeTab],
+    [flushActiveBudgetFinancial, flushActiveBudgetSettings, activeTab, invalidateInFlightCurrencyConversion, syncRegistryTotalFromFinancialSnapshot],
+  );
+
+  const getBudgetDisplayCurrency = useCallback(
+    (budgetId: string): ExpenseCurrency =>
+      getBudgetScopedSettings(
+        budgetId,
+        budgetRegistry,
+        budgetSettingsCacheRef.current,
+        buildCurrentSettingsSnapshot(),
+      ).displayCurrency as ExpenseCurrency,
+    [budgetRegistry, buildCurrentSettingsSnapshot],
   );
 
   const handleCreatePersonalBudget = useCallback(
@@ -3518,7 +4106,8 @@ function App() {
         name: input.name,
         startDate: input.startDate,
         endDate: input.endDate,
-        totalAmount: input.totalAmount,
+        // Stored in the budget's display currency (matches budgetOriginalByMonth.amount).
+        totalAmount: roundMoneyAmount(input.totalAmount),
         settingsMode: input.settingsMode,
         linkedBudgetId: input.linkedBudgetId,
         copiedFromBudgetId: input.copiedFromBudgetId,
@@ -3529,42 +4118,171 @@ function App() {
         status: input.status,
         createdAt: Date.now(),
       };
-      const nextRegistry: BudgetRegistryState = {
-        ...budgetRegistry,
-        personal: [...budgetRegistry.personal, meta],
-      };
 
-      const buildInitialFinancial = async (): Promise<typeof EMPTY_USER_APP_DATA> => {
-        if (input.totalAmount <= 0) {
-          return { ...EMPTY_USER_APP_DATA };
+      budgetDebug('create:start', {
+        budgetId: id.slice(-10),
+        totalAmount: meta.totalAmount,
+        settingsMode: input.settingsMode,
+        copiedFromBudgetId: input.copiedFromBudgetId ?? null,
+        linkedBudgetId: input.linkedBudgetId ?? null,
+        formCurrency: input.displayCurrency,
+        startDate: input.startDate || null,
+      });
+
+      const formCurrency = input.displayCurrency;
+
+      const targetOldCurrency: ExpenseCurrency | null =
+        input.settingsMode === 'linked' && input.linkedBudgetId
+          ? (getBudgetScopedSettings(
+              input.linkedBudgetId,
+              budgetRegistry,
+              budgetSettingsCacheRef.current,
+              buildCurrentSettingsSnapshot(),
+            ).displayCurrency as ExpenseCurrency)
+          : null;
+
+      const buildInitialFinancial = async () => {
+        let baseFinancial: UserAppData = { ...EMPTY_USER_APP_DATA };
+        if (input.settingsMode === 'copy-from' && input.copiedFromBudgetId) {
+          const sourceFinancial =
+            budgetFinancialCacheRef.current[input.copiedFromBudgetId] ??
+            loadBudgetFinancialLocal(input.copiedFromBudgetId);
+          // Copy categories/expenses/etc. but strip monthly allocations — form amount wins last.
+          baseFinancial = {
+            ...sourceFinancial,
+            budgetsByMonth: {},
+            budgetOriginalByMonth: {},
+          };
         }
+
+        const seededCore = await buildInitialPersonalBudgetFinancial(
+          input.totalAmount,
+          formCurrency,
+          input.startDate,
+        );
         const now = new Date();
         const monthKey =
           input.startDate?.slice(0, 7) ??
           `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-        let ilsAmount = roundMoneyAmount(input.totalAmount);
-        if (displayCurrency !== 'ILS') {
-          const rates = getCachedExchangeRates() ?? (await fetchExchangeRates().catch(() => null));
-          if (rates) {
-            const converted = convertForeignToIls(input.totalAmount, displayCurrency, rates);
-            if (converted != null) {
-              ilsAmount = roundMoneyAmount(converted);
-            }
-          }
-        }
-        return {
-          ...EMPTY_USER_APP_DATA,
-          budgetsByMonth: { [monthKey]: ilsAmount },
-          budgetOriginalByMonth: {
-            [monthKey]: {
-              amount: roundMoneyAmount(input.totalAmount),
-              currency: displayCurrency as ExpenseCurrency,
-            },
-          },
-        };
+        const ilsAmount = seededCore.budgetsByMonth[monthKey] ?? 0;
+
+        return overlayFormMonthlySeed(
+          baseFinancial,
+          monthKey,
+          roundMoneyAmount(input.totalAmount),
+          formCurrency,
+          ilsAmount,
+        );
       };
 
-      void buildInitialFinancial().then((initialFinancial) => {
+      void buildInitialFinancial().then(async (initialFinancial) => {
+        budgetDebug('create:initialFinancial', {
+          budgetId: id.slice(-10),
+          financial: snapshotFinancialForLog(initialFinancial),
+        });
+
+        let mainFinancialUpdate: UserAppData | undefined;
+        let targetFinancialUpdate: UserAppData | undefined;
+        const now = new Date();
+        const monthKey =
+          input.startDate?.slice(0, 7) ??
+          `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const ilsAmount = initialFinancial.budgetsByMonth[monthKey] ?? 0;
+
+        const shouldConvertTargetFinancial =
+          Boolean(input.updateTargetBudgetCurrency) &&
+          input.settingsMode === 'linked' &&
+          Boolean(input.linkedBudgetId) &&
+          targetOldCurrency != null &&
+          targetOldCurrency !== formCurrency;
+
+        let conversionRates = getCachedExchangeRates();
+        if (shouldConvertTargetFinancial && !conversionRates) {
+          conversionRates = (await fetchExchangeRates().catch(() => null)) ?? null;
+        }
+
+        if (shouldConvertTargetFinancial && input.linkedBudgetId && conversionRates) {
+          const targetId = input.linkedBudgetId;
+          const targetMetaBefore =
+            budgetRegistry.personal.find((budget) => budget.id === targetId) ?? null;
+          const sourceFinancial =
+            budgetFinancialCacheRef.current[targetId] ??
+            loadBudgetFinancialLocal(targetId) ??
+            { ...EMPTY_USER_APP_DATA };
+
+          targetFinancialUpdate = convertTargetBudgetFinancialForCurrencyChange(
+            sourceFinancial,
+            targetOldCurrency!,
+            formCurrency,
+            conversionRates,
+            {
+              registryMeta: targetMetaBefore,
+              registryTotalAmountBefore: targetMetaBefore?.totalAmount ?? 0,
+            },
+          );
+          budgetFinancialCacheRef.current[targetId] = targetFinancialUpdate;
+          saveBudgetFinancialLocal(targetId, targetFinancialUpdate);
+          armFinancialConversionGuard(financialConversionGuardRef.current, targetId);
+
+          if (activeBudgetIdRef.current === targetId) {
+            applyAppData(targetFinancialUpdate, 'create:targetCurrencyConvert');
+          }
+        }
+
+        let nextRegistry: BudgetRegistryState = {
+          ...budgetRegistry,
+          personal: [...budgetRegistry.personal, meta],
+        };
+
+        if (shouldConvertTargetFinancial && input.linkedBudgetId && conversionRates) {
+          nextRegistry = {
+            ...nextRegistry,
+            personal: nextRegistry.personal.map((budget) => {
+              if (budget.id !== input.linkedBudgetId || !(budget.totalAmount > 0)) {
+                return budget;
+              }
+              const convertedTotal = convertRegistryBudgetTotalAmount(
+                budget.totalAmount,
+                targetOldCurrency!,
+                formCurrency,
+                conversionRates!,
+              );
+              if (convertedTotal == null) return budget;
+              return { ...budget, totalAmount: roundMoneyAmount(convertedTotal) };
+            }),
+          };
+        }
+
+        // Dual-write: mirror linked budget as a sub-budget category in the main budget.
+        if (input.isLinkedToMain) {
+          const mainFinancialBase =
+            input.linkedBudgetId === DEFAULT_MONTHLY_BUDGET_ID && targetFinancialUpdate
+              ? targetFinancialUpdate
+              : loadMainBudgetFinancial(
+                  budgetFinancialCacheRef.current,
+                  loadBudgetFinancialLocal,
+                );
+
+          const injected = injectLinkedBudgetIntoMainFinancial(mainFinancialBase, {
+            personalBudgetId: id,
+            name: input.name,
+            totalAmountIls: ilsAmount,
+            totalAmountDisplay: roundMoneyAmount(input.totalAmount),
+            displayCurrency: formCurrency,
+            icon: input.icon,
+            color: input.color,
+            monthKey,
+          });
+          meta.linkedCategoryId = injected.linkedCategoryId;
+          mainFinancialUpdate = injected.financial;
+          budgetFinancialCacheRef.current[DEFAULT_MONTHLY_BUDGET_ID] = mainFinancialUpdate;
+          saveBudgetFinancialLocal(DEFAULT_MONTHLY_BUDGET_ID, mainFinancialUpdate);
+
+          if (activeBudgetIdRef.current === DEFAULT_MONTHLY_BUDGET_ID) {
+            applyAppData(mainFinancialUpdate, 'create:linkedMainInject');
+          }
+        }
+
         budgetFinancialCacheRef.current[id] = initialFinancial;
         saveBudgetFinancialLocal(id, initialFinancial);
         budgetSettingsCacheRef.current = initializeBudgetSettingsForNewPersonalBudget(
@@ -3572,20 +4290,112 @@ function App() {
           nextRegistry,
           buildCurrentSettingsSnapshot(),
           budgetSettingsCacheRef.current,
+          {
+            displayCurrency: formCurrency,
+            updateLinkedTargetCurrency: Boolean(input.updateTargetBudgetCurrency),
+          },
         );
+
         setBudgetRegistry(nextRegistry);
         saveBudgetRegistryLocal(nextRegistry);
-        if (user && !user.isAnonymous) {
-          void saveBudgetRegistryCloud(user.uid, nextRegistry);
-          void saveBudgetFinancialCloud(user.uid, id, initialFinancial);
+
+        const seedViewDate = resolveFinancialViewMonthDate(initialFinancial, meta);
+
+        const conversionGuardIds = new Set<string>();
+        if (targetFinancialUpdate && input.linkedBudgetId) {
+          conversionGuardIds.add(input.linkedBudgetId);
         }
-        enterBudget(id, nextRegistry);
+        if (mainFinancialUpdate && input.linkedBudgetId === DEFAULT_MONTHLY_BUDGET_ID) {
+          conversionGuardIds.add(DEFAULT_MONTHLY_BUDGET_ID);
+        }
+
+        if (user && !user.isAnonymous) {
+          const cloudWrites: Promise<void>[] = [];
+
+          if (mainFinancialUpdate) {
+            cloudWrites.push(
+              dualWriteLinkedBudgetCreationCloud(
+                user.uid,
+                nextRegistry,
+                id,
+                initialFinancial,
+                mainFinancialUpdate,
+              ),
+            );
+          } else {
+            cloudWrites.push(saveBudgetRegistryCloud(user.uid, nextRegistry));
+            cloudWrites.push(saveBudgetFinancialCloud(user.uid, id, initialFinancial));
+          }
+
+          if (targetFinancialUpdate && input.linkedBudgetId) {
+            const targetId = input.linkedBudgetId;
+            const mainAlreadyPersisted =
+              targetId === DEFAULT_MONTHLY_BUDGET_ID && Boolean(mainFinancialUpdate);
+            if (!mainAlreadyPersisted) {
+              cloudWrites.push(saveBudgetFinancialCloud(user.uid, targetId, targetFinancialUpdate));
+            }
+          }
+
+          try {
+            await Promise.all(cloudWrites);
+          } catch {
+            // Local cache remains authoritative until the next successful save.
+          } finally {
+            for (const guardId of conversionGuardIds) {
+              clearFinancialConversionGuard(financialConversionGuardRef.current, guardId);
+            }
+          }
+        } else {
+          for (const guardId of conversionGuardIds) {
+            clearFinancialConversionGuard(financialConversionGuardRef.current, guardId);
+          }
+        }
+
+        budgetDebug('create:preEnterBudget', {
+          budgetId: id.slice(-10),
+          monthKey,
+          seedViewDate: seedViewDate?.toISOString() ?? null,
+          cache: snapshotFinancialForLog(budgetFinancialCacheRef.current[id]),
+          localStorage: snapshotFinancialForLog(loadBudgetFinancialLocal(id)),
+          registryTotal: meta.totalAmount,
+        });
+
+        enterBudget(id, nextRegistry, {
+          skipSettingsFlush: true,
+          initialSelectedDate: seedViewDate ?? undefined,
+        });
+        budgetSettingsCacheRef.current = finalizePersonalBudgetDisplayCurrency(
+          meta,
+          nextRegistry,
+          budgetSettingsCacheRef.current,
+          buildCurrentSettingsSnapshot(),
+          formCurrency,
+          input.updateTargetBudgetCurrency,
+        );
+        applyActiveBudgetSettings(id, nextRegistry);
+        budgetDebug('create:postEnterBudget', {
+          budgetId: id.slice(-10),
+          note: 'sync-closure-after-enterBudget (may still be stale until next render)',
+          reactBudgetsByMonth: budgetsByMonth,
+          reactBudgetOriginalByMonth: budgetOriginalByMonth,
+          selectedMonthKey,
+          displayCurrency,
+        });
+        requestAnimationFrame(() => {
+          budgetDebug('create:postEnterBudget:raf', {
+            budgetId: id.slice(-10),
+            activeBudgetId: activeBudgetIdRef.current?.slice(-10) ?? null,
+            cache: snapshotFinancialForLog(budgetFinancialCacheRef.current[id]),
+            localStorage: snapshotFinancialForLog(loadBudgetFinancialLocal(id)),
+          });
+        });
       });
     },
     [
+      applyActiveBudgetSettings,
+      applyAppData,
       budgetRegistry,
       buildCurrentSettingsSnapshot,
-      displayCurrency,
       enterBudget,
       user,
     ],
@@ -3681,7 +4491,7 @@ function App() {
           if (!userBudgetChoiceClaimedRef.current) {
             setActiveBudgetId(DEFAULT_MONTHLY_BUDGET_ID);
             setAppShellView('active-budget');
-            applyAppData(financialCache[DEFAULT_MONTHLY_BUDGET_ID] ?? legacy);
+            applyAppData(financialCache[DEFAULT_MONTHLY_BUDGET_ID] ?? legacy, 'bootstrap:guest');
             applyActiveBudgetSettingsRef.current(DEFAULT_MONTHLY_BUDGET_ID, registry);
           }
           setBudgetSystemReady(true);
@@ -3723,7 +4533,7 @@ function App() {
           if (!userBudgetChoiceClaimedRef.current) {
             setActiveBudgetId(DEFAULT_MONTHLY_BUDGET_ID);
             setAppShellView('active-budget');
-            applyAppData(financial);
+            applyAppData(financial, 'bootstrap:cloud');
             applyActiveBudgetSettingsRef.current(DEFAULT_MONTHLY_BUDGET_ID, registry);
           }
           setBudgetSystemReady(true);
@@ -3736,8 +4546,19 @@ function App() {
           uid,
           (nextRegistry, meta) => {
             if (cancelled || meta.hasPendingWrites) return;
-            setBudgetRegistry(nextRegistry);
-            saveBudgetRegistryLocal(nextRegistry);
+            const merged = mergeRegistryWithRecentLocalPatches(
+              budgetRegistryRef.current,
+              nextRegistry,
+              registryPatchedAtRef.current,
+            );
+            budgetRegistryRef.current = merged;
+            budgetDebug('subscribeRegistry:incoming', {
+              hasPendingWrites: meta.hasPendingWrites,
+              totals: snapshotRegistryTotalsForLog(merged.personal),
+              mergedLocalPatches: merged !== nextRegistry,
+            });
+            setBudgetRegistry(merged);
+            saveBudgetRegistryLocal(merged);
           },
           () => {
             if (!cancelled) setBudgetRegistry({ personal: [], shared: [] });
@@ -3746,8 +4567,10 @@ function App() {
 
         unsubSettings = subscribeSettings(
           uid,
-          (_settings, meta) => {
+          (settings, meta) => {
             if (cancelled || meta.hasPendingWrites) return;
+
+            setUiPreferences(settings.uiPreferences ?? DEFAULT_UI_PREFERENCES);
 
             if (appShellViewRef.current === 'active-budget') {
               const pendingLang = pendingAuthLangRef.current;
@@ -3856,20 +4679,76 @@ function App() {
     let cancelled = false;
     suppressCloudSaveRef.current = true;
     const subscribedBudgetId = activeBudgetId;
+    const subscribedAt = Date.now();
     const unsub = subscribeBudgetFinancial(
       user.uid,
       subscribedBudgetId,
       (data, meta) => {
         if (cancelled || meta.hasPendingWrites || appShellViewRef.current !== 'active-budget') return;
         if (activeBudgetIdRef.current !== subscribedBudgetId) return;
+
+        const cached = budgetFinancialCacheRef.current[subscribedBudgetId];
+        const guardActive = isFinancialConversionGuardActive(
+          financialConversionGuardRef.current,
+          subscribedBudgetId,
+        );
+        budgetDebug('subscribeFinancial:incoming', {
+          budgetId: subscribedBudgetId.slice(-10),
+          firestoreExists: meta.exists,
+          hasPendingWrites: meta.hasPendingWrites,
+          guardActive,
+          incoming: snapshotFinancialForLog(data),
+          cachedBefore: snapshotFinancialForLog(cached),
+        });
+        if (
+          shouldRejectEmptyIncomingFinancial(cached, data, meta, guardActive)
+        ) {
+          budgetDebug('subscribeFinancial:rejected', {
+            budgetId: subscribedBudgetId.slice(-10),
+            reason: 'shouldRejectEmptyIncomingFinancial',
+            firestoreExists: meta.exists,
+            guardActive,
+          });
+          return;
+        }
+
+        if (
+          shouldRejectStaleIncomingFinancial(
+            cached,
+            data,
+            financialLocalVersionRef.current[subscribedBudgetId],
+            subscribedAt,
+          )
+        ) {
+          budgetDebug('subscribeFinancial:rejected', {
+            budgetId: subscribedBudgetId.slice(-10),
+            reason: 'shouldRejectStaleIncomingFinancial',
+            localWriteAt: financialLocalVersionRef.current[subscribedBudgetId] ?? null,
+            subscribedAt,
+          });
+          return;
+        }
+
         budgetFinancialCacheRef.current[subscribedBudgetId] = data;
-        applyAppData(data);
+        financialLocalVersionRef.current[subscribedBudgetId] = Date.now();
+        budgetDebug('subscribeFinancial:applied', {
+          budgetId: subscribedBudgetId.slice(-10),
+          incoming: snapshotFinancialForLog(data),
+        });
+        applyAppData(data, 'subscribeFinancial', subscribedBudgetId);
       },
       () => {
         if (!cancelled && appShellViewRef.current === 'active-budget' && activeBudgetIdRef.current === subscribedBudgetId) {
-          const empty = { ...EMPTY_USER_APP_DATA };
-          budgetFinancialCacheRef.current[subscribedBudgetId] = empty;
-          applyAppData(empty);
+          budgetDebug('subscribeFinancial:onMissing', {
+            budgetId: subscribedBudgetId.slice(-10),
+          });
+          const cached = resolveBudgetFinancialForEntry(
+            subscribedBudgetId,
+            budgetFinancialCacheRef.current,
+            loadBudgetFinancialLocal,
+          );
+          budgetFinancialCacheRef.current[subscribedBudgetId] = cached;
+          applyAppData(cached, 'subscribeFinancial:onMissing', subscribedBudgetId);
         }
       },
     );
@@ -3901,6 +4780,107 @@ function App() {
     buildCurrentSettingsSnapshot,
   ]);
 
+  // When the user changes display currency inside a budget, convert financial payloads
+  // and sync the converted total to the registry card (not the raw pre-conversion amount).
+  useEffect(() => {
+    if (!isInsideActiveBudget || !activeBudgetId) return;
+
+    if (skipDisplayCurrencyConversionRef.current) {
+      skipDisplayCurrencyConversionRef.current = false;
+      scopedDisplayCurrencyRef.current = displayCurrency;
+      return;
+    }
+
+    const previousCurrency = scopedDisplayCurrencyRef.current;
+    if (previousCurrency === displayCurrency) return;
+
+    const budgetId = activeBudgetIdRef.current;
+    if (!budgetId) return;
+
+    const activeMeta = budgetRegistryRef.current.personal.find((b) => b.id === budgetId);
+    if (!activeMeta || activeMeta.isDefaultMonthly) {
+      scopedDisplayCurrencyRef.current = displayCurrency;
+      return;
+    }
+
+    const conversionGeneration = currencyConversionGenerationRef.current;
+
+    const runConversion = async () => {
+      if (conversionGeneration !== currencyConversionGenerationRef.current) return;
+
+      const rates =
+        getCachedExchangeRates() ?? (await fetchExchangeRates().catch(() => null));
+      if (!rates) {
+        scopedDisplayCurrencyRef.current = displayCurrency;
+        return;
+      }
+
+      if (conversionGeneration !== currencyConversionGenerationRef.current) return;
+
+      const sourceFinancial =
+        activeFinancialSnapshotRef.current.budgetId === budgetId
+          ? activeFinancialSnapshotRef.current.data
+          : budgetFinancialCacheRef.current[budgetId];
+      if (!sourceFinancial) {
+        scopedDisplayCurrencyRef.current = displayCurrency;
+        return;
+      }
+
+      const convertedFinancial = convertBudgetFinancialToDisplayCurrency(
+        sourceFinancial,
+        previousCurrency,
+        displayCurrency,
+        rates,
+      );
+
+      if (conversionGeneration !== currencyConversionGenerationRef.current) return;
+
+      armFinancialConversionGuard(financialConversionGuardRef.current, budgetId);
+      writeFinancialToCache(budgetId, convertedFinancial);
+      activeFinancialSnapshotRef.current = { budgetId, data: convertedFinancial };
+      applyAppData(convertedFinancial, 'displayCurrencyChange', budgetId);
+
+      const registryMonthKey = selectedMonthKeyRef.current;
+      const convertedRegistryTotal =
+        deriveRegistryTotalFromFinancialMonth(
+          convertedFinancial,
+          registryMonthKey,
+          displayCurrency,
+          rates,
+        ) ??
+        convertRegistryBudgetTotalAmount(
+          activeMeta.totalAmount,
+          previousCurrency,
+          displayCurrency,
+          rates,
+        );
+
+      if (conversionGeneration !== currencyConversionGenerationRef.current) return;
+
+      if (convertedRegistryTotal != null && convertedRegistryTotal > 0) {
+        commitPersonalBudgetRegistryTotal(budgetId, convertedRegistryTotal);
+      }
+
+      scopedDisplayCurrencyRef.current = displayCurrency;
+      clearFinancialConversionGuard(financialConversionGuardRef.current, budgetId);
+
+      const currentUser = auth.currentUser;
+      if (currentUser && !currentUser.isAnonymous) {
+        void saveBudgetFinancialCloud(currentUser.uid, budgetId, convertedFinancial).catch(
+          () => {},
+        );
+      }
+    };
+
+    void runConversion();
+  }, [
+    displayCurrency,
+    isInsideActiveBudget,
+    activeBudgetId,
+    commitPersonalBudgetRegistryTotal,
+    writeFinancialToCache,
+  ]);
+
   // Persist financial changes per budgetId: localStorage for guests, debounced Firestore for accounts.
   useEffect(() => {
     if (!dataReady || !user || appShellView !== 'active-budget') return;
@@ -3911,13 +4891,20 @@ function App() {
       budgetsByMonth,
       budgetOriginalByMonth,
       subBudgetsByMonth,
+      subBudgetsOriginalByMonth,
       autoTransferByMonth,
     });
 
-    budgetFinancialCacheRef.current[activeBudgetId] = payload;
+    writeFinancialToCache(activeBudgetId, payload);
+
+    budgetDebug('financialPersist', {
+      budgetId: activeBudgetId.slice(-10),
+      suppressNext: suppressCloudSaveRef.current,
+      payload: snapshotFinancialForLog(payload),
+      isAnonymous: user.isAnonymous,
+    });
 
     if (user.isAnonymous) {
-      saveBudgetFinancialLocal(activeBudgetId, payload);
       saveBudgetRegistryLocal(budgetRegistry);
       return;
     }
@@ -3929,15 +4916,25 @@ function App() {
 
     const uid = user.uid;
     const budgetId = activeBudgetId;
+    cancelPendingFinancialCloudSave();
     const timer = window.setTimeout(() => {
+      financialPersistTimerRef.current = null;
       const currentUser = auth.currentUser;
       if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) return;
+      if (appShellViewRef.current !== 'active-budget') return;
+      if (activeBudgetIdRef.current !== budgetId) return;
       void saveBudgetFinancialCloud(uid, budgetId, payload).catch(() => {
         // Non-blocking; next edit will retry.
       });
     }, 400);
+    financialPersistTimerRef.current = timer;
 
-    return () => window.clearTimeout(timer);
+    return () => {
+      if (financialPersistTimerRef.current != null) {
+        window.clearTimeout(financialPersistTimerRef.current);
+        financialPersistTimerRef.current = null;
+      }
+    };
   }, [
     expenses,
     customCategories,
@@ -3945,11 +4942,13 @@ function App() {
     budgetOriginalByMonth,
     autoTransferByMonth,
     subBudgetsByMonth,
+    subBudgetsOriginalByMonth,
     dataReady,
     user,
     activeBudgetId,
     appShellView,
     budgetRegistry,
+    cancelPendingFinancialCloudSave,
   ]);
 
   // Budget update entry point. If the active month already has sub-budget
@@ -3993,11 +4992,58 @@ function App() {
     mode: BudgetChangeMode,
     original: { amount: number; currency: ExpenseCurrency },
   ) => {
+    budgetDebug('applyBudgetChange:start', {
+      activeBudgetId: activeBudgetIdRef.current?.slice(-10) ?? null,
+      selectedMonthKey,
+      amountIls: roundMoneyAmount(amount),
+      originalAmount: roundMoneyAmount(original.amount),
+      originalCurrency: original.currency,
+      mode,
+    });
+
     setBudgetsByMonth((prev) => ({ ...prev, [selectedMonthKey]: roundMoneyAmount(amount) }));
     setBudgetOriginalByMonth((prev) => ({
       ...prev,
       [selectedMonthKey]: { ...original, amount: roundMoneyAmount(original.amount) },
     }));
+
+    const budgetId = activeBudgetIdRef.current;
+    const activeMeta = budgetRegistryRef.current.personal.find((b) => b.id === budgetId);
+    if (budgetId && activeMeta && !activeMeta.isDefaultMonthly) {
+      const registryTotal =
+        deriveRegistryTotalFromFinancialMonth(
+          {
+            expenses,
+            customCategories,
+            budgetsByMonth: {
+              ...budgetsByMonth,
+              [selectedMonthKey]: roundMoneyAmount(amount),
+            },
+            budgetOriginalByMonth: {
+              ...budgetOriginalByMonth,
+              [selectedMonthKey]: {
+                ...original,
+                amount: roundMoneyAmount(original.amount),
+              },
+            },
+            subBudgetsByMonth,
+            subBudgetsOriginalByMonth,
+            autoTransferByMonth,
+          },
+          selectedMonthKey,
+          original.currency,
+          getCachedExchangeRates(),
+        ) ?? roundMoneyAmount(original.amount);
+
+      commitPersonalBudgetRegistryTotal(budgetId, registryTotal);
+    } else {
+      budgetDebug('applyBudgetChange:registrySkipped', {
+        budgetId: budgetId?.slice(-10) ?? null,
+        hasMeta: Boolean(activeMeta),
+        isDefaultMonthly: activeMeta?.isDefaultMonthly ?? null,
+        reason: 'guard-not-personal-budget',
+      });
+    }
 
     if (mode === 'reset') {
       // Wipe this month's allocations only.
@@ -4026,35 +5072,44 @@ function App() {
 
     if (isNaN(enteredAmount) || !(enteredAmount > 0)) return;
 
-    const resolveIlsAmount = async (): Promise<number | null> => {
-      if (inputCurrency === 'ILS') return roundMoneyAmount(enteredAmount);
+    const resolveConversion = async (): Promise<{
+      ilsAmount: number;
+      appliedFeePercent: number;
+      manualRateUsed: boolean;
+    } | null> => {
+      if (inputCurrency === 'ILS') {
+        return { ilsAmount: roundMoneyAmount(enteredAmount), appliedFeePercent: 0, manualRateUsed: false };
+      }
 
-      const rates = getCachedExchangeRates() ?? (await fetchExchangeRates().catch(() => null));
-      if (!rates) return null;
-
-      const converted = convertExpenseAmountToIls(enteredAmount, inputCurrency, rates, {
+      const rates = getCachedExchangeRates();
+      const isoDate = normalizeDate(newExpense.date);
+      const recorded = await recordExpenseConversionToIlsAsync(enteredAmount, inputCurrency, rates, {
         displayCurrency,
+        transactionDate: isoDate,
       });
-      if (converted == null) return null;
+      if (recorded == null) return null;
 
-      return roundMoneyAmount(converted);
+      return { ...recorded, ilsAmount: roundMoneyAmount(recorded.ilsAmount) };
     };
 
-    void resolveIlsAmount().then((ilsAmount) => {
-      if (ilsAmount == null || !(ilsAmount > 0)) return;
+    void resolveConversion().then((conversion) => {
+      if (conversion == null || !(conversion.ilsAmount > 0)) return;
 
       const isoDate = normalizeDate(newExpense.date);
       const expense: Expense = {
         id: Date.now().toString(),
         description: newExpense.description.trim(),
-        amount: ilsAmount,
+        amount: conversion.ilsAmount,
         category: newExpense.category,
         date: isoDate,
         originalAmount: roundMoneyAmount(enteredAmount),
-        originalCurrency: currencySymbol(inputCurrency),
+        originalCurrency: inputCurrency,
+        appliedFeePercent: conversion.appliedFeePercent,
+        manualRateUsed: conversion.manualRateUsed,
       };
 
-      setExpenses((prev) => [expense, ...prev]);
+      const nextExpenses = [expense, ...expenses];
+      setExpenses(nextExpenses);
       setNewExpense((prev) => ({
         description: '',
         amount: '',
@@ -4063,6 +5118,44 @@ function App() {
         date: toISODate(new Date()),
       }));
       setExpenseRatesReady(true);
+
+      // Dual-write (Task 2): mirror expense into main budget when source budget is linked.
+      const linkedMeta = resolveLinkedBudgetMeta(activeBudgetId, budgetRegistry);
+      if (linkedMeta?.linkedCategoryId) {
+        const mainFinancial = loadMainBudgetFinancial(
+          budgetFinancialCacheRef.current,
+          loadBudgetFinancialLocal,
+        );
+        const mirroredExpense = buildMirroredExpense(
+          expense,
+          linkedMeta.id,
+          linkedMeta.linkedCategoryId,
+        );
+        const updatedMainFinancial = mirrorExpenseIntoMainFinancial(mainFinancial, mirroredExpense);
+        budgetFinancialCacheRef.current[DEFAULT_MONTHLY_BUDGET_ID] = updatedMainFinancial;
+        saveBudgetFinancialLocal(DEFAULT_MONTHLY_BUDGET_ID, updatedMainFinancial);
+
+        if (user && !user.isAnonymous) {
+          const sourceFinancial = snapshotUserAppData({
+            expenses: nextExpenses,
+            customCategories,
+            budgetsByMonth,
+            budgetOriginalByMonth,
+            subBudgetsByMonth,
+            subBudgetsOriginalByMonth,
+            autoTransferByMonth,
+          });
+          // Parallel cloud dual-write: source budget + mirrored main-budget expense.
+          void dualWriteMirroredExpenseCloud(
+            user.uid,
+            activeBudgetId,
+            sourceFinancial,
+            updatedMainFinancial,
+          ).catch(() => {
+            // Non-blocking; debounced effect may retry source save.
+          });
+        }
+      }
 
       const [y, m] = isoDate.split('-').map((n) => parseInt(n, 10));
       setSelectedDate(new Date(y, m - 1, 1));
@@ -4083,7 +5176,7 @@ function App() {
   const getExpenseEditCurrency = useCallback(
     (expense: Expense): ExpenseCurrency => {
       if (expense.originalCurrency) {
-        return (symbolToCurrency(expense.originalCurrency) ?? displayCurrency) as ExpenseCurrency;
+        return symbolToCurrency(expense.originalCurrency, displayCurrency) ?? displayCurrency;
       }
       return 'ILS';
     },
@@ -4104,6 +5197,8 @@ function App() {
       currency: editCurrency,
       category: expense.category,
       date: normalizeDate(expense.date),
+      disableManualRate: Boolean(expense.disableManualRate),
+      disableFee: Boolean(expense.disableFee),
     });
   };
 
@@ -4111,7 +5206,54 @@ function App() {
     setEditingExpenseId(null);
     setEditExpenseDraft(null);
     setEditExpenseRatesReady(true);
+    setEditPreviewAmount(null);
   };
+
+  // Live preview: recomputes instantly when amount, currency, date, or either
+  // modifier checkbox changes — mirrors the exact conversion + fee pipeline.
+  const editDraftAmount = editExpenseDraft?.amount;
+  const editDraftCurrency = editExpenseDraft?.currency;
+  const editDraftDate = editExpenseDraft?.date;
+  const editDraftDisableManual = editExpenseDraft?.disableManualRate ?? false;
+  const editDraftDisableFee = editExpenseDraft?.disableFee ?? false;
+  useEffect(() => {
+    if (editDraftAmount == null || editDraftCurrency == null || editDraftDate == null) {
+      setEditPreviewAmount(null);
+      return;
+    }
+
+    const typed = parseFloat(editDraftAmount);
+    if (!(typed > 0)) {
+      setEditPreviewAmount(null);
+      return;
+    }
+
+    let cancelled = false;
+    const rates = getCachedExchangeRates();
+    const date = normalizeDate(editDraftDate);
+
+    void previewExpenseDisplayAmount(typed, editDraftCurrency, rates, {
+      displayCurrency,
+      transactionDate: date,
+      disableManualRate: editDraftDisableManual,
+      disableFee: editDraftDisableFee,
+    }).then((preview) => {
+      if (!cancelled) {
+        setEditPreviewAmount(preview?.displayAmount ?? null);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    editDraftAmount,
+    editDraftCurrency,
+    editDraftDate,
+    editDraftDisableManual,
+    editDraftDisableFee,
+    displayCurrency,
+  ]);
 
   const handleEditExpenseSave = () => {
     if (!editingExpenseId || !editExpenseDraft) return;
@@ -4119,19 +5261,35 @@ function App() {
     const typedAmount = parseFloat(editExpenseDraft.amount);
     if (isNaN(typedAmount) || !(typedAmount > 0)) return;
 
-    const resolveIlsAmount = async (): Promise<number | null> => {
-      if (editExpenseDraft.currency === 'ILS') return roundMoneyAmount(typedAmount);
-      const rates = getCachedExchangeRates() ?? (await fetchExchangeRates().catch(() => null));
-      if (!rates) return null;
-      const converted = convertExpenseAmountToIls(typedAmount, editExpenseDraft.currency, rates, {
-        displayCurrency,
-      });
-      if (converted == null) return null;
-      return roundMoneyAmount(converted);
+    const { disableManualRate, disableFee } = editExpenseDraft;
+
+    const resolveConversion = async (): Promise<{
+      ilsAmount: number;
+      appliedFeePercent: number;
+      manualRateUsed: boolean;
+    } | null> => {
+      if (editExpenseDraft.currency === 'ILS') {
+        return { ilsAmount: roundMoneyAmount(typedAmount), appliedFeePercent: 0, manualRateUsed: false };
+      }
+      const normalizedDate = normalizeDate(editExpenseDraft.date);
+      const rates = getCachedExchangeRates();
+      const recorded = await recordExpenseConversionToIlsAsync(
+        typedAmount,
+        editExpenseDraft.currency,
+        rates,
+        {
+          displayCurrency,
+          transactionDate: normalizedDate,
+          disableManualRate,
+          disableFee,
+        },
+      );
+      if (recorded == null) return null;
+      return { ...recorded, ilsAmount: roundMoneyAmount(recorded.ilsAmount) };
     };
 
-    void resolveIlsAmount().then((ilsAmount) => {
-      if (ilsAmount == null || !(ilsAmount > 0)) return;
+    void resolveConversion().then((conversion) => {
+      if (conversion == null || !(conversion.ilsAmount > 0)) return;
 
       const normalizedDate = normalizeDate(editExpenseDraft.date);
       const normalizedDescription = editExpenseDraft.description.trim();
@@ -4143,11 +5301,15 @@ function App() {
             ? {
                 ...expense,
                 description: normalizedDescription,
-                amount: ilsAmount,
+                amount: conversion.ilsAmount,
                 category: editExpenseDraft.category,
                 date: normalizedDate,
                 originalAmount: roundedTypedAmount,
-                originalCurrency: currencySymbol(editExpenseDraft.currency),
+                originalCurrency: editExpenseDraft.currency,
+                appliedFeePercent: conversion.appliedFeePercent,
+                manualRateUsed: conversion.manualRateUsed,
+                disableManualRate,
+                disableFee,
               }
             : expense,
         ),
@@ -4219,19 +5381,41 @@ function App() {
 
   // Sub-budget handlers — allocations are keyed by category ID (1:1 with categories).
   const handleSaveSubBudgets = useCallback(
-    async (draft: Record<string, number>) => {
-      patchSubBudgetsByMonth(selectedMonthKey, (monthMap) => {
-        let next = { ...monthMap };
-        for (const cat of allCategories) {
-          if (!isSubBudgetCategoryKey(cat.value)) continue;
-          const amount = draft[cat.value] ?? 0;
-          next =
-            amount > 0
-              ? { ...next, [cat.value]: roundMoneyAmount(amount) }
-              : withoutSubBudgetKey(next, cat.value);
-        }
-        return markSubBudgetMonthInitialized(next);
-      });
+    async (
+      draft: Record<string, number>,
+      draftOriginal: Record<string, { amount: number; currency: ExpenseCurrency }>,
+    ) => {
+      patchSubBudgetsByMonth(
+        selectedMonthKey,
+        (monthMap) => {
+          let next = { ...monthMap };
+          for (const cat of allCategories) {
+            if (!isSubBudgetCategoryKey(cat.value)) continue;
+            const amount = draft[cat.value] ?? 0;
+            next =
+              amount > 0
+                ? { ...next, [cat.value]: roundMoneyAmount(amount) }
+                : withoutSubBudgetKey(next, cat.value);
+          }
+          return markSubBudgetMonthInitialized(next);
+        },
+        // Immutable baseline patch: store the exact typed amount + currency per
+        // allocation so display projects losslessly; drop cleared allocations.
+        (originalMap) => {
+          const next = { ...originalMap };
+          for (const cat of allCategories) {
+            if (!isSubBudgetCategoryKey(cat.value)) continue;
+            const amount = draft[cat.value] ?? 0;
+            const baseline = draftOriginal[cat.value];
+            if (amount > 0 && baseline && baseline.amount > 0) {
+              next[cat.value] = { amount: baseline.amount, currency: baseline.currency };
+            } else {
+              delete next[cat.value];
+            }
+          }
+          return next;
+        },
+      );
       if (user && !user.isAnonymous) {
         await new Promise<void>((resolve) => window.setTimeout(resolve, 450));
       }
@@ -4267,37 +5451,30 @@ function App() {
   const statusRates = getCachedExchangeRates();
   const totalExpensesDisplayAmount = useMemo(() => {
     if (displayCurrency === 'ILS') return roundMoneyAmount(totalExpenses);
-    const hasOriginalsForDisplayCurrency = monthExpenses.every((expense) => {
-      if (!(expense.originalAmount != null && expense.originalAmount > 0 && expense.originalCurrency)) {
-        return false;
-      }
-      const originalCode = symbolToCurrency(expense.originalCurrency);
-      return originalCode === displayCurrency;
-    });
-    if (hasOriginalsForDisplayCurrency) {
-      return sumMoney(monthExpenses.map((expense) => expense.originalAmount ?? 0));
-    }
     if (!statusRates) return null;
-    const convertedTotal = monthExpenses.reduce((sum, expense) => {
-      const converted = convertIlsToForeign(expense.amount, displayCurrency, statusRates);
-      return roundMoneyAmount(sum + (converted ?? 0));
-    }, 0);
-    return roundMoneyAmount(convertedTotal);
+    // Hierarchical rollup: project EACH expense from its OWN immutable baseline
+    // directly into the display currency, then sum (no chained ILS conversion).
+    // Expenses with a matching baseline currency revert with zero math. Fees are
+    // off here: commission is already baked into the canonical ILS at entry, and
+    // per-line display is fee-less — so the total stays consistent with the rows.
+    const ctx = buildMoneyProjectionContext(displayCurrency, {
+      rates: statusRates,
+      applyFees: false,
+    });
+    const bases = monthExpenses.map((expense) => immutableFromExpense(expense));
+    return sumMoneyProjections(bases, displayCurrency, ctx);
   }, [displayCurrency, monthExpenses, statusRates, totalExpenses]);
   const budgetStatusDisplayAmount = useMemo(() => {
-    if (selectedBudgetSourceMonthKey) {
-      const original = budgetOriginalByMonth[selectedBudgetSourceMonthKey];
-      if (original && original.currency === displayCurrency) {
-        return roundMoneyAmount(original.amount);
-      }
-    }
-    if (displayCurrency === 'ILS') return roundMoneyAmount(budget);
-    if (!statusRates) return null;
-    const converted = convertIlsToForeign(budget, displayCurrency, statusRates);
-    if (converted == null) return null;
-    return roundMoneyAmount(converted);
+    const sourceKey = selectedBudgetSourceMonthKey ?? selectedMonthKey;
+    return projectBudgetMonthDisplayAmount(
+      budget,
+      sourceKey ? budgetOriginalByMonth[sourceKey] : undefined,
+      displayCurrency,
+      statusRates,
+    );
   }, [
     selectedBudgetSourceMonthKey,
+    selectedMonthKey,
     budgetOriginalByMonth,
     displayCurrency,
     budget,
@@ -4308,20 +5485,63 @@ function App() {
     return roundMoneyAmount(budgetStatusDisplayAmount - totalExpensesDisplayAmount);
   }, [budgetStatusDisplayAmount, totalExpensesDisplayAmount]);
   const selectedBudgetDisplayParts = useMemo(() => {
-    if (selectedBudgetSourceMonthKey) {
-      const original = budgetOriginalByMonth[selectedBudgetSourceMonthKey];
-      if (original && original.currency === displayCurrency) {
-        return formatAmountParts(original.amount, displayCurrency);
-      }
+    const sourceKey = selectedBudgetSourceMonthKey ?? selectedMonthKey;
+    const displayAmount = projectBudgetMonthDisplayAmount(
+      budget,
+      sourceKey ? budgetOriginalByMonth[sourceKey] : undefined,
+      displayCurrency,
+      statusRates,
+    );
+    if (displayAmount != null) {
+      return formatAmountParts(displayAmount, displayCurrency, {
+        forceTwoDecimals: displayCurrency !== 'ILS',
+      });
     }
     return formatMoneyPartsFromIls(budget, displayCurrency, statusRates);
   }, [
     selectedBudgetSourceMonthKey,
+    selectedMonthKey,
     budgetOriginalByMonth,
     displayCurrency,
     budget,
     statusRates,
   ]);
+
+  useLayoutEffect(() => {
+    if (appShellView !== 'active-budget' || activeTab !== 'dashboard') return;
+    budgetDebug('financialSummary:render', {
+      activeBudgetId: activeBudgetId?.slice(-10) ?? null,
+      selectedMonthKey,
+      selectedDate: selectedDate.toISOString(),
+      budgetsByMonth,
+      budgetOriginalByMonth,
+      autoTransferByMonth,
+      displayCurrency,
+      resolution: selectedBudgetResolution,
+      budgetIls: budget,
+      sourceMonthKey: selectedBudgetSourceMonthKey,
+      displayLabel: selectedBudgetDisplayLabel,
+      displayPartsAmount: selectedBudgetDisplayParts.amount,
+      displayPartsSymbol: selectedBudgetDisplayParts.symbol,
+      stateSource: 'App.tsx useState (NOT Context/Zustand)',
+    });
+  }, [
+    appShellView,
+    activeTab,
+    activeBudgetId,
+    selectedMonthKey,
+    selectedDate,
+    budgetsByMonth,
+    budgetOriginalByMonth,
+    autoTransferByMonth,
+    displayCurrency,
+    selectedBudgetResolution,
+    budget,
+    selectedBudgetSourceMonthKey,
+    selectedBudgetDisplayLabel,
+    selectedBudgetDisplayParts,
+  ]);
+
   const totalExpensesDisplayParts = useMemo(() => {
     if (totalExpensesDisplayAmount != null) {
       return formatAmountParts(totalExpensesDisplayAmount, displayCurrency);
@@ -4389,7 +5609,23 @@ function App() {
       .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
   }, [expenses, search, timeFilter]);
 
-  const historyTotal = historyExpenses.reduce((s, e) => s + e.amount, 0);
+  // History rollup projected from each expense's immutable baseline → display
+  // currency, so the total matches the (baseline-aware) per-row amounts. Falls
+  // back to the raw ILS sum only when a non-ILS view has no rates yet.
+  const historyTotalIls = historyExpenses.reduce((s, e) => s + e.amount, 0);
+  const historyTotal = useMemo(() => {
+    if (displayCurrency === 'ILS') return roundMoneyAmount(historyTotalIls);
+    if (!statusRates) return null;
+    const ctx = buildMoneyProjectionContext(displayCurrency, {
+      rates: statusRates,
+      applyFees: false,
+    });
+    return sumMoneyProjections(
+      historyExpenses.map((expense) => immutableFromExpense(expense)),
+      displayCurrency,
+      ctx,
+    );
+  }, [historyExpenses, displayCurrency, statusRates, historyTotalIls]);
   const recentExpenseCurrencies = useMemo<ExpenseCurrency[]>(() => {
     return [...expenses]
       .sort((a, b) => {
@@ -4436,7 +5672,6 @@ function App() {
     return <AuthPage />;
   }
 
-  const userDisplayLabel = user.isAnonymous ? tr('guest') : (user.email ?? '');
   const userName = user.isAnonymous
     ? tr('guest')
     : (user.displayName || user.email?.split('@')[0] || tr('user'));
@@ -4568,6 +5803,7 @@ function App() {
             budgets={budgetRegistry.personal}
             activeBudgetId={activeBudgetId}
             displayCurrency={displayCurrency}
+            getBudgetDisplayCurrency={getBudgetDisplayCurrency}
             onEnterBudget={enterBudget}
             onCreateBudget={handleCreatePersonalBudget}
           />
@@ -4707,7 +5943,7 @@ function App() {
             <div className={`mb-4 w-full ${themeCardClass} p-4 sm:mb-6 sm:p-6`}>
               <h2 className={`mb-4 flex items-center gap-2 text-base font-semibold sm:text-lg ${typographyTitleClass}`}>
                 <Wallet className="h-5 w-5 shrink-0 text-emerald-400" />
-                {tr('addMonthlyBudget')}
+                {budgetSetterTitle}
               </h2>
               <div className="w-full">
                 <div className="min-w-0 w-full">
@@ -4892,8 +6128,19 @@ function App() {
               monthLabel={monthLabel}
               monthExpenses={monthExpenses}
               categories={allCategories}
+              budgetOriginal={budgetOriginalByMonth[selectedMonthKey]}
               subBudgets={subBudgets}
+              subBudgetsOriginal={subBudgetsOriginal}
               onSaveSubBudgets={handleSaveSubBudgets}
+              isMainBudget={activeBudgetId === DEFAULT_MONTHLY_BUDGET_ID}
+              linkedBudgetsExpanded={uiPreferences.linkedBudgetsExpanded}
+              regularBudgetsExpanded={uiPreferences.regularBudgetsExpanded}
+              onLinkedBudgetsExpandedChange={(expanded) =>
+                persistUiPreferences({ linkedBudgetsExpanded: expanded })
+              }
+              onRegularBudgetsExpandedChange={(expanded) =>
+                persistUiPreferences({ regularBudgetsExpanded: expanded })
+              }
             />
           </>
         )}
@@ -4905,7 +6152,11 @@ function App() {
             <h2 className={`text-base sm:text-lg font-semibold ${typographyTitleClass}`}>{tr('expenseHistoryTitle')}</h2>
             <p className={`text-sm mt-1 ${typographyMutedClass}`}>
               {historyExpenses.length} • {tr('totalShort')}{' '}
-              <DisplayMoney amount={historyTotal} className="inline-block font-medium" />
+              {historyTotal != null ? (
+                <DisplayCurrencyAmount amount={historyTotal} className="inline-block font-medium" />
+              ) : (
+                <DisplayMoney amount={historyTotalIls} className="inline-block font-medium" />
+              )}
             </p>
 
             <div
@@ -5014,6 +6265,16 @@ function App() {
                             originalCurrency={expense.originalCurrency}
                             variant="card"
                             showSecondaryLine={shouldShowExpenseEquivalentLine(expense, displayCurrency)}
+                            manualBadgeLabel={
+                              !expense.disableManualRate && expense.manualRateUsed
+                                ? tr('expenseManualRateBadge')
+                                : undefined
+                            }
+                            feeBadgeLabel={
+                              !expense.disableFee && (expense.appliedFeePercent ?? 0) > 0
+                                ? tr('expenseFeeBadge')
+                                : undefined
+                            }
                           />
                         </div>
                         <div className="shrink-0 flex items-center gap-1">
@@ -5088,6 +6349,16 @@ function App() {
                             originalAmount={expense.originalAmount}
                             originalCurrency={expense.originalCurrency}
                             showSecondaryLine={shouldShowExpenseEquivalentLine(expense, displayCurrency)}
+                            manualBadgeLabel={
+                              !expense.disableManualRate && expense.manualRateUsed
+                                ? tr('expenseManualRateBadge')
+                                : undefined
+                            }
+                            feeBadgeLabel={
+                              !expense.disableFee && (expense.appliedFeePercent ?? 0) > 0
+                                ? tr('expenseFeeBadge')
+                                : undefined
+                            }
                           />
                         </div>
                         <div role="cell" className="flex justify-end">
@@ -5254,6 +6525,56 @@ function App() {
                     className={`${surfaceInputLgClass} px-3`}
                   />
                 </div>
+              </div>
+
+              <div className="space-y-3 rounded-xl border border-[var(--color-sub-cards-border)] p-3 sm:p-4">
+                <label
+                  htmlFor="edit-expense-disable-manual"
+                  className="flex cursor-pointer items-center justify-between gap-3"
+                >
+                  <span className={`text-sm ${typographyBodyClass}`}>
+                    {tr('expenseRemoveManualRate')}
+                  </span>
+                  <input
+                    id="edit-expense-disable-manual"
+                    type="checkbox"
+                    checked={editExpenseDraft.disableManualRate}
+                    onChange={(e) =>
+                      setEditExpenseDraft((prev) =>
+                        prev ? { ...prev, disableManualRate: e.target.checked } : prev,
+                      )
+                    }
+                    className="h-5 w-5 shrink-0 rounded border-gray-600 bg-neutral-800 text-emerald-500 focus:ring-emerald-500/30"
+                  />
+                </label>
+                <label
+                  htmlFor="edit-expense-disable-fee"
+                  className="flex cursor-pointer items-center justify-between gap-3"
+                >
+                  <span className={`text-sm ${typographyBodyClass}`}>{tr('expenseRemoveFee')}</span>
+                  <input
+                    id="edit-expense-disable-fee"
+                    type="checkbox"
+                    checked={editExpenseDraft.disableFee}
+                    onChange={(e) =>
+                      setEditExpenseDraft((prev) =>
+                        prev ? { ...prev, disableFee: e.target.checked } : prev,
+                      )
+                    }
+                    className="h-5 w-5 shrink-0 rounded border-gray-600 bg-neutral-800 text-emerald-500 focus:ring-emerald-500/30"
+                  />
+                </label>
+                {editPreviewAmount != null && (
+                  <p className={`text-sm font-medium ${typographyBodyClass}`}>
+                    <LtrNumeric>
+                      {formatTranslation(lang, 'expenseCurrentChoicePreview', {
+                        amount: formatAmountWithSymbol(editPreviewAmount, displayCurrency, {
+                          forceTwoDecimals: displayCurrency !== 'ILS',
+                        }),
+                      })}
+                    </LtrNumeric>
+                  </p>
+                )}
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-1">

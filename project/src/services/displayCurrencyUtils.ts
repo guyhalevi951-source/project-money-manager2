@@ -1,12 +1,17 @@
 import {
+  CORE_CURRENCY_CODES,
   CURRENCY_DICTIONARY,
   currencySymbol,
   isSupportedCurrency,
   type CurrencyCode,
   type ExpenseCurrency,
 } from '../constants/currencies';
-import { convertIlsToForeign, type ExchangeRates } from './exchangeRateService';
-import { roundMoney } from './money';
+import {
+  convertForeignToIls,
+  convertIlsToForeign,
+  type ExchangeRates,
+} from './exchangeRateService';
+import { roundMoney, smartRoundMoney } from './money';
 
 export interface ExpenseDisplayAmount {
   primary: string;
@@ -51,38 +56,126 @@ export function formatAmountWithSymbol(
   return `${sign}${symbol}${formatted}`;
 }
 
+/**
+ * ILS ledger → display currency.
+ * Returns a standard 2dp-rounded display value; does NOT snap to integer
+ * (127.38 GBP must stay 127.38, not collapse to 127).
+ */
+export function convertLedgerAmountToDisplayCurrency(
+  ilsAmount: number,
+  displayCurrency: ExpenseCurrency,
+  rates: ExchangeRates | null,
+): number | null {
+  if (!(ilsAmount > 0)) return null;
+  if (displayCurrency === 'ILS') return roundMoney(ilsAmount);
+  if (!rates) return null;
+  // convertIlsToForeign already applies roundMoney internally
+  return convertIlsToForeign(ilsAmount, displayCurrency, rates);
+}
+
+/**
+ * Display currency → ILS ledger.
+ * Applies smartRoundMoney so near-integer results snap cleanly
+ * (e.g. 499.96 from 127.38 GBP → 500 ILS).
+ */
+export function convertDisplayAmountToLedgerCurrency(
+  displayAmount: number,
+  displayCurrency: ExpenseCurrency,
+  rates: ExchangeRates | null,
+): number | null {
+  if (!(displayAmount > 0)) return null;
+  if (displayCurrency === 'ILS') return smartRoundMoney(displayAmount);
+  if (!rates) return null;
+  // convertForeignToIls already applies smartRoundMoney internally
+  return convertForeignToIls(displayAmount, displayCurrency, rates);
+}
+
+export interface BudgetMonthOriginal {
+  amount: number;
+  currency: string;
+}
+
+/**
+ * Resolve a monthly budget amount in display currency — mirrors App.tsx
+ * `budgetStatusDisplayAmount` (prefer matching original snapshot, else convert ILS ledger).
+ */
+export function resolveBudgetMonthDisplayAmount(
+  ilsAmount: number,
+  original: BudgetMonthOriginal | undefined,
+  displayCurrency: ExpenseCurrency,
+  rates: ExchangeRates | null,
+): number | null {
+  if (original && original.amount > 0) {
+    const originalCurrency = (symbolToCurrency(original.currency) ??
+      original.currency) as ExpenseCurrency;
+    if (originalCurrency === displayCurrency) {
+      return roundMoney(original.amount);
+    }
+  }
+  return convertLedgerAmountToDisplayCurrency(ilsAmount, displayCurrency, rates);
+}
+
 export function formatMoneyPartsFromIls(
   ilsAmount: number,
   displayCurrency: ExpenseCurrency,
   rates: ExchangeRates | null,
 ): AmountDisplayParts {
-  if (displayCurrency === 'ILS') {
+  const displayAmount = convertLedgerAmountToDisplayCurrency(ilsAmount, displayCurrency, rates);
+  if (displayAmount == null) {
     return formatAmountParts(ilsAmount, 'ILS');
   }
-
-  if (!rates) {
-    return formatAmountParts(ilsAmount, 'ILS');
-  }
-
-  const converted = convertIlsToForeign(ilsAmount, displayCurrency, rates);
-  if (converted == null) {
-    return formatAmountParts(ilsAmount, 'ILS');
-  }
-
-  return formatAmountParts(roundMoney(converted), displayCurrency, { forceTwoDecimals: true });
+  return formatAmountParts(displayAmount, displayCurrency, {
+    forceTwoDecimals: displayCurrency !== 'ILS',
+  });
 }
 
-export function symbolToCurrency(symbol: string): ExpenseCurrency | null {
+/** Ambiguous symbols shared by many ISO codes — USD wins over ARS for `$`, etc. */
+const SYMBOL_AMBIGUITY_PRIORITY: Partial<Record<string, readonly CurrencyCode[]>> = {
+  '$': ['USD', 'AUD', 'CAD', 'NZD', 'SGD', 'MXN', 'CLP', 'COP', 'HKD', 'BND', 'BOB', 'ARS'],
+  '¥': ['JPY', 'CNY'],
+  kr: ['SEK', 'NOK', 'DKK', 'ISK'],
+  Rs: ['INR', 'PKR', 'LKR', 'NPR'],
+};
+
+export function symbolToCurrency(
+  symbol: string,
+  preferredCode?: ExpenseCurrency,
+): ExpenseCurrency | null {
   const trimmed = symbol.trim();
   if (isSupportedCurrency(trimmed)) return trimmed;
 
+  const matches: CurrencyCode[] = [];
   for (const [code, meta] of Object.entries(CURRENCY_DICTIONARY) as [
     CurrencyCode,
     { symbol: string },
   ][]) {
-    if (meta.symbol === trimmed) return code;
+    if (meta.symbol === trimmed) matches.push(code);
   }
-  return null;
+  if (matches.length === 0) return null;
+  if (matches.length === 1) return matches[0];
+
+  if (preferredCode && matches.includes(preferredCode)) return preferredCode;
+
+  for (const core of CORE_CURRENCY_CODES) {
+    if (matches.includes(core)) return core;
+  }
+
+  const priority = SYMBOL_AMBIGUITY_PRIORITY[trimmed];
+  if (priority) {
+    for (const code of priority) {
+      if (matches.includes(code)) return code;
+    }
+  }
+
+  return matches[0];
+}
+
+/** Normalize persisted `originalCurrency` — ISO codes pass through; legacy symbols resolve. */
+export function normalizeStoredOriginalCurrency(raw: string): string {
+  const trimmed = raw.trim();
+  if (isSupportedCurrency(trimmed)) return trimmed;
+  const resolved = symbolToCurrency(trimmed);
+  return resolved ?? trimmed;
 }
 
 export function formatMoneyFromIls(
@@ -90,21 +183,13 @@ export function formatMoneyFromIls(
   displayCurrency: ExpenseCurrency,
   rates: ExchangeRates | null,
 ): string {
-  if (displayCurrency === 'ILS') {
+  const displayAmount = convertLedgerAmountToDisplayCurrency(ilsAmount, displayCurrency, rates);
+  if (displayAmount == null) {
     return formatAmountWithSymbol(ilsAmount, 'ILS');
   }
-
-  if (!rates) {
-    return formatAmountWithSymbol(ilsAmount, 'ILS');
-  }
-
-  const converted = convertIlsToForeign(ilsAmount, displayCurrency, rates);
-  if (converted == null) {
-    return formatAmountWithSymbol(ilsAmount, 'ILS');
-  }
-
-  const rounded = roundMoney(converted);
-  return formatAmountWithSymbol(rounded, displayCurrency, { forceTwoDecimals: true });
+  return formatAmountWithSymbol(displayAmount, displayCurrency, {
+    forceTwoDecimals: displayCurrency !== 'ILS',
+  });
 }
 
 export function resolveExpenseDisplayAmount(
@@ -116,9 +201,11 @@ export function resolveExpenseDisplayAmount(
 ): ExpenseDisplayAmount {
   const hasOriginal =
     originalAmount != null && originalAmount > 0 && Boolean(originalCurrency?.trim());
-  const originalCode = hasOriginal ? symbolToCurrency(originalCurrency!) : null;
+  const originalCode = hasOriginal
+    ? symbolToCurrency(originalCurrency!, displayCurrency)
+    : null;
   const originalFormatted = hasOriginal
-    ? `${originalCurrency}${formatNumeric(originalAmount!, false)}`
+    ? `${currencySymbol(originalCode ?? originalCurrency!)}${formatNumeric(originalAmount!, false)}`
     : null;
 
   if (displayCurrency === 'ILS') {

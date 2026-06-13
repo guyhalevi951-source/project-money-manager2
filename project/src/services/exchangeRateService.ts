@@ -3,7 +3,7 @@ import {
   getActiveManualExchangeOverrideSnapshot,
   getManualExchangeOverride,
 } from './manualExchangeOverrideService';
-import { roundMoney } from './money';
+import { roundMoney, smartRoundMoney } from './money';
 
 export type { ExpenseCurrency, CurrencyCode } from '../constants/currencies';
 export { CORE_DISPLAY_CURRENCIES as EXPENSE_CURRENCIES, currencySymbol } from '../constants/currencies';
@@ -57,7 +57,7 @@ function isCacheFresh(fetchedAt: number): boolean {
   return Date.now() - fetchedAt < CACHE_TTL_MS;
 }
 
-function readStorageCache(): ExchangeRates | null {
+function readStorageCache(options?: { allowStale?: boolean }): ExchangeRates | null {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
@@ -65,7 +65,7 @@ function readStorageCache(): ExchangeRates | null {
     const parsed = JSON.parse(raw) as StoredExchangeRatesPayload;
     const fetchedAt = parsed.last_fetched_timestamp ?? parsed.fetchedAt;
     if (!fetchedAt || !parsed?.rates?.ilsToForeign) return null;
-    if (!isCacheFresh(fetchedAt)) return null;
+    if (!options?.allowStale && !isCacheFresh(fetchedAt)) return null;
 
     return {
       ...parsed.rates,
@@ -74,6 +74,10 @@ function readStorageCache(): ExchangeRates | null {
   } catch {
     return null;
   }
+}
+
+function isOffline(): boolean {
+  return typeof navigator !== 'undefined' && navigator.onLine === false;
 }
 
 function writeStorageCache(rates: ExchangeRates): void {
@@ -104,9 +108,20 @@ hydrateMemoryFromStorage();
 
 export function getCachedExchangeRates(): ExchangeRates | null {
   const cached = memoryCache ?? readStorageCache();
-  if (!cached) return null;
-  if (!isCacheFresh(cached.lastFetchedAt)) return null;
-  return cached;
+  if (cached && isCacheFresh(cached.lastFetchedAt)) return cached;
+
+  // Offline-first: when the network is unavailable, serve the last-known
+  // snapshot past the 24h TTL so dynamic conversions keep working. Online, we
+  // still return null here so the fetch layer refreshes after expiry.
+  if (isOffline()) {
+    const stale = readStorageCache({ allowStale: true });
+    if (stale) {
+      memoryCache = stale;
+      return stale;
+    }
+  }
+
+  return null;
 }
 
 function parseErApiResponse(data: unknown, fetchedAt: number): ExchangeRates | null {
@@ -194,13 +209,15 @@ export function convertForeignToIls(
 
   const manualRate = getManualExchangeOverride(currency, 'ILS');
   if (manualRate != null) {
-    return amount * manualRate;
+    // Smart-round: ILS is the canonical ledger currency
+    return smartRoundMoney(amount * manualRate);
   }
 
   const foreignToIls = getForeignToIls(currency, rates);
   if (foreignToIls == null) return null;
 
-  return amount * foreignToIls;
+  // Smart-round to snap accumulated float drift (e.g. 499.96 → 500)
+  return smartRoundMoney(amount * foreignToIls);
 }
 
 export function convertIlsToForeign(
@@ -212,18 +229,20 @@ export function convertIlsToForeign(
 
   const manualRate = getManualExchangeOverride('ILS', currency);
   if (manualRate != null) {
-    return ilsAmount * manualRate;
+    return roundMoney(ilsAmount * manualRate);
   }
 
   const ilsToForeign = rates.ilsToForeign[currency];
   if (!ilsToForeign || ilsToForeign <= 0) return null;
 
-  return ilsAmount * ilsToForeign;
+  // Standard 2dp for display currencies (don't snap 127.38 GBP to 127)
+  return roundMoney(ilsAmount * ilsToForeign);
 }
 
 /**
  * Cross-convert any two currencies using ILS as the base (`ilsToForeign` rates).
- * `baseAmount = amount / ilsToForeign[from]` then `converted = baseAmount * ilsToForeign[to]`.
+ * When `toCurrency` is ILS the result gets smart-rounded (ledger write);
+ * otherwise standard 2dp rounding is applied (display write).
  */
 export function convertAmountViaIls(
   amount: number,
@@ -236,7 +255,8 @@ export function convertAmountViaIls(
 
   const manualRate = getManualExchangeOverride(fromCurrency, toCurrency);
   if (manualRate != null) {
-    return amount * manualRate;
+    const raw = amount * manualRate;
+    return toCurrency === 'ILS' ? smartRoundMoney(raw) : roundMoney(raw);
   }
 
   const fromIlsToForeign =
@@ -252,8 +272,8 @@ export function convertAmountViaIls(
     return null;
   }
 
-  const baseAmount = amount / fromIlsToForeign;
-  return baseAmount * toIlsToForeign;
+  const raw = (amount / fromIlsToForeign) * toIlsToForeign;
+  return toCurrency === 'ILS' ? smartRoundMoney(raw) : roundMoney(raw);
 }
 
 /**
@@ -538,12 +558,18 @@ export function peekHistoricalDirectRateSnapshot(
     return { rate: 1, fetchedAt: Date.now() };
   }
 
-  const manualSnapshot = getActiveManualExchangeOverrideSnapshot(fromCurrency, toCurrency);
-  if (manualSnapshot != null) {
-    return { rate: manualSnapshot.rate, fetchedAt: manualSnapshot.updatedAt };
+  const safeDate = normalizeHistoricalDateIso(dateIso);
+
+  // Manual overrides are scoped to the live (today) context only. They must
+  // NEVER retroactively rewrite a historical date — a past date always resolves
+  // from its own date-specific cached/historical apiRate.
+  if (safeDate === getLocalTodayIso()) {
+    const manualSnapshot = getActiveManualExchangeOverrideSnapshot(fromCurrency, toCurrency);
+    if (manualSnapshot != null) {
+      return { rate: manualSnapshot.rate, fetchedAt: manualSnapshot.updatedAt };
+    }
   }
 
-  const safeDate = normalizeHistoricalDateIso(dateIso);
   const cached = getCachedCurrencyRate(safeDate, fromCurrency, toCurrency);
   if (!cached) {
     return { rate: null, fetchedAt: null };
@@ -775,12 +801,18 @@ export async function fetchHistoricalDirectRateSnapshot(
     return { rate: 1, fetchedAt };
   }
 
-  const manualSnapshot = getActiveManualExchangeOverrideSnapshot(fromCurrency, toCurrency);
-  if (manualSnapshot != null) {
-    return { rate: manualSnapshot.rate, fetchedAt: manualSnapshot.updatedAt };
+  const safeDate = normalizeHistoricalDateIso(dateIso);
+
+  // Manual overrides apply only to the live (today) context. Historical dates
+  // always resolve from their own date-specific cached/fetched apiRate, so a
+  // manual rate defined today never alters a 6-month-old expense.
+  if (safeDate === getLocalTodayIso()) {
+    const manualSnapshot = getActiveManualExchangeOverrideSnapshot(fromCurrency, toCurrency);
+    if (manualSnapshot != null) {
+      return { rate: manualSnapshot.rate, fetchedAt: manualSnapshot.updatedAt };
+    }
   }
 
-  const safeDate = normalizeHistoricalDateIso(dateIso);
   const bypassCache = options?.bypassCache === true;
 
   try {

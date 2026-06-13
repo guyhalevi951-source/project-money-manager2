@@ -64,6 +64,7 @@ import {
   saveCurrencyCommissionToCloud,
   saveManualExchangeOverrideToCloud,
 } from '../services/userFirebaseSync';
+import { syncManualRate } from '../services/rateCacheService';
 import { surfaceInputClass, surfacePanelClass, subCardSmClass } from '../styles/themeSurfaceStyles';
 
 export type ExchangeRateSimulatorSection = 'exchange' | 'manual-rate' | 'commissions';
@@ -884,11 +885,24 @@ export default function ExchangeRateSimulator({
     shouldSeedSecondaryRef.current = true;
   }, []);
 
+  /**
+   * Write the current manual override directly into the unified rate cache's
+   * `manualRate` field (today's date) so the offline-first ledger reflects the
+   * form action immediately — both pair directions, and on removal too (the
+   * mirror resolves to `null` once the override is gone).
+   */
+  const mirrorManualRateToCache = useCallback((from: CurrencyCode, to: CurrencyCode) => {
+    const today = getLocalTodayIso();
+    syncManualRate(today, from, to);
+    syncManualRate(today, to, from);
+  }, []);
+
   const persistManualRate24h = useCallback(() => {
     const rate = resolveManualRateForSave();
     if (rate == null) return;
 
     saveManualExchangeOverride24h(mainCurrency, secondaryCurrency, rate);
+    mirrorManualRateToCache(mainCurrency, secondaryCurrency);
     setManualRateSaveModalOpen(false);
     setManualRateSaveError(null);
     if (section === 'exchange') {
@@ -901,6 +915,7 @@ export default function ExchangeRateSimulator({
     mainCurrency,
     secondaryCurrency,
     section,
+    mirrorManualRateToCache,
     resetManualRateEntryFields,
     refreshStoredOverrides,
   ]);
@@ -920,6 +935,7 @@ export default function ExchangeRateSimulator({
     setCloudError(null);
     try {
       upsertCloudManualExchangeOverride(mainCurrency, secondaryCurrency, rate);
+      mirrorManualRateToCache(mainCurrency, secondaryCurrency);
       await saveManualExchangeOverrideToCloud(
         currentUser.uid,
         mainCurrency,
@@ -942,6 +958,7 @@ export default function ExchangeRateSimulator({
     mainCurrency,
     secondaryCurrency,
     section,
+    mirrorManualRateToCache,
     resetManualRateEntryFields,
     refreshStoredOverrides,
     tr,
@@ -966,6 +983,7 @@ export default function ExchangeRateSimulator({
 
       if (entry.data.source === 'local_24h') {
         removeLocalManualExchangeOverride(entry.data.baseCurrency, entry.data.quoteCurrency);
+        mirrorManualRateToCache(entry.data.baseCurrency, entry.data.quoteCurrency);
         refreshStoredOverrides();
         return;
       }
@@ -977,6 +995,7 @@ export default function ExchangeRateSimulator({
       }
       try {
         removeCloudManualExchangeOverride(entry.data.baseCurrency, entry.data.quoteCurrency);
+        mirrorManualRateToCache(entry.data.baseCurrency, entry.data.quoteCurrency);
         await deleteManualExchangeOverrideFromCloud(
           currentUser.uid,
           entry.data.baseCurrency,
@@ -986,7 +1005,7 @@ export default function ExchangeRateSimulator({
         setCloudError(tr('exchangeRateCloudCancelFailed'));
       }
     },
-    [refreshStoredOverrides, tr],
+    [mirrorManualRateToCache, refreshStoredOverrides, tr],
   );
 
   const currenciesToPin = useMemo(() => {

@@ -1,5 +1,6 @@
 import { type User } from 'firebase/auth';
 import { roundMoney } from './services/money';
+import { normalizeStoredOriginalCurrency } from './services/displayCurrencyUtils';
 
 export interface StoredExpense {
   id: string;
@@ -9,6 +10,14 @@ export interface StoredExpense {
   date: string;
   originalAmount?: number;
   originalCurrency?: string;
+  /** Commission % baked into `amount` when this record was converted (0 = none). */
+  appliedFeePercent?: number;
+  /** True when a manual exchange-rate override was used to convert this record. */
+  manualRateUsed?: boolean;
+  /** Per-expense override: ignore manual rates, resolving to the historical base. */
+  disableManualRate?: boolean;
+  /** Per-expense override: drop any conversion fee multiplier for this record. */
+  disableFee?: boolean;
 }
 
 export interface StoredCustomCategory {
@@ -16,7 +25,17 @@ export interface StoredCustomCategory {
   label: string;
   color: string;
   iconName: string;
+  /** True when this category mirrors a linked personal budget in the main budget. */
+  isLinkedBudget?: boolean;
+  /** Personal budget id that owns this linked category. */
+  sourceBudgetId?: string;
+  /** Display-currency allocation amount from the personal budget form. */
+  amount?: number;
+  amountCurrency?: string;
 }
+
+/** Immutable per-category baseline ({@link ImmutableMoney} record shape). */
+export type SubBudgetOriginalMonthMap = Record<string, { amount: number; currency: string }>;
 
 export interface UserAppData {
   expenses: StoredExpense[];
@@ -24,6 +43,13 @@ export interface UserAppData {
   budgetsByMonth: Record<string, number>;
   budgetOriginalByMonth: Record<string, { amount: number; currency: string }>;
   subBudgetsByMonth: Record<string, Record<string, number>>;
+  /**
+   * Immutable sub-budget baselines: monthKey -> categoryKey -> { amount, currency }.
+   * Stores the exact value + currency the user typed per allocation so display can
+   * project losslessly (zero-math reversion). `subBudgetsByMonth` stays the ILS
+   * canonical ledger used for allocation math.
+   */
+  subBudgetsOriginalByMonth: Record<string, SubBudgetOriginalMonthMap>;
   autoTransferByMonth: Record<string, boolean>;
 }
 
@@ -33,6 +59,7 @@ export const EMPTY_USER_APP_DATA: UserAppData = {
   budgetsByMonth: {},
   budgetOriginalByMonth: {},
   subBudgetsByMonth: {},
+  subBudgetsOriginalByMonth: {},
   autoTransferByMonth: {},
 };
 
@@ -42,6 +69,7 @@ const LS_KEYS = {
   budgetsByMonth: 'budgetsByMonth',
   budgetOriginalByMonth: 'budgetOriginalByMonth',
   subBudgetsByMonth: 'subBudgetsByMonth',
+  subBudgetsOriginalByMonth: 'subBudgetsOriginalByMonth',
   autoTransferByMonth: 'autoTransferByMonth',
   legacyBudget: 'monthlyBudget',
   legacySubBudgets: 'subBudgets',
@@ -64,6 +92,10 @@ export function loadFromLocalStorage(): UserAppData {
       amount: roundMoney(Number(expense.amount ?? 0)),
       originalAmount:
         expense.originalAmount != null ? roundMoney(Number(expense.originalAmount)) : undefined,
+      originalCurrency:
+        expense.originalCurrency != null
+          ? normalizeStoredOriginalCurrency(expense.originalCurrency)
+          : undefined,
     }));
   }
 
@@ -118,6 +150,13 @@ export function loadFromLocalStorage(): UserAppData {
     };
   }
 
+  const savedSubOriginalByMonth = localStorage.getItem(LS_KEYS.subBudgetsOriginalByMonth);
+  if (savedSubOriginalByMonth) {
+    data.subBudgetsOriginalByMonth = parseSubBudgetsOriginalByMonth(
+      JSON.parse(savedSubOriginalByMonth),
+    );
+  }
+
   const savedAutoTransferByMonth = localStorage.getItem(LS_KEYS.autoTransferByMonth);
   if (savedAutoTransferByMonth) {
     data.autoTransferByMonth = JSON.parse(savedAutoTransferByMonth) as Record<string, boolean>;
@@ -126,11 +165,39 @@ export function loadFromLocalStorage(): UserAppData {
   return data;
 }
 
+/** Normalize a raw sub-budget baseline map (rounds amounts, drops malformed entries). */
+export function parseSubBudgetsOriginalByMonth(
+  raw: unknown,
+): Record<string, SubBudgetOriginalMonthMap> {
+  if (!raw || typeof raw !== 'object') return {};
+  const source = raw as Record<string, Record<string, { amount?: unknown; currency?: unknown }>>;
+  return Object.fromEntries(
+    Object.entries(source).map(([month, map]) => [
+      month,
+      Object.fromEntries(
+        Object.entries(map ?? {})
+          .filter(([, value]) => value && typeof value === 'object')
+          .map(([key, value]) => [
+            key,
+            {
+              amount: roundMoney(Number(value?.amount ?? 0)),
+              currency: typeof value?.currency === 'string' ? value.currency : 'ILS',
+            },
+          ]),
+      ),
+    ]),
+  );
+}
+
 export function saveToLocalStorage(data: UserAppData): void {
   localStorage.setItem(LS_KEYS.expenses, JSON.stringify(data.expenses));
   localStorage.setItem(LS_KEYS.customCategories, JSON.stringify(data.customCategories));
   localStorage.setItem(LS_KEYS.budgetsByMonth, JSON.stringify(data.budgetsByMonth));
   localStorage.setItem(LS_KEYS.budgetOriginalByMonth, JSON.stringify(data.budgetOriginalByMonth));
   localStorage.setItem(LS_KEYS.subBudgetsByMonth, JSON.stringify(data.subBudgetsByMonth));
+  localStorage.setItem(
+    LS_KEYS.subBudgetsOriginalByMonth,
+    JSON.stringify(data.subBudgetsOriginalByMonth ?? {}),
+  );
   localStorage.setItem(LS_KEYS.autoTransferByMonth, JSON.stringify(data.autoTransferByMonth));
 }

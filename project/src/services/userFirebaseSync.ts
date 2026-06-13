@@ -13,8 +13,10 @@ import { db } from '../firebase';
 import {
   EMPTY_USER_APP_DATA,
   loadFromLocalStorage,
+  parseSubBudgetsOriginalByMonth,
   type StoredCustomCategory,
   type StoredExpense,
+  type SubBudgetOriginalMonthMap,
   type UserAppData,
 } from '../userDataStorage';
 import { isCustomHexColor, normalizeCustomHex } from '../categories';
@@ -40,6 +42,8 @@ import {
   type CommissionCurrency,
 } from './currencyCommissionService';
 import { roundMoney } from './money';
+import { parseRateCacheStore, type RateCacheStore } from './rateCacheService';
+import { normalizeStoredOriginalCurrency } from './displayCurrencyUtils';
 
 const DOC_ID = 'data';
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -52,13 +56,25 @@ export interface UserSettings {
   custom_currencies: ExpenseCurrency[];
   currency_layout: CurrencyLayoutItem[];
   themePreferences: ThemePreferences;
+  uiPreferences?: UiPreferences;
 }
+
+export interface UiPreferences {
+  linkedBudgetsExpanded: boolean;
+  regularBudgetsExpanded: boolean;
+}
+
+export const DEFAULT_UI_PREFERENCES: UiPreferences = {
+  linkedBudgetsExpanded: true,
+  regularBudgetsExpanded: true,
+};
 
 export interface UserCategoriesData {
   customCategories: StoredCustomCategory[];
   budgetsByMonth: Record<string, number>;
   budgetOriginalByMonth: Record<string, { amount: number; currency: string }>;
   subBudgetsByMonth: Record<string, Record<string, number>>;
+  subBudgetsOriginalByMonth: Record<string, SubBudgetOriginalMonthMap>;
   autoTransferByMonth: Record<string, boolean>;
 }
 
@@ -83,6 +99,7 @@ export const EMPTY_USER_SETTINGS: UserSettings = {
   custom_currencies: [],
   currency_layout: buildDefaultCurrencyLayout(),
   themePreferences: { ...DEFAULT_THEME_PREFERENCES },
+  uiPreferences: { ...DEFAULT_UI_PREFERENCES },
 };
 
 export const EMPTY_USER_CATEGORIES: UserCategoriesData = {
@@ -90,6 +107,7 @@ export const EMPTY_USER_CATEGORIES: UserCategoriesData = {
   budgetsByMonth: {},
   budgetOriginalByMonth: {},
   subBudgetsByMonth: {},
+  subBudgetsOriginalByMonth: {},
   autoTransferByMonth: {},
 };
 
@@ -110,6 +128,7 @@ const categoriesRef = (uid: string) => doc(db, 'users', uid, 'categories', DOC_I
 const settingsRef = (uid: string) => doc(db, 'users', uid, 'settings', DOC_ID);
 const manualOverridesRef = (uid: string) => doc(db, 'users', uid, 'manual_exchange_overrides', DOC_ID);
 const currencyCommissionsRef = (uid: string) => doc(db, 'users', uid, 'currency_commissions', DOC_ID);
+const rateCacheRef = (uid: string) => doc(db, 'users', uid, 'rate_cache', DOC_ID);
 const legacyAppRef = (uid: string) => doc(db, 'users', uid, 'data', 'app');
 
 export type SnapshotMeta = { hasPendingWrites: boolean; exists: boolean };
@@ -148,6 +167,18 @@ function parseSettings(raw: Record<string, unknown> | undefined): UserSettings {
     raw.themePreferences ?? raw.button_theme,
   );
 
+  const uiPreferencesRaw = raw.uiPreferences as Record<string, unknown> | undefined;
+  const uiPreferences: UiPreferences = {
+    linkedBudgetsExpanded:
+      typeof uiPreferencesRaw?.linkedBudgetsExpanded === 'boolean'
+        ? uiPreferencesRaw.linkedBudgetsExpanded
+        : DEFAULT_UI_PREFERENCES.linkedBudgetsExpanded,
+    regularBudgetsExpanded:
+      typeof uiPreferencesRaw?.regularBudgetsExpanded === 'boolean'
+        ? uiPreferencesRaw.regularBudgetsExpanded
+        : DEFAULT_UI_PREFERENCES.regularBudgetsExpanded,
+  };
+
   return {
     lang,
     keepOriginalValues,
@@ -156,6 +187,7 @@ function parseSettings(raw: Record<string, unknown> | undefined): UserSettings {
     custom_currencies,
     currency_layout,
     themePreferences,
+    uiPreferences,
   };
 }
 
@@ -186,6 +218,7 @@ function parseCategories(raw: Record<string, unknown> | undefined): UserCategori
         ),
       ]),
     ),
+    subBudgetsOriginalByMonth: parseSubBudgetsOriginalByMonth(raw.subBudgetsOriginalByMonth),
     autoTransferByMonth: (raw.autoTransferByMonth as Record<string, boolean> | undefined) ?? {},
   };
 }
@@ -196,6 +229,10 @@ function parseExpenses(raw: Record<string, unknown> | undefined): StoredExpense[
     amount: roundMoney(Number(expense.amount ?? 0)),
     originalAmount:
       expense.originalAmount != null ? roundMoney(Number(expense.originalAmount)) : undefined,
+    originalCurrency:
+      expense.originalCurrency != null
+        ? normalizeStoredOriginalCurrency(expense.originalCurrency)
+        : undefined,
   }));
 }
 
@@ -372,6 +409,7 @@ async function readLegacyFirestoreApp(uid: string): Promise<UserAppData | null> 
       {},
     subBudgetsByMonth:
       (raw.subBudgetsByMonth as Record<string, Record<string, number>> | undefined) ?? {},
+    subBudgetsOriginalByMonth: parseSubBudgetsOriginalByMonth(raw.subBudgetsOriginalByMonth),
     autoTransferByMonth: {},
   };
 }
@@ -436,6 +474,10 @@ export async function migrateLegacyDataToCloud(uid: string): Promise<void> {
       Object.keys(localFinancial.subBudgetsByMonth).length > 0
         ? localFinancial.subBudgetsByMonth
         : (legacyRemote?.subBudgetsByMonth ?? {}),
+    subBudgetsOriginalByMonth:
+      Object.keys(localFinancial.subBudgetsOriginalByMonth ?? {}).length > 0
+        ? localFinancial.subBudgetsOriginalByMonth
+        : (legacyRemote?.subBudgetsOriginalByMonth ?? {}),
     autoTransferByMonth: localFinancial.autoTransferByMonth ?? {},
   };
 
@@ -462,6 +504,7 @@ export async function migrateLegacyDataToCloud(uid: string): Promise<void> {
         budgetsByMonth: categories.budgetsByMonth,
         budgetOriginalByMonth: categories.budgetOriginalByMonth,
         subBudgetsByMonth: categories.subBudgetsByMonth,
+        subBudgetsOriginalByMonth: categories.subBudgetsOriginalByMonth,
         autoTransferByMonth: categories.autoTransferByMonth,
         updatedAt: serverTimestamp(),
       },
@@ -559,6 +602,36 @@ export function subscribeCurrencyCommissions(
   );
 }
 
+/**
+ * Subscribe to the cloud rate-cache ledger (per-date/per-pair API history).
+ * The persisted shape is `{ entries: RateCacheStore, updatedAt }`.
+ */
+export function subscribeRateCache(
+  uid: string,
+  onData: (entries: RateCacheStore, meta: SnapshotMeta) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  return subscribeDoc(
+    rateCacheRef(uid),
+    (raw) => parseRateCacheStore((raw?.entries as unknown) ?? {}),
+    onData,
+    onError,
+  );
+}
+
+/**
+ * Persist the unified rate-cache ledger for an authenticated member. Only
+ * `apiRate` history travels to the cloud (manual rates own their own doc), so
+ * the synced fallback rates are available offline on every device.
+ */
+export async function saveRateCacheToCloud(uid: string, entries: RateCacheStore): Promise<void> {
+  await setDoc(
+    rateCacheRef(uid),
+    { entries, updatedAt: serverTimestamp() },
+    { merge: true },
+  );
+}
+
 export async function saveExpensesToCloud(uid: string, expenses: StoredExpense[]): Promise<void> {
   await setDoc(expensesRef(uid), { expenses, updatedAt: serverTimestamp() }, { merge: true });
 }
@@ -574,6 +647,7 @@ export async function saveCategoriesToCloud(
       budgetsByMonth: categories.budgetsByMonth,
       budgetOriginalByMonth: categories.budgetOriginalByMonth,
       subBudgetsByMonth: categories.subBudgetsByMonth,
+      subBudgetsOriginalByMonth: categories.subBudgetsOriginalByMonth,
       autoTransferByMonth: categories.autoTransferByMonth,
       updatedAt: serverTimestamp(),
     },
@@ -582,20 +656,20 @@ export async function saveCategoriesToCloud(
 }
 
 export async function saveSettingsToCloud(uid: string, settings: UserSettings): Promise<void> {
-  await setDoc(
-    settingsRef(uid),
-    {
-      lang: settings.lang,
-      keepOriginalValues: settings.keepOriginalValues,
-      displayCurrency: settings.displayCurrency,
-      saved_colors: settings.saved_colors,
-      custom_currencies: settings.custom_currencies,
-      currency_layout: settings.currency_layout,
-      themePreferences: settings.themePreferences,
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true },
-  );
+  const payload: Record<string, unknown> = {
+    lang: settings.lang,
+    keepOriginalValues: settings.keepOriginalValues,
+    displayCurrency: settings.displayCurrency,
+    saved_colors: settings.saved_colors,
+    custom_currencies: settings.custom_currencies,
+    currency_layout: settings.currency_layout,
+    themePreferences: settings.themePreferences,
+    updatedAt: serverTimestamp(),
+  };
+  if (settings.uiPreferences !== undefined) {
+    payload.uiPreferences = settings.uiPreferences;
+  }
+  await setDoc(settingsRef(uid), payload, { merge: true });
 }
 
 function normalizeOverridePair(

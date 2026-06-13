@@ -4,8 +4,10 @@ import {
   onSnapshot,
   serverTimestamp,
   setDoc,
+  writeBatch,
   type Unsubscribe,
 } from 'firebase/firestore';
+import { db } from '../firebase';
 import { db } from '../firebase';
 import {
   createDefaultMonthlyBudgetMeta,
@@ -17,6 +19,7 @@ import {
 } from './budgetArchitecture';
 import {
   EMPTY_USER_APP_DATA,
+  parseSubBudgetsOriginalByMonth,
   type UserAppData,
 } from '../userDataStorage';
 import { roundMoney } from './money';
@@ -60,6 +63,7 @@ function parseFinancial(raw: Record<string, unknown> | undefined): UserAppData {
       raw.subBudgetsByMonth && typeof raw.subBudgetsByMonth === 'object'
         ? (raw.subBudgetsByMonth as UserAppData['subBudgetsByMonth'])
         : {},
+    subBudgetsOriginalByMonth: parseSubBudgetsOriginalByMonth(raw.subBudgetsOriginalByMonth),
     autoTransferByMonth:
       raw.autoTransferByMonth && typeof raw.autoTransferByMonth === 'object'
         ? (raw.autoTransferByMonth as UserAppData['autoTransferByMonth'])
@@ -90,6 +94,7 @@ export async function migrateLegacyFinancialToDefaultBudget(uid: string): Promis
     financial.budgetsByMonth = catParsed.budgetsByMonth;
     financial.budgetOriginalByMonth = catParsed.budgetOriginalByMonth;
     financial.subBudgetsByMonth = catParsed.subBudgetsByMonth;
+    financial.subBudgetsOriginalByMonth = catParsed.subBudgetsOriginalByMonth;
     financial.autoTransferByMonth = catParsed.autoTransferByMonth;
   }
 
@@ -162,22 +167,64 @@ export function subscribeBudgetFinancial(
   );
 }
 
+function financialDocPayload(data: UserAppData) {
+  return {
+    expenses: data.expenses,
+    customCategories: data.customCategories,
+    budgetsByMonth: data.budgetsByMonth,
+    budgetOriginalByMonth: data.budgetOriginalByMonth,
+    subBudgetsByMonth: data.subBudgetsByMonth,
+    subBudgetsOriginalByMonth: data.subBudgetsOriginalByMonth ?? {},
+    autoTransferByMonth: data.autoTransferByMonth,
+    updatedAt: serverTimestamp(),
+  };
+}
+
 export async function saveBudgetFinancialCloud(
   uid: string,
   budgetId: string,
   data: UserAppData,
 ): Promise<void> {
-  await setDoc(
-    financialRef(uid, budgetId),
-    {
-      expenses: data.expenses,
-      customCategories: data.customCategories,
-      budgetsByMonth: data.budgetsByMonth,
-      budgetOriginalByMonth: data.budgetOriginalByMonth,
-      subBudgetsByMonth: data.subBudgetsByMonth,
-      autoTransferByMonth: data.autoTransferByMonth,
-      updatedAt: serverTimestamp(),
-    },
+  await setDoc(financialRef(uid, budgetId), financialDocPayload(data), { merge: true });
+}
+
+/**
+ * Linked-budget creation dual-write: registry + personal financial + main financial
+ * in a single Firestore batch so partial writes cannot orphan a linked sub-budget.
+ */
+export async function dualWriteLinkedBudgetCreationCloud(
+  uid: string,
+  registry: BudgetRegistryState,
+  personalBudgetId: string,
+  personalFinancial: UserAppData,
+  mainFinancial: UserAppData,
+): Promise<void> {
+  const batch = writeBatch(db);
+  batch.set(
+    registryRef(uid),
+    { personal: registry.personal, shared: registry.shared, updatedAt: serverTimestamp() },
     { merge: true },
   );
+  batch.set(financialRef(uid, personalBudgetId), financialDocPayload(personalFinancial), {
+    merge: true,
+  });
+  batch.set(financialRef(uid, DEFAULT_MONTHLY_BUDGET_ID), financialDocPayload(mainFinancial), {
+    merge: true,
+  });
+  await batch.commit();
+}
+
+/**
+ * Linked-budget expense dual-write: persist source + mirrored main expense in parallel.
+ */
+export async function dualWriteMirroredExpenseCloud(
+  uid: string,
+  sourceBudgetId: string,
+  sourceFinancial: UserAppData,
+  mainFinancial: UserAppData,
+): Promise<void> {
+  await Promise.all([
+    saveBudgetFinancialCloud(uid, sourceBudgetId, sourceFinancial),
+    saveBudgetFinancialCloud(uid, DEFAULT_MONTHLY_BUDGET_ID, mainFinancial),
+  ]);
 }

@@ -1,45 +1,64 @@
-import { useMemo, useState, type ComponentType } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   Briefcase,
   Calendar,
   Car,
+  Check,
   ChevronRight,
   Coffee,
   Gift,
   Home,
+  Palette,
   Plane,
   Plus,
   ShoppingCart,
   Wallet,
   type LucideProps,
 } from 'lucide-react';
-import { useLanguage } from '../LanguageContext';
+import { isCustomHexColor, normalizeCustomHex } from '../categories';
+import { useLanguage, LtrNumeric } from '../LanguageContext';
 import {
   primaryActionButtonClass,
   primaryActionDisabled,
+  primaryActionSelectedChipClass,
+  primaryActionButtonBorderedClass,
   utilityNavButtonLgClass,
+  filterDropdownWrapperClass,
 } from '../styles/actionButtonStyles';
 import {
+  computeFloatingAnchorPosition,
   dashedEmptyStateClass,
+  monochromeToastPanelClass,
   subCardListRowClass,
   subCardOptionRowClass,
   surfaceInputClass,
   surfaceInputLgClass,
+  surfaceModalLgClass,
   themeCardClass,
+  themeFloatingHostClass,
+  themeFloatingOverlayClass,
   themeTextClass,
   themeTextMutedClass,
   typographyLabelClass,
   typographyTitleClass,
 } from '../styles/themeSurfaceStyles';
-import MoneyAmountInput from './MoneyAmountInput';
-import DisplayMoney from './DisplayMoney';
+import AdvancedColorPickerPopover from './AdvancedColorPickerPopover';
+import CurrencySelector from './CurrencySelector';
+import { formatAmountWithSymbol } from '../services/displayCurrencyUtils';
 import type { ExpenseCurrency } from '../services/exchangeRateService';
+import type { CurrencyCode } from '../constants/currencies';
+import { parseMoneyInput, roundMoney, sanitizeMoneyInputDraft } from '../services/money';
 import {
   type BudgetSettingsInitMode,
   type PersonalBudgetMeta,
   type PersonalBudgetStatus,
 } from '../services/budgetArchitecture';
-import { parseMoneyInput } from '../services/money';
+import {
+  budgetDebug,
+  snapshotRegistryTotalsForLog,
+} from '../services/budgetDebugTrace';
 
 const BUDGET_COLOR_OPTIONS = [
   { id: 'emerald', hex: '#10B981' },
@@ -65,11 +84,118 @@ const BUDGET_ICON_OPTIONS: { id: string; Icon: ComponentType<LucideProps> }[] = 
 
 const ICON_BY_ID = Object.fromEntries(BUDGET_ICON_OPTIONS.map((o) => [o.id, o.Icon]));
 
+const CONIC_GRADIENT =
+  'conic-gradient(from 180deg, #ff0000, #ff8000, #ffff00, #00ff00, #00ffff, #0080ff, #8000ff, #ff0080, #ff0000)';
+
+const PICKER_TRIGGER_CLASS =
+  'h-12 w-12 shrink-0 transition-all duration-200 active:scale-95 outline-none focus-visible:ring-2 focus-visible:ring-[var(--btn-primary-bg)]/50';
+
+const BUDGET_AMOUNT_INPUT_CLASS = `h-14 min-h-[3.5rem] w-full py-3 text-lg ${surfaceInputClass}`;
+
+function addOneDayToIsoDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map((part) => parseInt(part, 10));
+  const date = new Date(y, (m || 1) - 1, d || 1);
+  date.setDate(date.getDate() + 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+interface BudgetFormPickerPopoverProps {
+  open: boolean;
+  onClose: () => void;
+  anchorRef: React.RefObject<HTMLElement | null>;
+  ariaLabel: string;
+  estimatedHeightPx?: number;
+  children: ReactNode;
+}
+
+function BudgetFormPickerPopover({
+  open,
+  onClose,
+  anchorRef,
+  ariaLabel,
+  estimatedHeightPx = 220,
+  children,
+}: BudgetFormPickerPopoverProps) {
+  const { dir } = useLanguage();
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const [anchorPosition, setAnchorPosition] = useState({ top: 0, left: 0, width: 240 });
+
+  const updateAnchorPosition = useCallback(() => {
+    const anchor = anchorRef.current;
+    if (!anchor) return;
+    setAnchorPosition(
+      computeFloatingAnchorPosition(anchor, {
+        dir,
+        estimatedHeightPx,
+        maxWidthPx: 260,
+      }),
+    );
+  }, [anchorRef, dir, estimatedHeightPx]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    updateAnchorPosition();
+    const handleReposition = () => updateAnchorPosition();
+    window.addEventListener('resize', handleReposition);
+    window.addEventListener('scroll', handleReposition, true);
+    return () => {
+      window.removeEventListener('resize', handleReposition);
+      window.removeEventListener('scroll', handleReposition, true);
+    };
+  }, [open, updateAnchorPosition]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (popoverRef.current?.contains(target)) return;
+      if (anchorRef.current?.contains(target)) return;
+      onClose();
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [open, anchorRef, onClose]);
+
+  return createPortal(
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          ref={popoverRef}
+          initial={{ opacity: 0, y: -6, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -4, scale: 0.98 }}
+          transition={{ duration: 0.18, ease: 'easeOut' }}
+          className={`${themeFloatingOverlayClass} p-3 shadow-xl shadow-black/40 ${filterDropdownWrapperClass}`}
+          style={{
+            top: anchorPosition.top,
+            left: anchorPosition.left,
+            width: anchorPosition.width,
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-label={ariaLabel}
+        >
+          {children}
+        </motion.div>
+      )}
+    </AnimatePresence>,
+    document.body,
+  );
+}
+
 export interface CreatePersonalBudgetInput {
   name: string;
   startDate: string;
   endDate: string;
   totalAmount: number;
+  displayCurrency: ExpenseCurrency;
   settingsMode: BudgetSettingsInitMode;
   linkedBudgetId?: string;
   copiedFromBudgetId?: string;
@@ -78,12 +204,14 @@ export interface CreatePersonalBudgetInput {
   isLinkedToMain: boolean;
   keepAfterDates: boolean | null;
   status: PersonalBudgetStatus;
+  updateTargetBudgetCurrency?: boolean;
 }
 
 interface PersonalBudgetsPageProps {
   budgets: PersonalBudgetMeta[];
   activeBudgetId: string | null;
   displayCurrency: ExpenseCurrency;
+  getBudgetDisplayCurrency: (budgetId: string) => ExpenseCurrency;
   onEnterBudget: (budgetId: string) => void;
   onCreateBudget: (input: CreatePersonalBudgetInput) => void;
 }
@@ -101,15 +229,16 @@ export default function PersonalBudgetsPage({
   budgets,
   activeBudgetId,
   displayCurrency,
+  getBudgetDisplayCurrency,
   onEnterBudget,
   onCreateBudget,
 }: PersonalBudgetsPageProps) {
-  const { tr, lang } = useLanguage();
+  const { tr, lang, dir } = useLanguage();
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [name, setName] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [totalAmount, setTotalAmount] = useState(0);
+  const [totalAmountInput, setTotalAmountInput] = useState('');
   const [color, setColor] = useState<string>(BUDGET_COLOR_OPTIONS[0].hex);
   const [icon, setIcon] = useState<string>('wallet');
   const [settingsMode, setSettingsMode] = useState<BudgetSettingsInitMode>('copy-default');
@@ -117,8 +246,234 @@ export default function PersonalBudgetsPage({
   const [copiedFromBudgetId, setCopiedFromBudgetId] = useState('');
   const [isLinkedToMain, setIsLinkedToMain] = useState(false);
   const [keepAfterDates, setKeepAfterDates] = useState(true);
+  const [formDisplayCurrency, setFormDisplayCurrency] = useState<ExpenseCurrency>(displayCurrency);
+  const [updateTargetBudgetCurrency, setUpdateTargetBudgetCurrency] = useState(false);
+  const [currencyConflictOpen, setCurrencyConflictOpen] = useState(false);
+  const [dateToastVisible, setDateToastVisible] = useState(false);
+  const [colorPopoverOpen, setColorPopoverOpen] = useState(false);
+  const [iconPopoverOpen, setIconPopoverOpen] = useState(false);
+  const [advancedColorOpen, setAdvancedColorOpen] = useState(false);
+  const colorTriggerRef = useRef<HTMLButtonElement>(null);
+  const iconTriggerRef = useRef<HTMLButtonElement>(null);
+  const startDateInputRef = useRef<HTMLInputElement>(null);
+  const endDateInputRef = useRef<HTMLInputElement>(null);
+  const dateToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const currencyConflictContextRef = useRef<'radio' | 'budget' | 'currency'>('radio');
+  const pendingLinkedBudgetIdRef = useRef('');
+  const pendingFormDisplayCurrencyRef = useRef<ExpenseCurrency | null>(null);
+  const previousSettingsModeRef = useRef<BudgetSettingsInitMode>('copy-default');
+  const previousLinkedBudgetIdRef = useRef('');
+  const previousFormDisplayCurrencyRef = useRef<ExpenseCurrency>(displayCurrency);
+
+  useEffect(() => {
+    if (showCreateForm) {
+      setFormDisplayCurrency(displayCurrency);
+    }
+  }, [showCreateForm, displayCurrency]);
+
+  useEffect(() => {
+    return () => {
+      if (dateToastTimerRef.current) clearTimeout(dateToastTimerRef.current);
+    };
+  }, []);
+
+  const closeAllPickers = useCallback(() => {
+    setColorPopoverOpen(false);
+    setIconPopoverOpen(false);
+    setAdvancedColorOpen(false);
+  }, []);
+
+  const isCustomColor = isCustomHexColor(color);
+  const displayColorHex = isCustomColor ? normalizeCustomHex(color) : color;
+
+  const openColorPopover = () => {
+    setIconPopoverOpen(false);
+    setAdvancedColorOpen(false);
+    setColorPopoverOpen((prev) => !prev);
+  };
+
+  const openIconPopover = () => {
+    setColorPopoverOpen(false);
+    setAdvancedColorOpen(false);
+    setIconPopoverOpen((prev) => !prev);
+  };
+
+  const openAdvancedColorPicker = () => {
+    setColorPopoverOpen(false);
+    setAdvancedColorOpen(true);
+  };
+
+  const parsedTotalAmount = useMemo(
+    () => parseMoneyInput(totalAmountInput.trim()) ?? 0,
+    [totalAmountInput],
+  );
 
   const hasDateRange = startDate.length > 0 && endDate.length > 0;
+
+  const minEndDate = useMemo(
+    () => (startDate.length > 0 ? addOneDayToIsoDate(startDate) : undefined),
+    [startDate],
+  );
+
+  const showStartDateFirstToast = useCallback(() => {
+    setDateToastVisible(true);
+    if (dateToastTimerRef.current) clearTimeout(dateToastTimerRef.current);
+    dateToastTimerRef.current = setTimeout(() => setDateToastVisible(false), 2800);
+  }, []);
+
+  const handleStartDateChange = (value: string) => {
+    setStartDate(value);
+    if (value && endDate && endDate < addOneDayToIsoDate(value)) {
+      setEndDate('');
+    }
+  };
+
+  const handleEndDateIntercept = () => {
+    if (startDate.length > 0) return;
+    showStartDateFirstToast();
+    endDateInputRef.current?.blur();
+    startDateInputRef.current?.focus();
+  };
+
+  const clearCurrencyConflictPending = useCallback(() => {
+    pendingLinkedBudgetIdRef.current = '';
+    pendingFormDisplayCurrencyRef.current = null;
+    currencyConflictContextRef.current = 'radio';
+  }, []);
+
+  const resolveConflictTargetBudgetId = useCallback((): string => {
+    if (currencyConflictContextRef.current === 'budget') {
+      return pendingLinkedBudgetIdRef.current;
+    }
+    return linkedBudgetId;
+  }, [linkedBudgetId]);
+
+  const openCurrencyConflictIfNeeded = useCallback(
+    (
+      targetBudgetId: string,
+      context: 'radio' | 'budget' | 'currency',
+      pending?: { linkedBudgetId?: string; formDisplayCurrency?: ExpenseCurrency },
+    ): boolean => {
+      if (!targetBudgetId) return false;
+
+      const currencyToCompare = pending?.formDisplayCurrency ?? formDisplayCurrency;
+      const targetCurrency = getBudgetDisplayCurrency(targetBudgetId);
+      if (currencyToCompare === targetCurrency) return false;
+
+      currencyConflictContextRef.current = context;
+      previousSettingsModeRef.current = settingsMode;
+      previousLinkedBudgetIdRef.current = linkedBudgetId;
+      previousFormDisplayCurrencyRef.current = formDisplayCurrency;
+      pendingLinkedBudgetIdRef.current = pending?.linkedBudgetId ?? targetBudgetId;
+      pendingFormDisplayCurrencyRef.current = pending?.formDisplayCurrency ?? null;
+      setCurrencyConflictOpen(true);
+      return true;
+    },
+    [formDisplayCurrency, getBudgetDisplayCurrency, linkedBudgetId, settingsMode],
+  );
+
+  const applySettingsMode = useCallback(
+    (
+      mode: BudgetSettingsInitMode,
+      options?: {
+        updateTargetCurrency?: boolean;
+        adoptTargetCurrency?: boolean;
+        targetBudgetId?: string;
+      },
+    ) => {
+      if (options?.adoptTargetCurrency) {
+        const targetId = options.targetBudgetId ?? linkedBudgetId;
+        if (targetId) {
+          setFormDisplayCurrency(getBudgetDisplayCurrency(targetId));
+        }
+        setUpdateTargetBudgetCurrency(false);
+      } else if (options?.updateTargetCurrency) {
+        setUpdateTargetBudgetCurrency(true);
+      } else {
+        setUpdateTargetBudgetCurrency(false);
+      }
+      setSettingsMode(mode);
+    },
+    [getBudgetDisplayCurrency, linkedBudgetId],
+  );
+
+  const handleSettingsModeChange = (mode: BudgetSettingsInitMode) => {
+    if (mode !== 'linked') {
+      applySettingsMode(mode);
+      return;
+    }
+    if (openCurrencyConflictIfNeeded(linkedBudgetId, 'radio')) return;
+    applySettingsMode('linked');
+  };
+
+  const handleLinkedBudgetChange = (nextId: string) => {
+    if (nextId === linkedBudgetId) return;
+    if (!nextId) {
+      setLinkedBudgetId('');
+      setUpdateTargetBudgetCurrency(false);
+      return;
+    }
+    if (openCurrencyConflictIfNeeded(nextId, 'budget', { linkedBudgetId: nextId })) return;
+    setLinkedBudgetId(nextId);
+    setUpdateTargetBudgetCurrency(false);
+  };
+
+  const handleFormDisplayCurrencyChange = (code: ExpenseCurrency) => {
+    if (code === formDisplayCurrency) return;
+    if (settingsMode === 'linked' && linkedBudgetId) {
+      if (openCurrencyConflictIfNeeded(linkedBudgetId, 'currency', { formDisplayCurrency: code })) {
+        return;
+      }
+    }
+    setFormDisplayCurrency(code);
+    if (settingsMode === 'linked') {
+      setUpdateTargetBudgetCurrency(false);
+    }
+  };
+
+  const handleCurrencyConflictKeepTarget = () => {
+    const targetId = resolveConflictTargetBudgetId();
+    if (!targetId) {
+      setCurrencyConflictOpen(false);
+      clearCurrencyConflictPending();
+      return;
+    }
+
+    if (currencyConflictContextRef.current === 'budget') {
+      setLinkedBudgetId(targetId);
+    }
+
+    applySettingsMode('linked', { adoptTargetCurrency: true, targetBudgetId: targetId });
+    setCurrencyConflictOpen(false);
+    clearCurrencyConflictPending();
+  };
+
+  const handleCurrencyConflictChangeTarget = () => {
+    const targetId = resolveConflictTargetBudgetId();
+
+    if (currencyConflictContextRef.current === 'budget' && targetId) {
+      setLinkedBudgetId(targetId);
+    }
+    if (
+      currencyConflictContextRef.current === 'currency' &&
+      pendingFormDisplayCurrencyRef.current
+    ) {
+      setFormDisplayCurrency(pendingFormDisplayCurrencyRef.current);
+    }
+
+    applySettingsMode('linked', { updateTargetCurrency: true, targetBudgetId: targetId });
+    setCurrencyConflictOpen(false);
+    clearCurrencyConflictPending();
+  };
+
+  const handleCurrencyConflictCancel = () => {
+    setSettingsMode(previousSettingsModeRef.current);
+    setLinkedBudgetId(previousLinkedBudgetIdRef.current);
+    setFormDisplayCurrency(previousFormDisplayCurrencyRef.current);
+    setUpdateTargetBudgetCurrency(false);
+    setCurrencyConflictOpen(false);
+    clearCurrencyConflictPending();
+  };
 
   const sortedBudgets = useMemo(
     () =>
@@ -129,6 +484,15 @@ export default function PersonalBudgetsPage({
       }),
     [budgets],
   );
+
+  useEffect(() => {
+    budgetDebug('personalBudgetsPage:render', {
+      budgetCount: sortedBudgets.length,
+      totals: snapshotRegistryTotalsForLog(sortedBudgets),
+      activeBudgetId: activeBudgetId?.slice(-10) ?? null,
+      stateSource: 'props.budgets from App budgetRegistry.personal (NOT local cache)',
+    });
+  }, [sortedBudgets, activeBudgetId]);
 
   const budgetLabel = (meta: PersonalBudgetMeta) =>
     meta.isDefaultMonthly ? tr('monthlyDefaultBudgetName') : meta.name;
@@ -147,12 +511,13 @@ export default function PersonalBudgetsPage({
   };
 
   const resolveBudgetIcon = (iconId?: string) => ICON_BY_ID[iconId ?? 'wallet'] ?? Wallet;
+  const SelectedIcon = resolveBudgetIcon(icon);
 
   const resetForm = () => {
     setName('');
     setStartDate('');
     setEndDate('');
-    setTotalAmount(0);
+    setTotalAmountInput('');
     setColor(BUDGET_COLOR_OPTIONS[0].hex);
     setIcon('wallet');
     setSettingsMode('copy-default');
@@ -160,14 +525,23 @@ export default function PersonalBudgetsPage({
     setCopiedFromBudgetId('');
     setIsLinkedToMain(false);
     setKeepAfterDates(true);
+    setFormDisplayCurrency(displayCurrency);
+    setUpdateTargetBudgetCurrency(false);
+    setCurrencyConflictOpen(false);
+    clearCurrencyConflictPending();
+    closeAllPickers();
     setShowCreateForm(false);
   };
 
   const handleCreate = () => {
     const trimmedName = name.trim();
     if (!trimmedName) return;
-    const amount = parseMoneyInput(String(totalAmount)) ?? totalAmount;
-    if (amount <= 0) return;
+
+    // Parse directly from the input draft (display currency) — avoids MoneyAmountInput ILS commit mismatch.
+    const parsed = parseMoneyInput(totalAmountInput.trim());
+    if (parsed == null || !(parsed > 0)) return;
+    const amount = roundMoney(parsed);
+
     if (settingsMode === 'linked' && !linkedBudgetId) return;
     if (settingsMode === 'copy-from' && !copiedFromBudgetId) return;
 
@@ -176,6 +550,7 @@ export default function PersonalBudgetsPage({
       startDate,
       endDate,
       totalAmount: amount,
+      displayCurrency: formDisplayCurrency,
       settingsMode,
       linkedBudgetId: settingsMode === 'linked' ? linkedBudgetId : undefined,
       copiedFromBudgetId: settingsMode === 'copy-from' ? copiedFromBudgetId : undefined,
@@ -184,13 +559,15 @@ export default function PersonalBudgetsPage({
       isLinkedToMain,
       keepAfterDates: hasDateRange ? keepAfterDates : null,
       status: 'active',
+      updateTargetBudgetCurrency:
+        settingsMode === 'linked' && updateTargetBudgetCurrency ? true : undefined,
     });
     resetForm();
   };
 
   const canCreate =
     name.trim().length > 0 &&
-    totalAmount > 0 &&
+    parsedTotalAmount > 0 &&
     (settingsMode !== 'linked' || linkedBudgetId.length > 0) &&
     (settingsMode !== 'copy-from' || copiedFromBudgetId.length > 0);
 
@@ -234,7 +611,12 @@ export default function PersonalBudgetsPage({
                 {budget.totalAmount > 0 && (
                   <span className={`mt-1 block text-xs ${themeTextMutedClass}`}>
                     {tr('totalBudgetLabel')}:{' '}
-                    <DisplayMoney amount={budget.totalAmount} className="inline-block" />
+                    <LtrNumeric className="inline-block whitespace-nowrap">
+                      {formatAmountWithSymbol(
+                        budget.totalAmount,
+                        getBudgetDisplayCurrency(budget.id) as CurrencyCode,
+                      )}
+                    </LtrNumeric>
                   </span>
                 )}
               </span>
@@ -259,79 +641,178 @@ export default function PersonalBudgetsPage({
             {tr('createPersonalBudget')}
           </h2>
 
-          {/* Row: Budget Name → Color → Icon */}
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
-            <div className="min-w-0 flex-1">
-              <label className={`mb-2 block text-sm font-medium ${typographyLabelClass}`}>
+          {/* Row (RTL): Budget Name → Color trigger → Icon trigger — aligned label baseline */}
+          <div>
+            <div className="mb-2 flex flex-row items-baseline gap-3">
+              <label className={`min-w-0 flex-1 text-sm font-medium ${typographyLabelClass}`}>
                 {tr('budgetNameLabel')}
                 <RequiredMark />
               </label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder={tr('budgetNamePlaceholder')}
-                className={`w-full ${surfaceInputLgClass}`}
-                required
+              <span
+                className={`w-12 shrink-0 text-center text-sm font-medium leading-none ${typographyLabelClass}`}
+              >
+                {tr('budgetColorLabel')}
+              </span>
+              <span
+                className={`w-12 shrink-0 text-center text-sm font-medium leading-none ${typographyLabelClass}`}
+              >
+                {tr('budgetIconLabel')}
+              </span>
+            </div>
+            <div className="flex flex-row items-center gap-3">
+              <div className="min-w-0 flex-1">
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder={tr('budgetNamePlaceholder')}
+                  className={`w-full ${surfaceInputLgClass}`}
+                  required
+                />
+              </div>
+
+              <div className={`${themeFloatingHostClass} shrink-0`}>
+                <button
+                ref={colorTriggerRef}
+                type="button"
+                onClick={openColorPopover}
+                aria-label={tr('budgetColorLabel')}
+                aria-expanded={colorPopoverOpen}
+                aria-haspopup="dialog"
+                className={`${PICKER_TRIGGER_CLASS} rounded-full border-2 border-[var(--surface-input-border)] hover:scale-105 ${
+                  colorPopoverOpen ? 'ring-2 ring-offset-2 ring-offset-[var(--main-card-surface-bg)]' : ''
+                }`}
+                style={{
+                  backgroundColor: displayColorHex,
+                  ...(colorPopoverOpen ? { ringColor: displayColorHex } : {}),
+                }}
+              />
+
+              <BudgetFormPickerPopover
+                open={colorPopoverOpen}
+                onClose={() => setColorPopoverOpen(false)}
+                anchorRef={colorTriggerRef}
+                ariaLabel={tr('budgetColorLabel')}
+                estimatedHeightPx={200}
+              >
+                <div className="grid grid-cols-4 gap-2">
+                  {BUDGET_COLOR_OPTIONS.map((option) => {
+                    const selected = color === option.hex;
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => {
+                          setColor(option.hex);
+                          setColorPopoverOpen(false);
+                        }}
+                        aria-label={option.id}
+                        aria-pressed={selected}
+                        className={[
+                          'relative mx-auto h-9 w-9 rounded-full border-2 transition-transform active:scale-95',
+                          selected
+                            ? 'border-white ring-2 ring-offset-2 ring-offset-[var(--surface-input-bg)] scale-105'
+                            : 'border-transparent hover:scale-105',
+                        ].join(' ')}
+                        style={{
+                          backgroundColor: option.hex,
+                          ...(selected ? { ringColor: option.hex } : {}),
+                        }}
+                      >
+                        {selected && (
+                          <Check
+                            className="absolute inset-0 m-auto h-3.5 w-3.5 text-white drop-shadow"
+                            strokeWidth={3}
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  type="button"
+                  onClick={openAdvancedColorPicker}
+                  title={tr('customColorAdvanced')}
+                  aria-label={tr('customColorAdvanced')}
+                  className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm transition-all active:scale-[0.98] ${
+                    isCustomColor
+                      ? `${primaryActionSelectedChipClass} border-[var(--btn-primary-bg)]`
+                      : 'border-[var(--surface-input-border)] bg-[var(--surface-input-bg)] text-[var(--color-category-5-muted)] hover:border-[var(--btn-primary-bg)]/40'
+                  }`}
+                >
+                  <span
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
+                    style={{ background: CONIC_GRADIENT }}
+                  >
+                    <Palette className="h-3.5 w-3.5 text-white drop-shadow" />
+                  </span>
+                  <span className={themeTextClass}>{tr('customColorAdvanced')}</span>
+                </button>
+              </BudgetFormPickerPopover>
+
+              <AdvancedColorPickerPopover
+                open={advancedColorOpen}
+                color={displayColorHex}
+                onApply={(hex) => {
+                  setColor(hex);
+                  setAdvancedColorOpen(false);
+                }}
+                onCancel={() => setAdvancedColorOpen(false)}
+                anchorRef={colorTriggerRef}
               />
             </div>
 
-            <div className="shrink-0">
-              <span className={`mb-2 block text-sm font-medium ${typographyLabelClass}`}>
-                {tr('budgetColorLabel')}
-              </span>
-              <div className="flex flex-wrap items-center gap-2">
-                {BUDGET_COLOR_OPTIONS.map((option) => {
-                  const selected = color === option.hex;
-                  return (
-                    <button
-                      key={option.id}
-                      type="button"
-                      onClick={() => setColor(option.hex)}
-                      aria-label={option.id}
-                      aria-pressed={selected}
-                      className={[
-                        'h-9 w-9 rounded-full border-2 transition-transform active:scale-95',
-                        selected
-                          ? 'border-white ring-2 ring-offset-2 ring-offset-[var(--main-card-surface-bg)] scale-105'
-                          : 'border-transparent hover:scale-105',
-                      ].join(' ')}
-                      style={{
-                        backgroundColor: option.hex,
-                        ...(selected ? { ringColor: option.hex } : {}),
-                      }}
-                    />
-                  );
-                })}
-              </div>
-            </div>
+            <div className={`${themeFloatingHostClass} shrink-0`}>
+              <button
+                ref={iconTriggerRef}
+                type="button"
+                onClick={openIconPopover}
+                aria-label={tr('budgetIconLabel')}
+                aria-expanded={iconPopoverOpen}
+                aria-haspopup="dialog"
+                className={`${PICKER_TRIGGER_CLASS} flex items-center justify-center rounded-xl border ${
+                  iconPopoverOpen
+                    ? 'border-[var(--btn-primary-bg)] bg-[var(--btn-primary-bg)]/15 text-[var(--btn-primary-bg)] ring-2 ring-[var(--btn-primary-bg)]/30'
+                    : 'border-[var(--surface-input-border)] bg-[var(--surface-input-bg)] text-[var(--color-category-5-muted)] hover:border-[var(--btn-primary-bg)]/40'
+                }`}
+              >
+                <SelectedIcon className="h-5 w-5" />
+              </button>
 
-            <div className="shrink-0">
-              <span className={`mb-2 block text-sm font-medium ${typographyLabelClass}`}>
-                {tr('budgetIconLabel')}
-              </span>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {BUDGET_ICON_OPTIONS.map(({ id, Icon }) => {
-                  const selected = icon === id;
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => setIcon(id)}
-                      aria-label={id}
-                      aria-pressed={selected}
-                      className={[
-                        'flex h-9 w-9 items-center justify-center rounded-xl border transition-all active:scale-95',
-                        selected
-                          ? 'border-[var(--btn-primary-bg)] bg-[var(--btn-primary-bg)]/15 text-[var(--btn-primary-bg)]'
-                          : 'border-[var(--surface-input-border)] bg-[var(--surface-input-bg)] text-[var(--color-category-5-muted)] hover:border-[var(--btn-primary-bg)]/40',
-                      ].join(' ')}
-                    >
-                      <Icon className="h-4 w-4" />
-                    </button>
-                  );
-                })}
-              </div>
+              <BudgetFormPickerPopover
+                open={iconPopoverOpen}
+                onClose={() => setIconPopoverOpen(false)}
+                anchorRef={iconTriggerRef}
+                ariaLabel={tr('budgetIconLabel')}
+                estimatedHeightPx={180}
+              >
+                <div className="grid grid-cols-4 gap-1.5">
+                  {BUDGET_ICON_OPTIONS.map(({ id, Icon }) => {
+                    const selected = icon === id;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => {
+                          setIcon(id);
+                          setIconPopoverOpen(false);
+                        }}
+                        aria-label={id}
+                        aria-pressed={selected}
+                        className={[
+                          'flex h-10 w-10 items-center justify-center rounded-xl border transition-all active:scale-95',
+                          selected
+                            ? 'border-[var(--btn-primary-bg)] bg-[var(--btn-primary-bg)]/15 text-[var(--btn-primary-bg)]'
+                            : 'border-[var(--surface-input-border)] bg-[var(--surface-input-bg)] text-[var(--color-category-5-muted)] hover:border-[var(--btn-primary-bg)]/40',
+                        ].join(' ')}
+                      >
+                        <Icon className="h-4 w-4" />
+                      </button>
+                    );
+                  })}
+                </div>
+              </BudgetFormPickerPopover>
+            </div>
             </div>
           </div>
 
@@ -341,9 +822,10 @@ export default function PersonalBudgetsPage({
                 {tr('budgetStartDateLabel')}
               </label>
               <input
+                ref={startDateInputRef}
                 type="date"
                 value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
+                onChange={(e) => handleStartDateChange(e.target.value)}
                 className={`w-full ${surfaceInputLgClass} px-3`}
               />
             </div>
@@ -352,9 +834,12 @@ export default function PersonalBudgetsPage({
                 {tr('budgetEndDateLabel')}
               </label>
               <input
+                ref={endDateInputRef}
                 type="date"
                 value={endDate}
+                min={minEndDate}
                 onChange={(e) => setEndDate(e.target.value)}
+                onFocus={handleEndDateIntercept}
                 className={`w-full ${surfaceInputLgClass} px-3`}
               />
             </div>
@@ -365,12 +850,22 @@ export default function PersonalBudgetsPage({
               {tr('budgetTotalAmountLabel')}
               <RequiredMark />
             </label>
-            <MoneyAmountInput
-              value={totalAmount}
-              displayCurrency={displayCurrency}
-              onCommit={(amount) => setTotalAmount(amount ?? 0)}
-              className={`w-full max-w-xs ${surfaceInputClass}`}
-            />
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
+              <input
+                type="text"
+                inputMode="decimal"
+                value={totalAmountInput}
+                onChange={(e) => setTotalAmountInput(sanitizeMoneyInputDraft(e.target.value))}
+                placeholder={tr('enterAmount')}
+                aria-label={tr('budgetTotalAmountLabel')}
+                className={`max-w-md flex-1 ${BUDGET_AMOUNT_INPUT_CLASS}`}
+              />
+              <CurrencySelector
+                value={formDisplayCurrency as CurrencyCode}
+                onChange={(code) => handleFormDisplayCurrencyChange(code as ExpenseCurrency)}
+                className="self-end sm:self-stretch sm:flex sm:items-end"
+              />
+            </div>
           </div>
 
           <fieldset className="space-y-3">
@@ -383,7 +878,7 @@ export default function PersonalBudgetsPage({
                 type="radio"
                 name="settingsMode"
                 checked={settingsMode === 'copy-default'}
-                onChange={() => setSettingsMode('copy-default')}
+                onChange={() => handleSettingsModeChange('copy-default')}
                 className="mt-1 h-4 w-4 shrink-0"
               />
               <span className={`text-sm ${themeTextClass}`}>{tr('budgetSettingsCopyDefault')}</span>
@@ -395,7 +890,7 @@ export default function PersonalBudgetsPage({
                   type="radio"
                   name="settingsMode"
                   checked={settingsMode === 'linked'}
-                  onChange={() => setSettingsMode('linked')}
+                  onChange={() => handleSettingsModeChange('linked')}
                   className="mt-1 h-4 w-4 shrink-0"
                 />
                 <span className={`text-sm ${themeTextClass}`}>{tr('budgetSettingsLinked')}</span>
@@ -403,7 +898,7 @@ export default function PersonalBudgetsPage({
               {settingsMode === 'linked' && (
                 <select
                   value={linkedBudgetId}
-                  onChange={(e) => setLinkedBudgetId(e.target.value)}
+                  onChange={(e) => handleLinkedBudgetChange(e.target.value)}
                   className={`ms-7 w-full max-w-sm ${surfaceInputClass}`}
                 >
                   <option value="">{tr('budgetSelectExisting')}</option>
@@ -422,7 +917,7 @@ export default function PersonalBudgetsPage({
                   type="radio"
                   name="settingsMode"
                   checked={settingsMode === 'copy-from'}
-                  onChange={() => setSettingsMode('copy-from')}
+                  onChange={() => handleSettingsModeChange('copy-from')}
                   className="mt-1 h-4 w-4 shrink-0"
                 />
                 <span className={`text-sm ${themeTextClass}`}>{tr('budgetSettingsCopyFrom')}</span>
@@ -487,6 +982,83 @@ export default function PersonalBudgetsPage({
           </div>
         </div>
       )}
+
+      <AnimatePresence>
+        {dateToastVisible && (
+          <motion.div
+            key="budget-date-toast"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            transition={{ duration: 0.2 }}
+            className={monochromeToastPanelClass}
+            role="status"
+            aria-live="polite"
+          >
+            {tr('budgetChooseStartDateFirst')}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {currencyConflictOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-end justify-center p-0 sm:items-center sm:p-4"
+            role="presentation"
+          >
+            <button
+              type="button"
+              aria-label={tr('cancel')}
+              className="absolute inset-0 bg-black/65 backdrop-blur-sm"
+              onClick={handleCurrencyConflictCancel}
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 20, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.98 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              dir={dir}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="budget-currency-conflict-title"
+              className={`relative w-full max-w-md p-5 backdrop-blur-xl sm:rounded-2xl sm:p-6 ${surfaceModalLgClass}`}
+            >
+              <p
+                id="budget-currency-conflict-title"
+                className={`text-base font-semibold leading-relaxed sm:text-lg ${themeTextClass}`}
+              >
+                {tr('budgetCurrencyConflictMessage')}
+              </p>
+              <div className="mt-5 flex flex-col gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleCurrencyConflictKeepTarget}
+                  className={`w-full px-4 py-3 text-sm ${utilityNavButtonLgClass}`}
+                >
+                  {tr('budgetCurrencyKeepTarget')}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCurrencyConflictChangeTarget}
+                  className={`w-full px-4 py-3 text-sm ${primaryActionButtonBorderedClass}`}
+                >
+                  {tr('budgetCurrencyChangeTarget')}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCurrencyConflictCancel}
+                  className={`w-full px-4 py-3 text-sm ${utilityNavButtonLgClass}`}
+                >
+                  {tr('cancel')}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
