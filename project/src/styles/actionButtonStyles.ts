@@ -209,6 +209,22 @@ export const filterDropdownWrapperClass = [
   'rounded-xl border border-[var(--surface-input-border)] bg-[var(--surface-input-bg)] shadow-xl shadow-black/50',
 ].join(' ');
 
+/** Dropdown / drawer menu row — Category 4 (filter & input surfaces). */
+export const filterDropdownMenuItemClass = [
+  'flex w-full items-center gap-2.5 text-sm transition-colors',
+  'text-[var(--surface-input-text,var(--color-category-5))]',
+  'hover:bg-[var(--btn-filter-hover)]',
+  'hover:text-[var(--btn-filter-text-hover,var(--color-category-5-secondary))]',
+].join(' ');
+
+/** Ghost icon-only control on themed surfaces (modal close, toolbar). */
+export const utilityIconButtonGhostClass = [
+  'rounded-lg p-2 transition-colors',
+  'text-[var(--color-category-5-muted)]',
+  'hover:bg-[var(--btn-filter-hover)]',
+  'hover:text-[var(--color-category-5-secondary)]',
+].join(' ');
+
 /** Nested panel surface inside settings / forms. */
 export const filterPanelSurfaceClass = [
   'rounded-2xl border p-1',

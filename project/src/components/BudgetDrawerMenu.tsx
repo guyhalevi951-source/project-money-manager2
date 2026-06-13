@@ -1,7 +1,11 @@
 import { useEffect, useRef } from 'react';
 import { Menu, User, Users } from 'lucide-react';
 import { useLanguage } from '../LanguageContext';
-import { utilityNavMenuToggleClass } from '../styles/actionButtonStyles';
+import {
+  filterDropdownMenuItemClass,
+  filterDropdownWrapperClass,
+  utilityNavMenuToggleClass,
+} from '../styles/actionButtonStyles';
 import type { AppShellView } from '../services/budgetArchitecture';
 
 interface BudgetDrawerMenuProps {
@@ -51,7 +55,7 @@ export default function BudgetDrawerMenu({ open, onOpenChange, onNavigate }: Bud
       <div
         role="menu"
         aria-hidden={!open}
-        className={`absolute end-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-xl border border-neutral-700 bg-neutral-900 py-1 shadow-xl transition-all duration-200 ${
+        className={`absolute end-0 top-full z-50 mt-2 w-56 overflow-hidden py-1 transition-all duration-200 ${filterDropdownWrapperClass} ${
           open
             ? 'pointer-events-auto translate-y-0 scale-100 opacity-100'
             : 'pointer-events-none -translate-y-1 scale-95 opacity-0'
@@ -64,9 +68,9 @@ export default function BudgetDrawerMenu({ open, onOpenChange, onNavigate }: Bud
             onOpenChange(false);
             onNavigate('personal-budgets');
           }}
-          className="flex w-full items-center gap-2.5 px-4 py-3 text-sm text-neutral-200 transition-colors hover:bg-neutral-800"
+          className={`${filterDropdownMenuItemClass} px-4 py-3`}
         >
-          <User className="h-4 w-4 shrink-0 text-emerald-400" />
+          <User className="h-4 w-4 shrink-0 text-emerald-500" />
           <span className="flex-1 text-start">{tr('personalBudgetsTitle')}</span>
         </button>
         <button
@@ -76,9 +80,9 @@ export default function BudgetDrawerMenu({ open, onOpenChange, onNavigate }: Bud
             onOpenChange(false);
             onNavigate('shared-budgets');
           }}
-          className="flex w-full items-center gap-2.5 px-4 py-3 text-sm text-neutral-200 transition-colors hover:bg-neutral-800"
+          className={`${filterDropdownMenuItemClass} px-4 py-3`}
         >
-          <Users className="h-4 w-4 shrink-0 text-violet-400" />
+          <Users className="h-4 w-4 shrink-0 text-violet-500" />
           <span className="flex-1 text-start">{tr('sharedBudgetsTitle')}</span>
         </button>
       </div>

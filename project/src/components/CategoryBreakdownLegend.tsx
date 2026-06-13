@@ -2,7 +2,7 @@ import type { CategoryBreakdownSlice } from '../categories';
 import CategoryIconBadge from './CategoryIconBadge';
 import DisplayMoney from './DisplayMoney';
 import { LocalizedUserText, LtrNumeric, useLanguage } from '../LanguageContext';
-import { typographyBodyClass, typographyLabelClass, typographyMutedClass } from '../styles/themeSurfaceStyles';
+import { typographyBodyClass, typographyLabelClass, typographyMutedClass, themeTextClass } from '../styles/themeSurfaceStyles';
 
 interface CategoryBreakdownLegendProps {
   items: CategoryBreakdownSlice[];
@@ -63,15 +63,15 @@ export default function CategoryBreakdownLegend({
       {visible.map((item) => (
         <div key={item.value} className="flex items-center gap-2.5 text-sm">
           <CategoryIconBadge icon={item.icon} hex={item.hex} colorClass={item.color} size="compact" />
-          <span className="text-neutral-300 truncate flex-1">
+          <span className={`truncate flex-1 ${themeTextClass}`}>
             <LocalizedUserText text={item.value} />
           </span>
           {percentageDecimals > 0 ? (
-            <LtrNumeric className="text-neutral-400 font-medium shrink-0">
+            <LtrNumeric className={`font-medium shrink-0 ${typographyMutedClass}`}>
               {item.percentage.toFixed(percentageDecimals)}%
             </LtrNumeric>
           ) : (
-            <DisplayMoney amount={item.amount} className="text-neutral-400 font-medium shrink-0 inline-block" />
+            <DisplayMoney amount={item.amount} className={`font-medium shrink-0 inline-block ${typographyMutedClass}`} />
           )}
         </div>
       ))}

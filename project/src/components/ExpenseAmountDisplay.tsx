@@ -1,5 +1,6 @@
 import { getCurrencyMeta, type ExpenseCurrency } from '../constants/currencies';
 import { LtrNumeric, useLanguage } from '../LanguageContext';
+import { typographyBodyClass, typographyMutedClass } from '../styles/themeSurfaceStyles';
 import CurrencyFlag from './CurrencyFlag';
 
 interface ExpenseAmountDisplayProps {
@@ -60,10 +61,10 @@ export default function ExpenseAmountDisplay({
 
   const mainClass =
     variant === 'card'
-      ? 'text-base font-semibold text-neutral-100'
-      : 'text-lg font-semibold text-neutral-100';
+      ? `text-base font-semibold ${typographyBodyClass}`
+      : `text-lg font-semibold ${typographyBodyClass}`;
 
-  const secondaryClass = 'text-xs text-neutral-500';
+  const secondaryClass = `text-xs ${typographyMutedClass}`;
 
   return (
     <div

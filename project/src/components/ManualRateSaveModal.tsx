@@ -1,7 +1,7 @@
 import { X } from 'lucide-react';
 import { useLanguage } from '../LanguageContext';
-import { primaryActionButtonClass, utilityNavButtonClass } from '../styles/actionButtonStyles';
-import { surfaceModalLgClass } from '../styles/themeSurfaceStyles';
+import { primaryActionButtonClass, utilityIconButtonGhostClass, utilityNavButtonClass } from '../styles/actionButtonStyles';
+import { surfaceModalLgClass, themeTextMutedClass, typographyTitleClass } from '../styles/themeSurfaceStyles';
 
 interface ManualRateSaveModalProps {
   open: boolean;
@@ -46,21 +46,21 @@ export default function ManualRateSaveModal({
         <div className="mb-1 flex items-start gap-3">
           <h2
             id="manual-rate-save-modal-title"
-            className="min-w-0 flex-1 text-base font-bold leading-snug text-neutral-100 sm:text-lg"
+            className={`min-w-0 flex-1 text-base font-bold leading-snug sm:text-lg ${typographyTitleClass}`}
           >
             {tr('exchangeRateSaveManualRate')}
           </h2>
           <button
             type="button"
             onClick={onClose}
-            className="shrink-0 rounded-lg p-2 text-neutral-500 transition-colors hover:bg-neutral-800 hover:text-neutral-200"
+            className={`shrink-0 ${utilityIconButtonGhostClass}`}
             aria-label={tr('close')}
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <p className="mt-2 text-sm leading-relaxed text-neutral-400">
+        <p className={`mt-2 text-sm leading-relaxed ${themeTextMutedClass}`}>
           {tr('exchangeRateSaveManualRateDesc')}
         </p>
 

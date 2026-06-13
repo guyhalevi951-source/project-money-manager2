@@ -52,12 +52,12 @@ import {
   subCardMasterCategoryStackClass,
   subCardNestedAccordionTriggerClass,
 } from './SubCardNestedStack';
-import { useSettingsPersistence } from '../context/SettingsPersistenceContext';
 import SettingsSyncStatusBadge from './SettingsSyncStatusBadge';
 import {
   applyThemeCSS,
   BUTTON_GROUP_META,
-  DEFAULT_THEME_PREFERENCES,
+  DEFAULT_DARK_THEME_PREFERENCES,
+  DEFAULT_LIGHT_THEME_PREFERENCES,
   getButtonChoiceLabel,
   getGroupColorChoice,
   PAGE_THEME_META,
@@ -71,10 +71,11 @@ import { SETTINGS_SYNC_DEBOUNCE_MS } from '../services/settingsPersistenceEngine
 import type { ExpenseCurrency } from '../services/exchangeRateService';
 import ProfileSettingsSections, { type ProfileCurrencySubSection } from './ProfileSettingsSections';
 
-function createFreshDefaultTheme(): ThemePreferences {
+function createFreshDefaultTheme(pageMode: PageThemeMode): ThemePreferences {
+  const base = pageMode === 'light' ? DEFAULT_LIGHT_THEME_PREFERENCES : DEFAULT_DARK_THEME_PREFERENCES;
   return {
-    ...DEFAULT_THEME_PREFERENCES,
-    buttons: { ...DEFAULT_THEME_PREFERENCES.buttons },
+    ...base,
+    buttons: { ...base.buttons },
   };
 }
 
@@ -164,11 +165,6 @@ export default function ProfilePage({
   initialCurrencySections,
 }: ProfilePageProps) {
   const { tr, lang, themePreferences, setThemePreferences } = useLanguage();
-  const { rehydrateGuestSettings } = useSettingsPersistence();
-
-  useEffect(() => {
-    rehydrateGuestSettings();
-  }, [rehydrateGuestSettings]);
   const [selectedAvatar, setSelectedAvatar] = useState(
     sanitizeAvatarUrl(currentAvatarUrl, DEFAULT_GUEST_AVATAR_URL),
   );
@@ -291,7 +287,7 @@ export default function ProfilePage({
   }, []);
 
   const handleResetTheme = useCallback(() => {
-    const defaults = createFreshDefaultTheme();
+    const defaults = createFreshDefaultTheme(draftTheme.pageMode);
     setDraftTheme(defaults);
     setThemePreferences(defaults);
 

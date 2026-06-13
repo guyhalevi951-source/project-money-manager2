@@ -1,7 +1,8 @@
 import { motion } from 'framer-motion';
 import { MapPin } from 'lucide-react';
 import { useLanguage } from '../LanguageContext';
-import { primaryActionButtonSemiboldClass } from '../styles/actionButtonStyles';
+import { primaryActionButtonSemiboldClass, utilityNavButtonClass } from '../styles/actionButtonStyles';
+import { themeTextMutedClass } from '../styles/themeSurfaceStyles';
 import { getCurrencyMeta, type CurrencyCode } from '../constants/currencies';
 import CurrencyFlag from './CurrencyFlag';
 
@@ -54,14 +55,14 @@ export default function CurrencyDetectionBanner({
         <button
           type="button"
           onClick={onAlwaysSwitch}
-          className="px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium text-neutral-200 border border-neutral-600/80 bg-neutral-900/60 hover:bg-neutral-800/80 hover:text-white transition-all active:scale-[0.98]"
+          className={`px-3.5 py-2 rounded-lg text-xs sm:text-sm ${utilityNavButtonClass}`}
         >
           {tr('currencyDetectionAlways')}
         </button>
         <button
           type="button"
           onClick={onNeverAsk}
-          className="px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium text-neutral-500 hover:text-rose-300 hover:bg-rose-500/10 transition-all active:scale-[0.98]"
+          className={`px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium hover:text-rose-500 hover:bg-rose-500/10 transition-all active:scale-[0.98] ${themeTextMutedClass}`}
         >
           {tr('currencyDetectionNever')}
         </button>

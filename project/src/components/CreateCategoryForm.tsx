@@ -4,7 +4,7 @@ import CategoryColorPicker from './CategoryColorPicker';
 import CategoryColorChip from './CategoryColorChip';
 import { useLanguage } from '../LanguageContext';
 import { primaryActionButtonClass, primaryActionSelectedChipClass } from '../styles/actionButtonStyles';
-import { surfaceInputClass, surfacePanelClass, typographyLabelClass } from '../styles/themeSurfaceStyles';
+import { surfaceInputClass, surfacePanelClass, themeTextMutedClass, typographyBodyClass, typographyLabelClass } from '../styles/themeSurfaceStyles';
 
 interface CreateCategoryFormProps {
   name: string;
@@ -85,8 +85,8 @@ export default function CreateCategoryForm({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-neutral-700/80">
-        <span className="text-xs text-neutral-400 w-full sm:w-auto">{tr('preview')}</span>
+      <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-[var(--color-sub-cards-border)]">
+        <span className={`text-xs w-full sm:w-auto ${themeTextMutedClass}`}>{tr('preview')}</span>
         <CategoryColorChip color={color || DEFAULT_CATEGORY_COLOR} icon={PreviewIcon}>
           {name.trim() || tr('newCategory')}
         </CategoryColorChip>
@@ -106,7 +106,7 @@ export default function CreateCategoryForm({
         <button
           type="button"
           onClick={onCancel}
-          className="shrink-0 text-neutral-400 hover:text-rose-400 hover:bg-rose-500/10 p-3 rounded-xl border border-neutral-700 hover:border-rose-500/40 transition-all"
+          className={`shrink-0 p-3 rounded-xl border border-[var(--color-sub-cards-border)] hover:border-rose-500/40 hover:text-rose-500 hover:bg-rose-500/10 transition-all ${themeTextMutedClass}`}
           title={tr('cancel')}
           aria-label={tr('cancel')}
         >

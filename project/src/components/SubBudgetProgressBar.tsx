@@ -1,3 +1,5 @@
+import { progressTrackClass } from '../styles/themeSurfaceStyles';
+
 interface SubBudgetProgressBarProps {
   allocated: number;
   spent: number;
@@ -22,7 +24,7 @@ export default function SubBudgetProgressBar({
   const showRemaining = remainingWidth > 0;
 
   return (
-    <div className="h-2.5 rounded-full bg-neutral-800 overflow-hidden">
+    <div className={`h-2.5 ${progressTrackClass}`}>
       <div className="h-full flex">
         {showUsed && (
           <div

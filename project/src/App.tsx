@@ -102,6 +102,7 @@ import {
   utilityNavButtonLgClass,
   utilityNavIconBadgeClass,
   utilityNavMenuToggleClass,
+  utilityIconButtonGhostClass,
 } from './styles/actionButtonStyles';
 import {
   surfaceInputClass,
@@ -126,12 +127,15 @@ import {
   typographyMutedClass,
   typographyTitleClass,
   themeTextMutedClass,
+  themeTextClass,
   APP_THEME_SCOPE,
   themeAntiClipVisibleClass,
   themeScrollRoutePageClass,
   themeScrollRouteShellClass,
   themeScrollSafeContentClass,
   themeScrollViewportClass,
+  emptyStateIconWellClass,
+  progressTrackClass,
 } from './styles/themeSurfaceStyles';
 import {
   clearAllManualExchangeOverridesLocal,
@@ -575,7 +579,7 @@ function CollapsibleNavMenu({
         } ${
           isActive
             ? utilityNavActiveTabClass
-            : 'bg-slate-800/95 text-slate-200 border-slate-700/80 hover:border-slate-600 hover:bg-slate-700/90'
+            : `${utilityNavButtonLgClass} border-[var(--btn-nav-border)]`
         } ${
           open
             ? 'opacity-100 translate-y-0 scale-100'
@@ -588,9 +592,15 @@ function CollapsibleNavMenu({
         <span
           className={`shrink-0 flex items-center justify-center rounded-xl ${
             variant === 'mobile' ? 'w-10 h-10' : 'w-9 h-9'
-          } ${isActive ? 'bg-white/15' : 'bg-slate-900/80'}`}
+          } ${utilityNavIconBadgeClass} ${isActive ? 'opacity-90' : ''}`}
         >
-          <Icon className={`${variant === 'mobile' ? 'w-5 h-5' : 'w-4 h-4'} ${isActive ? 'text-white' : 'text-indigo-400'}`} />
+          <Icon
+            className={`${variant === 'mobile' ? 'w-5 h-5' : 'w-4 h-4'} ${
+              isActive
+                ? 'text-[var(--btn-primary-fg,var(--color-category-5))]'
+                : primaryActionAccentIconClass
+            }`}
+          />
         </span>
         <span className={`flex-1 truncate ${dir === 'rtl' ? 'text-right' : 'text-left'}`}>{tabLabel(tab.id)}</span>
       </button>
@@ -607,23 +617,21 @@ function CollapsibleNavMenu({
           aria-label={open ? tr('closeMenu') : tr('tabDashboard')}
           aria-expanded={open}
           aria-haspopup="menu"
-          className={`h-10 w-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40 active:scale-95 ${utilityNavMenuToggleClass} ${
-            open ? 'text-white' : ''
-          }`}
+          className={`h-10 w-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40 active:scale-95 ${utilityNavMenuToggleClass}`}
         >
           {open ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
         </button>
         <div
           role="menu"
           aria-hidden={!open}
-          className={`absolute top-full mt-2 end-0 z-[60] flex w-[min(100vw-2rem,22rem)] flex-col gap-1.5 rounded-2xl border border-slate-700/80 bg-slate-900/95 p-2 shadow-2xl shadow-black/50 backdrop-blur-md transition-all duration-200 ease-out origin-top ${
+          className={`absolute top-full mt-2 end-0 z-[60] flex w-[min(100vw-2rem,22rem)] flex-col gap-1.5 rounded-2xl p-2 backdrop-blur-md transition-all duration-200 ease-out origin-top ${filterDropdownWrapperClass} ${
             open
               ? 'pointer-events-auto translate-y-0 scale-100 opacity-100'
               : 'pointer-events-none -translate-y-1 scale-95 opacity-0'
           }`}
         >
           {userEmail && (
-            <p className="truncate border-b border-slate-800/80 px-2 py-1 text-xs text-slate-500" title={userEmail}>
+            <p className={`truncate border-b border-[var(--page-border)] px-2 py-1 text-xs ${themeTextMutedClass}`} title={userEmail}>
               {userEmail}
             </p>
           )}
@@ -661,11 +669,11 @@ function CollapsibleNavMenu({
           }`}
         >
           <span className={`w-8 h-8 ${utilityNavIconBadgeClass}`}>
-            <ActiveIcon className="w-4 h-4 text-indigo-200" />
+            <ActiveIcon className={`w-4 h-4 ${primaryActionAccentIconClass}`} />
           </span>
-          <span className="text-slate-100">{tabLabel(active.id)}</span>
+          <span className={themeTextClass}>{tabLabel(active.id)}</span>
           <ChevronUp
-            className={`w-4 h-4 text-slate-400 transition-transform duration-300 ease-in-out ${
+            className={`w-4 h-4 ${themeTextMutedClass} transition-transform duration-300 ease-in-out ${
               open ? 'rotate-180' : ''
             }`}
           />
@@ -674,7 +682,7 @@ function CollapsibleNavMenu({
         <div
           role="menu"
           aria-hidden={!open}
-          className={`absolute top-full mt-2 end-0 min-w-[12.5rem] p-2 rounded-2xl bg-slate-900/95 border border-slate-700/80 shadow-2xl shadow-black/40 backdrop-blur-md flex flex-col gap-1.5 transition-all duration-300 ease-in-out origin-top ${
+          className={`absolute top-full mt-2 end-0 min-w-[12.5rem] p-2 rounded-2xl backdrop-blur-md flex flex-col gap-1.5 transition-all duration-300 ease-in-out origin-top ${filterDropdownWrapperClass} ${
             open
               ? 'opacity-100 scale-100 translate-y-0 pointer-events-auto'
               : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'
@@ -683,9 +691,9 @@ function CollapsibleNavMenu({
           {TABS.map((tab, i) => tabButton(tab, i))}
           {onLogout && (
             <>
-              <div className="h-px bg-slate-700/80 my-1" />
+              <div className="h-px bg-[var(--page-border)] my-1" />
               {userEmail && (
-                <p className="px-2 py-1 text-[11px] text-slate-500 truncate" title={userEmail}>
+                <p className={`px-2 py-1 text-[11px] truncate ${themeTextMutedClass}`} title={userEmail}>
                   {userEmail}
                 </p>
               )}
@@ -761,7 +769,7 @@ function MobileBottomNav({ activeTab, onOpenProfile, onTabSelect }: MobileBottom
   return (
     <nav
       aria-label={tr('tabDashboard')}
-      className="fixed bottom-0 left-0 z-[100] flex w-full bg-white/80 pb-[env(safe-area-inset-bottom,0px)] shadow-[0_-8px_30px_-5px_rgba(0,0,0,0.1)] backdrop-blur-lg md:hidden dark:bg-gray-900/80 dark:shadow-[0_-8px_30px_-5px_rgba(0,0,0,0.5)]"
+      className="fixed bottom-0 left-0 z-[100] flex w-full border-t border-[var(--page-border)] bg-[var(--page-surface)]/90 pb-[env(safe-area-inset-bottom,0px)] shadow-[0_-8px_30px_-5px_rgba(0,0,0,0.12)] backdrop-blur-lg md:hidden"
     >
       <div dir={dir} className="flex min-h-16 w-full items-center justify-between py-1.5">
         {items.map((item) => {
@@ -782,12 +790,12 @@ function MobileBottomNav({ activeTab, onOpenProfile, onTabSelect }: MobileBottom
                 }`}
               >
                 <Icon
-                  className={`h-5 w-5 shrink-0 ${item.isActive ? 'text-emerald-500 dark:text-emerald-400' : 'text-neutral-500'}`}
+                  className={`h-5 w-5 shrink-0 ${item.isActive ? 'text-emerald-500' : themeTextMutedClass}`}
                 />
               </span>
               <span
                 className={`line-clamp-2 max-w-full whitespace-normal px-0.5 text-center text-[10px] leading-tight ${
-                  item.isActive ? 'font-medium text-emerald-500 dark:text-emerald-400' : 'text-neutral-500'
+                  item.isActive ? `font-medium text-emerald-500` : themeTextMutedClass
                 }`}
               >
                 {item.label}
@@ -1569,7 +1577,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
           <button
             type="button"
             onClick={() => shift(-1)}
-            className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl text-neutral-400 hover:bg-neutral-800 active:scale-95 transition-all"
+            className={`shrink-0 w-10 h-10 flex items-center justify-center rounded-xl active:scale-95 transition-all ${utilityIconButtonGhostClass}`}
             aria-label={tr('prev')}
           >
             <ChevronLeft className="w-5 h-5" />
@@ -1601,7 +1609,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
           <button
             type="button"
             onClick={() => shift(1)}
-            className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl text-neutral-400 hover:bg-neutral-800 active:scale-95 transition-all"
+            className={`shrink-0 w-10 h-10 flex items-center justify-center rounded-xl active:scale-95 transition-all ${utilityIconButtonGhostClass}`}
             aria-label={tr('next')}
           >
             <ChevronRight className="w-5 h-5" />
@@ -1909,11 +1917,11 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
         <div className={`space-y-5 ${showMultiChartViews ? 'mt-8' : 'mt-6'}`}>
           {breakdown.length === 0 ? (
             <div className="text-center py-12">
-              <div className="bg-neutral-900 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                <PieChartIcon className="w-8 h-8 text-neutral-600" />
+              <div className={`${emptyStateIconWellClass} w-16 h-16 mx-auto mb-4`}>
+                <PieChartIcon className={`w-8 h-8 ${themeTextMutedClass}`} />
               </div>
-              <p className="text-neutral-400">{tr('noExpensesInPeriod')}</p>
-              <p className="text-neutral-600 text-sm mt-1">{tr('choosePeriodOrAdd')}</p>
+              <p className={themeTextMutedClass}>{tr('noExpensesInPeriod')}</p>
+              <p className={`text-sm mt-1 ${typographyMutedClass}`}>{tr('choosePeriodOrAdd')}</p>
             </div>
           ) : (
             breakdown.map((b) => (
@@ -1933,7 +1941,7 @@ function ExpenseSummary({ expenses, categories }: ExpenseSummaryProps) {
                         <DisplayMoney amount={b.amount} className="inline-block" />
                       </LtrNumeric>
                     </div>
-                    <div className="h-2 rounded-full bg-neutral-800 overflow-hidden">
+                    <div className={`h-2 ${progressTrackClass}`}>
                       <div
                         className="h-full rounded-full transition-all duration-500"
                         style={{ width: `${Math.max(2, b.percentage)}%`, backgroundColor: b.hex }}
@@ -2236,11 +2244,11 @@ function SubBudgetTracker({
 
       {budget <= 0 ? (
         <div className="text-center py-8">
-          <div className="bg-neutral-800 w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3">
-            <Wallet className="w-7 h-7 text-neutral-500" />
+          <div className={`${emptyStateIconWellClass} w-14 h-14 mx-auto mb-3`}>
+            <Wallet className={`w-7 h-7 ${themeTextMutedClass}`} />
           </div>
           <p className={typographyBodyClass}>{tr('setMonthlyBudgetFirst')}</p>
-          <p className="text-neutral-500 text-sm mt-1">{tr('thenSplitSubBudgets')}</p>
+          <p className={`text-sm mt-1 ${themeTextMutedClass}`}>{tr('thenSplitSubBudgets')}</p>
         </div>
       ) : (
         <>
@@ -2641,7 +2649,7 @@ function BudgetChangeModal({
           <button
             type="button"
             onClick={onClose}
-            className="shrink-0 -mt-1 -ml-1 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 p-2 rounded-lg transition-all"
+            className={`shrink-0 -mt-1 -ml-1 p-2 rounded-lg transition-all ${utilityIconButtonGhostClass}`}
             aria-label={tr('close')}
           >
             <X className="w-5 h-5" />
@@ -2991,10 +2999,13 @@ function App() {
   const budgetRegistryRef = useRef(budgetRegistry);
   const budgetBootstrappedRef = useRef(false);
   const budgetBootstrapUserIdRef = useRef<string | null>(null);
+  /** True once the user explicitly enters a budget — blocks async bootstrap from forcing default. */
+  const userBudgetChoiceClaimedRef = useRef(false);
   const applySettingsFromCloudRef = useRef(applySettingsFromCloud);
   const applyActiveBudgetSettingsRef = useRef<
     (budgetId: string, registry: BudgetRegistryState) => void
   >(() => {});
+  const flushActiveBudgetSettingsRef = useRef<() => void>(() => {});
   const setLangRef = useRef(setLang);
   const isProfileView = activeTab === 'profile';
   const isInsideActiveBudget = appShellView === 'active-budget';
@@ -3020,12 +3031,14 @@ function App() {
       setNavOpen(false);
       const sections = Array.isArray(currencySections) ? currencySections : null;
       setProfileInitialCurrencySections(sections);
+      flushActiveBudgetSettingsRef.current();
+      applyActiveBudgetSettingsRef.current(activeBudgetId, budgetRegistryRef.current);
       if (activeTab !== 'profile') {
         profileReturnTabRef.current = activeTab as MainTabId;
       }
       setActiveTab('profile');
     },
-    [activeTab],
+    [activeTab, activeBudgetId],
   );
 
   const openSettingsExchangeRates = useCallback(() => {
@@ -3075,6 +3088,7 @@ function App() {
       budgetSettingsCacheRef.current = {};
       budgetBootstrappedRef.current = false;
       budgetBootstrapUserIdRef.current = null;
+      userBudgetChoiceClaimedRef.current = false;
       setActiveTab('dashboard');
       await signOutUser();
     } catch {
@@ -3441,21 +3455,31 @@ function App() {
 
   applySettingsFromCloudRef.current = applySettingsFromCloud;
   applyActiveBudgetSettingsRef.current = applyActiveBudgetSettings;
+  flushActiveBudgetSettingsRef.current = flushActiveBudgetSettings;
   setLangRef.current = setLang;
   appShellViewRef.current = appShellView;
   activeBudgetIdRef.current = activeBudgetId;
   budgetRegistryRef.current = budgetRegistry;
 
   const enterBudget = useCallback(
-    (budgetId: string) => {
+    (budgetId: string, registryOverride?: BudgetRegistryState) => {
+      userBudgetChoiceClaimedRef.current = true;
       flushActiveBudgetFinancial();
       flushActiveBudgetSettings();
+      const registry = registryOverride ?? budgetRegistry;
       const cached = budgetFinancialCacheRef.current[budgetId] ?? loadBudgetFinancialLocal(budgetId);
       budgetFinancialCacheRef.current[budgetId] = cached;
       setActiveBudgetId(budgetId);
       activeBudgetIdRef.current = budgetId;
       applyAppData(cached);
-      applyActiveBudgetSettings(budgetId, budgetRegistry);
+      applyActiveBudgetSettings(budgetId, registry);
+      const meta = registry.personal.find((b) => b.id === budgetId);
+      if (meta?.startDate) {
+        const [y, m, d] = meta.startDate.split('-').map(Number);
+        if (y && m) {
+          setSelectedDate(new Date(y, m - 1, d || 1));
+        }
+      }
       appShellViewRef.current = 'active-budget';
       setAppShellView('active-budget');
       setActiveTab('dashboard');
@@ -3474,12 +3498,16 @@ function App() {
       if (view === 'active-budget') return;
       flushActiveBudgetFinancial();
       flushActiveBudgetSettings();
+      if (activeTab === 'profile') {
+        setProfileInitialCurrencySections(null);
+        setActiveTab(profileReturnTabRef.current);
+      }
       appShellViewRef.current = view;
       setAppShellView(view);
       setBudgetDrawerOpen(false);
       setNavOpen(false);
     },
-    [flushActiveBudgetFinancial, flushActiveBudgetSettings],
+    [flushActiveBudgetFinancial, flushActiveBudgetSettings, activeTab],
   );
 
   const handleCreatePersonalBudget = useCallback(
@@ -3500,23 +3528,59 @@ function App() {
         ...budgetRegistry,
         personal: [...budgetRegistry.personal, meta],
       };
-      budgetFinancialCacheRef.current[id] = { ...EMPTY_USER_APP_DATA };
-      saveBudgetFinancialLocal(id, EMPTY_USER_APP_DATA);
-      budgetSettingsCacheRef.current = initializeBudgetSettingsForNewPersonalBudget(
-        meta,
-        nextRegistry,
-        buildCurrentSettingsSnapshot(),
-        budgetSettingsCacheRef.current,
-      );
-      setBudgetRegistry(nextRegistry);
-      saveBudgetRegistryLocal(nextRegistry);
-      if (user && !user.isAnonymous) {
-        void saveBudgetRegistryCloud(user.uid, nextRegistry);
-        void saveBudgetFinancialCloud(user.uid, id, EMPTY_USER_APP_DATA);
-      }
-      enterBudget(id);
+
+      const buildInitialFinancial = async (): Promise<typeof EMPTY_USER_APP_DATA> => {
+        if (!input.startDate || input.totalAmount <= 0) {
+          return { ...EMPTY_USER_APP_DATA };
+        }
+        const monthKey = input.startDate.slice(0, 7);
+        let ilsAmount = roundMoneyAmount(input.totalAmount);
+        if (displayCurrency !== 'ILS') {
+          const rates = getCachedExchangeRates() ?? (await fetchExchangeRates().catch(() => null));
+          if (rates) {
+            const converted = convertForeignToIls(input.totalAmount, displayCurrency, rates);
+            if (converted != null) {
+              ilsAmount = roundMoneyAmount(converted);
+            }
+          }
+        }
+        return {
+          ...EMPTY_USER_APP_DATA,
+          budgetsByMonth: { [monthKey]: ilsAmount },
+          budgetOriginalByMonth: {
+            [monthKey]: {
+              amount: roundMoneyAmount(input.totalAmount),
+              currency: displayCurrency as ExpenseCurrency,
+            },
+          },
+        };
+      };
+
+      void buildInitialFinancial().then((initialFinancial) => {
+        budgetFinancialCacheRef.current[id] = initialFinancial;
+        saveBudgetFinancialLocal(id, initialFinancial);
+        budgetSettingsCacheRef.current = initializeBudgetSettingsForNewPersonalBudget(
+          meta,
+          nextRegistry,
+          buildCurrentSettingsSnapshot(),
+          budgetSettingsCacheRef.current,
+        );
+        setBudgetRegistry(nextRegistry);
+        saveBudgetRegistryLocal(nextRegistry);
+        if (user && !user.isAnonymous) {
+          void saveBudgetRegistryCloud(user.uid, nextRegistry);
+          void saveBudgetFinancialCloud(user.uid, id, initialFinancial);
+        }
+        enterBudget(id, nextRegistry);
+      });
     },
-    [budgetRegistry, buildCurrentSettingsSnapshot, enterBudget, user],
+    [
+      budgetRegistry,
+      buildCurrentSettingsSnapshot,
+      displayCurrency,
+      enterBudget,
+      user,
+    ],
   );
 
   const expenseDescriptionLabel = useCallback(
@@ -3554,6 +3618,7 @@ function App() {
       if (sessionUserId !== budgetBootstrapUserIdRef.current) {
         budgetBootstrappedRef.current = false;
         budgetBootstrapUserIdRef.current = sessionUserId;
+        userBudgetChoiceClaimedRef.current = false;
       }
       const shouldBootstrapBudget = !budgetBootstrappedRef.current;
 
@@ -3592,6 +3657,7 @@ function App() {
         clearCloudManualExchangeOverrides();
         clearCloudCurrencyCommissions();
         if (shouldBootstrapBudget) {
+          budgetBootstrappedRef.current = true;
           const guestLang = readGuestLang();
           if (guestLang) {
             setLangRef.current(guestLang, { persist: false });
@@ -3600,13 +3666,17 @@ function App() {
           const registryLocal = loadBudgetRegistryLocal();
           const { registry, financialCache } = ensureDefaultPersonalBudget(registryLocal, legacy);
           setBudgetRegistry(registry);
-          budgetFinancialCacheRef.current = financialCache;
-          setActiveBudgetId(DEFAULT_MONTHLY_BUDGET_ID);
-          setAppShellView('active-budget');
-          applyAppData(financialCache[DEFAULT_MONTHLY_BUDGET_ID] ?? legacy);
-          applyActiveBudgetSettingsRef.current(DEFAULT_MONTHLY_BUDGET_ID, registry);
+          budgetFinancialCacheRef.current = {
+            ...budgetFinancialCacheRef.current,
+            ...financialCache,
+          };
+          if (!userBudgetChoiceClaimedRef.current) {
+            setActiveBudgetId(DEFAULT_MONTHLY_BUDGET_ID);
+            setAppShellView('active-budget');
+            applyAppData(financialCache[DEFAULT_MONTHLY_BUDGET_ID] ?? legacy);
+            applyActiveBudgetSettingsRef.current(DEFAULT_MONTHLY_BUDGET_ID, registry);
+          }
           setBudgetSystemReady(true);
-          budgetBootstrappedRef.current = true;
         }
         setDataReady(true);
         return;
@@ -3628,6 +3698,7 @@ function App() {
         if (cancelled) return;
 
         if (shouldBootstrapBudget) {
+          budgetBootstrappedRef.current = true;
           let registry = await loadBudgetRegistryCloud(uid);
           if (registry.personal.length === 0) {
             registry = await migrateLegacyFinancialToDefaultBudget(uid);
@@ -3641,12 +3712,13 @@ function App() {
           if (cancelled) return;
 
           budgetFinancialCacheRef.current[DEFAULT_MONTHLY_BUDGET_ID] = financial;
-          setActiveBudgetId(DEFAULT_MONTHLY_BUDGET_ID);
-          setAppShellView('active-budget');
-          applyAppData(financial);
-          applyActiveBudgetSettingsRef.current(DEFAULT_MONTHLY_BUDGET_ID, registry);
+          if (!userBudgetChoiceClaimedRef.current) {
+            setActiveBudgetId(DEFAULT_MONTHLY_BUDGET_ID);
+            setAppShellView('active-budget');
+            applyAppData(financial);
+            applyActiveBudgetSettingsRef.current(DEFAULT_MONTHLY_BUDGET_ID, registry);
+          }
           setBudgetSystemReady(true);
-          budgetBootstrappedRef.current = true;
           initialRegistry = true;
           initialFinancial = true;
           markReadyIfComplete();
@@ -3775,18 +3847,20 @@ function App() {
 
     let cancelled = false;
     suppressCloudSaveRef.current = true;
+    const subscribedBudgetId = activeBudgetId;
     const unsub = subscribeBudgetFinancial(
       user.uid,
-      activeBudgetId,
+      subscribedBudgetId,
       (data, meta) => {
         if (cancelled || meta.hasPendingWrites || appShellViewRef.current !== 'active-budget') return;
-        budgetFinancialCacheRef.current[activeBudgetId] = data;
+        if (activeBudgetIdRef.current !== subscribedBudgetId) return;
+        budgetFinancialCacheRef.current[subscribedBudgetId] = data;
         applyAppData(data);
       },
       () => {
-        if (!cancelled && appShellViewRef.current === 'active-budget') {
+        if (!cancelled && appShellViewRef.current === 'active-budget' && activeBudgetIdRef.current === subscribedBudgetId) {
           const empty = { ...EMPTY_USER_APP_DATA };
-          budgetFinancialCacheRef.current[activeBudgetId] = empty;
+          budgetFinancialCacheRef.current[subscribedBudgetId] = empty;
           applyAppData(empty);
         }
       },
@@ -4705,33 +4779,8 @@ function App() {
           </h2>
 
           <form onSubmit={handleAddExpense} className="flex flex-col gap-4">
-            {/* Row 1: Description + Amount */}
+            {/* Row 1: Category + Amount */}
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-              <div className="min-w-0 flex-1">
-                <label className={`block text-sm font-medium mb-2 ${typographyLabelClass}`}>
-                  {tr('descriptionOptional')}
-                </label>
-                <input
-                  type="text"
-                  value={newExpense.description}
-                  onChange={(e) => setNewExpense({ ...newExpense, description: e.target.value })}
-                  placeholder={tr('exampleExpensePlaceholder')}
-                  className={surfaceInputLgClass}
-                />
-              </div>
-
-              <ExpenseAmountField
-                amount={newExpense.amount}
-                currency={newExpense.currency}
-                onAmountChange={(amount) => setNewExpense({ ...newExpense, amount })}
-                onCurrencyChange={(currency) => setNewExpense({ ...newExpense, currency })}
-                onRatesReadyChange={setExpenseRatesReady}
-                onOpenExchangeRatesSettings={openSettingsExchangeRates}
-              />
-            </div>
-
-            {/* Row 2: Category + Date + Submit */}
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
               <div className="min-w-0 flex-1">
                 <label className={`block text-sm font-medium mb-2 ${typographyLabelClass}`}>{tr('category')}</label>
                 <select
@@ -4746,6 +4795,31 @@ function App() {
                   ))}
                   <option value={ADD_CUSTOM_VALUE}>{tr('addNewCategory')}</option>
                 </select>
+              </div>
+
+              <ExpenseAmountField
+                amount={newExpense.amount}
+                currency={newExpense.currency}
+                onAmountChange={(amount) => setNewExpense({ ...newExpense, amount })}
+                onCurrencyChange={(currency) => setNewExpense({ ...newExpense, currency })}
+                onRatesReadyChange={setExpenseRatesReady}
+                onOpenExchangeRatesSettings={openSettingsExchangeRates}
+              />
+            </div>
+
+            {/* Row 2: Description + Date + Submit */}
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+              <div className="w-full shrink-0 sm:w-44">
+                <label className={`block text-sm font-medium mb-2 ${typographyLabelClass}`}>
+                  {tr('descriptionOptional')}
+                </label>
+                <input
+                  type="text"
+                  value={newExpense.description}
+                  onChange={(e) => setNewExpense({ ...newExpense, description: e.target.value })}
+                  placeholder={tr('exampleExpensePlaceholder')}
+                  className={surfaceInputLgClass}
+                />
               </div>
 
               <div className="w-full shrink-0 sm:w-44">
@@ -4878,8 +4952,8 @@ function App() {
 
           {historyExpenses.length === 0 ? (
             <div className="p-10 sm:p-12 text-center">
-              <div className="bg-neutral-800 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                <TrendingDown className="w-8 h-8 text-neutral-500" />
+              <div className={`${emptyStateIconWellClass} w-16 h-16 mx-auto mb-4`}>
+                <TrendingDown className={`w-8 h-8 ${themeTextMutedClass}`} />
               </div>
               <p className={`text-base sm:text-lg ${typographyBodyClass}`}>
                 {search ? tr('noResults') : expenses.length === 0 ? tr('noExpensesYet') : tr('noExpensesForPeriod')}
@@ -5077,7 +5151,7 @@ function App() {
               <button
                 type="button"
                 onClick={handleEditExpenseCancel}
-                className="rounded-lg p-2 text-neutral-500 transition-colors hover:bg-neutral-800 hover:text-neutral-300"
+                className={`rounded-lg p-2 transition-colors ${utilityIconButtonGhostClass}`}
                 aria-label={tr('close')}
               >
                 <X className="h-5 w-5" />

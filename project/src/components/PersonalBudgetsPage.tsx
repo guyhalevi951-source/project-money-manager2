@@ -7,6 +7,9 @@ import {
   utilityNavButtonLgClass,
 } from '../styles/actionButtonStyles';
 import {
+  dashedEmptyStateClass,
+  subCardListRowClass,
+  subCardOptionRowClass,
   surfaceInputClass,
   surfaceInputLgClass,
   themeCardClass,
@@ -137,10 +140,8 @@ export default function PersonalBudgetsPage({
               key={budget.id}
               type="button"
               onClick={() => onEnterBudget(budget.id)}
-              className={`flex w-full items-center gap-4 rounded-xl border p-4 text-start transition-all hover:border-emerald-500/40 hover:bg-neutral-800/60 ${
-                isActive
-                  ? 'border-emerald-500/50 bg-emerald-950/20'
-                  : 'border-neutral-700 bg-neutral-900/50'
+              className={`${subCardListRowClass} flex items-center gap-4 ${
+                isActive ? 'border-emerald-500/50 bg-[var(--btn-filter-hover)]' : ''
               }`}
             >
               <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-400">
@@ -161,7 +162,7 @@ export default function PersonalBudgetsPage({
                   </span>
                 )}
               </span>
-              <ChevronRight className="h-5 w-5 shrink-0 text-neutral-500 rtl:rotate-180" />
+              <ChevronRight className={`h-5 w-5 shrink-0 rtl:rotate-180 ${themeTextMutedClass}`} />
             </button>
           );
         })}
@@ -171,7 +172,7 @@ export default function PersonalBudgetsPage({
         <button
           type="button"
           onClick={() => setShowCreateForm(true)}
-          className={`flex min-h-[4.5rem] w-full items-center justify-center gap-2 rounded-xl border border-dashed border-neutral-600 bg-neutral-900/30 text-sm font-medium text-neutral-400 transition-colors hover:border-emerald-500/40 hover:text-emerald-300 ${utilityNavButtonLgClass}`}
+          className={`flex min-h-[4.5rem] w-full items-center justify-center gap-2 text-sm font-medium transition-colors hover:border-emerald-500/40 ${dashedEmptyStateClass} ${themeTextMutedClass}`}
         >
           <Plus className="h-5 w-5" />
           {tr('createPersonalBudget')}
@@ -237,7 +238,7 @@ export default function PersonalBudgetsPage({
               {tr('budgetSettingsInitTitle')}
             </legend>
 
-            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-neutral-700 p-3 hover:bg-neutral-800/50">
+            <label className={`flex cursor-pointer items-start gap-3 ${subCardOptionRowClass}`}>
               <input
                 type="radio"
                 name="settingsMode"
@@ -245,10 +246,10 @@ export default function PersonalBudgetsPage({
                 onChange={() => setSettingsMode('copy-default')}
                 className="mt-1 h-4 w-4 shrink-0"
               />
-              <span className="text-sm text-neutral-300">{tr('budgetSettingsCopyDefault')}</span>
+              <span className={`text-sm ${themeTextClass}`}>{tr('budgetSettingsCopyDefault')}</span>
             </label>
 
-            <label className="flex cursor-pointer flex-col gap-2 rounded-lg border border-neutral-700 p-3 hover:bg-neutral-800/50">
+            <label className={`flex cursor-pointer flex-col gap-2 ${subCardOptionRowClass}`}>
               <span className="flex items-start gap-3">
                 <input
                   type="radio"
@@ -257,7 +258,7 @@ export default function PersonalBudgetsPage({
                   onChange={() => setSettingsMode('linked')}
                   className="mt-1 h-4 w-4 shrink-0"
                 />
-                <span className="text-sm text-neutral-300">{tr('budgetSettingsLinked')}</span>
+                <span className={`text-sm ${themeTextClass}`}>{tr('budgetSettingsLinked')}</span>
               </span>
               {settingsMode === 'linked' && (
                 <select
@@ -275,7 +276,7 @@ export default function PersonalBudgetsPage({
               )}
             </label>
 
-            <label className="flex cursor-pointer flex-col gap-2 rounded-lg border border-neutral-700 p-3 hover:bg-neutral-800/50">
+            <label className={`flex cursor-pointer flex-col gap-2 ${subCardOptionRowClass}`}>
               <span className="flex items-start gap-3">
                 <input
                   type="radio"
@@ -284,7 +285,7 @@ export default function PersonalBudgetsPage({
                   onChange={() => setSettingsMode('copy-from')}
                   className="mt-1 h-4 w-4 shrink-0"
                 />
-                <span className="text-sm text-neutral-300">{tr('budgetSettingsCopyFrom')}</span>
+                <span className={`text-sm ${themeTextClass}`}>{tr('budgetSettingsCopyFrom')}</span>
               </span>
               {settingsMode === 'copy-from' && (
                 <select

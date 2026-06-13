@@ -350,11 +350,24 @@ export const FILTER_PRESETS: Record<string, ButtonThemePreset> = {
     textColorHover: 'rgb(231 229 228)',
     borderColor: 'rgb(41 37 36 / 0.75)',
   },
+  pearl: {
+    id: 'pearl', labelHe: 'פנינה', labelEn: 'Pearl', swatch: '#F8FAFC',
+    bg: '#F8FAFC',
+    bgHover: '#F1F5F9',
+    bgActive: '#E2E8F0',
+    textColor: '#0F172A',
+    textColorHover: '#020617',
+    borderColor: '#E2E8F0',
+  },
 };
 
 // ─── TEXT / TYPOGRAPHY presets (group 5) ───────────────────────────────────────
 
 export const TEXT_PRESETS: Record<string, TextThemePreset> = {
+  ink: {
+    id: 'ink', labelHe: 'דיו', labelEn: 'Ink', swatch: '#0F172A',
+    primary: '#0F172A', secondary: '#334155', muted: '#64748B',
+  },
   white: {
     id: 'white', labelHe: 'לבן', labelEn: 'White', swatch: '#FFFFFF',
     primary: '#FFFFFF', secondary: '#FFFFFF', muted: '#FFFFFF',
@@ -491,6 +504,11 @@ export const DEFAULT_FILTER_GROUP_COLOR = 'charcoal';
 export const DEFAULT_TEXT_COLOR = 'white';
 export const DEFAULT_MAIN_CARD_SURFACE_COLOR = 'default';
 export const DEFAULT_SUB_CARD_COLOR = 'default';
+
+export const DEFAULT_LIGHT_FILTER_GROUP_COLOR = 'pearl';
+export const DEFAULT_LIGHT_TEXT_COLOR = 'ink';
+export const DEFAULT_LIGHT_MAIN_CARD_SURFACE_COLOR = 'white';
+export const DEFAULT_LIGHT_SUB_CARD_COLOR = 'mist';
 export const GUEST_TEXT_THEME_LS_KEY = 'guest_text_theme';
 
 export type TypographyMode = 'default' | 'preset' | 'custom';
@@ -546,7 +564,7 @@ export const DEFAULT_BUTTON_THEME: ButtonGroupTheme = {
   nav: 'indigo',
 };
 
-export const DEFAULT_THEME_PREFERENCES: ThemePreferences = {
+export const DEFAULT_DARK_THEME_PREFERENCES: ThemePreferences = {
   pageMode: 'dark',
   pageCustomHex: MONO_DEPTH_PAGE_BG,
   buttons: { ...DEFAULT_BUTTON_THEME },
@@ -555,6 +573,19 @@ export const DEFAULT_THEME_PREFERENCES: ThemePreferences = {
   mainCardSurfaceColor: DEFAULT_MAIN_CARD_SURFACE_COLOR,
   subCardColor: DEFAULT_SUB_CARD_COLOR,
 };
+
+export const DEFAULT_LIGHT_THEME_PREFERENCES: ThemePreferences = {
+  pageMode: 'light',
+  pageCustomHex: '#F8FAFC',
+  buttons: { ...DEFAULT_BUTTON_THEME },
+  filterGroupColor: DEFAULT_LIGHT_FILTER_GROUP_COLOR,
+  textColor: DEFAULT_LIGHT_TEXT_COLOR,
+  mainCardSurfaceColor: DEFAULT_LIGHT_MAIN_CARD_SURFACE_COLOR,
+  subCardColor: DEFAULT_LIGHT_SUB_CARD_COLOR,
+};
+
+/** @deprecated Use DEFAULT_DARK_THEME_PREFERENCES */
+export const DEFAULT_THEME_PREFERENCES: ThemePreferences = DEFAULT_DARK_THEME_PREFERENCES;
 
 /** @deprecated Use DEFAULT_THEME_PREFERENCES */
 export const DEFAULT_BUTTON_THEME_FULL = DEFAULT_THEME_PREFERENCES;
@@ -905,16 +936,61 @@ export function applyPageCanvasCSS(prefs: ThemePreferences): void {
  * Patch Cat 0 keys only — preserves Category 4–7 and button group preferences in state.
  * Use for light/dark/custom page mode toggles (Firebase + localStorage keep other keys intact).
  */
+function resolveModePaletteSwap(
+  current: string,
+  priorDefault: string,
+  targetDefault: string,
+): string {
+  if (isCustomColorChoice(current)) return current;
+  if (current === priorDefault) return targetDefault;
+  return current;
+}
+
+function alignThemeColorGroupsToMode(
+  prefs: ThemePreferences,
+  targetMode: PageThemeMode,
+): ThemePreferences {
+  if (targetMode === 'custom') return prefs;
+  const targetDefaults =
+    targetMode === 'light' ? DEFAULT_LIGHT_THEME_PREFERENCES : DEFAULT_DARK_THEME_PREFERENCES;
+  const priorDefaults =
+    targetMode === 'light' ? DEFAULT_DARK_THEME_PREFERENCES : DEFAULT_LIGHT_THEME_PREFERENCES;
+  const swap = (current: string, prior: string, target: string) =>
+    resolveModePaletteSwap(current, prior, target);
+
+  return {
+    ...prefs,
+    buttons: {
+      primary: swap(prefs.buttons.primary, priorDefaults.buttons.primary, targetDefaults.buttons.primary),
+      currency: swap(prefs.buttons.currency, priorDefaults.buttons.currency, targetDefaults.buttons.currency),
+      nav: swap(prefs.buttons.nav, priorDefaults.buttons.nav, targetDefaults.buttons.nav),
+    },
+    filterGroupColor: swap(
+      prefs.filterGroupColor,
+      priorDefaults.filterGroupColor,
+      targetDefaults.filterGroupColor,
+    ),
+    textColor: swap(prefs.textColor, priorDefaults.textColor, targetDefaults.textColor),
+    mainCardSurfaceColor: swap(
+      prefs.mainCardSurfaceColor,
+      priorDefaults.mainCardSurfaceColor,
+      targetDefaults.mainCardSurfaceColor,
+    ),
+    subCardColor: swap(prefs.subCardColor, priorDefaults.subCardColor, targetDefaults.subCardColor),
+  };
+}
+
 export function patchThemePreferencesPageMode(
   prefs: ThemePreferences,
   patch: { pageMode: PageThemeMode; pageCustomHex?: string },
 ): ThemePreferences {
-  return {
+  const withMode: ThemePreferences = {
     ...prefs,
     buttons: { ...prefs.buttons },
     pageMode: patch.pageMode,
     ...(patch.pageCustomHex !== undefined ? { pageCustomHex: patch.pageCustomHex } : {}),
   };
+  return alignThemeColorGroupsToMode(withMode, patch.pageMode);
 }
 
 function applyButtonGroupCSS(prefs: ThemePreferences): void {
@@ -962,12 +1038,19 @@ function resolveCategory4InputSurface(
   prefs: ThemePreferences,
   filter: ButtonThemePreset,
 ): { bg: string; border: string } {
-  const isDefaultFilter =
+  const isDarkDefaultFilter =
     !isCustomColorChoice(prefs.filterGroupColor) &&
     prefs.filterGroupColor === DEFAULT_FILTER_GROUP_COLOR;
+  const isLightDefaultFilter =
+    !isCustomColorChoice(prefs.filterGroupColor) &&
+    prefs.filterGroupColor === DEFAULT_LIGHT_FILTER_GROUP_COLOR;
 
-  if (isDefaultFilter) {
+  if (isDarkDefaultFilter) {
     return { bg: MONO_DEPTH_CAT4_INPUT_BG, border: MONO_DEPTH_CAT4_INPUT_BORDER };
+  }
+
+  if (isLightDefaultFilter) {
+    return { bg: LIGHT_PAGE_PALETTE.inputBg, border: LIGHT_PAGE_PALETTE.inputBorder };
   }
 
   const bg = filter.bgHover;
@@ -1117,29 +1200,32 @@ function normalizeThemePreferences(raw: Partial<ThemePreferences> | null | undef
     }
   }
 
-  return {
-    pageMode,
-    pageCustomHex,
-    buttons: {
-      primary: normalizeButtonChoice('primary', buttonsRaw?.primary ?? DEFAULT_BUTTON_THEME.primary),
-      currency: normalizeButtonChoice('currency', buttonsRaw?.currency ?? DEFAULT_BUTTON_THEME.currency),
-      nav: normalizeButtonChoice('nav', buttonsRaw?.nav ?? DEFAULT_BUTTON_THEME.nav),
+  return alignThemeColorGroupsToMode(
+    {
+      pageMode,
+      pageCustomHex,
+      buttons: {
+        primary: normalizeButtonChoice('primary', buttonsRaw?.primary ?? DEFAULT_BUTTON_THEME.primary),
+        currency: normalizeButtonChoice('currency', buttonsRaw?.currency ?? DEFAULT_BUTTON_THEME.currency),
+        nav: normalizeButtonChoice('nav', buttonsRaw?.nav ?? DEFAULT_BUTTON_THEME.nav),
+      },
+      filterGroupColor: normalizeButtonChoice('filter', legacyFilter),
+      textColor: normalizeTextColorChoice(legacyText),
+      mainCardSurfaceColor: normalizeButtonChoice(
+        'mainCard',
+        typeof rawRecord?.mainCardSurfaceColor === 'string'
+          ? rawRecord.mainCardSurfaceColor
+          : DEFAULT_MAIN_CARD_SURFACE_COLOR,
+      ),
+      subCardColor: normalizeButtonChoice(
+        'subCard',
+        typeof rawRecord?.subCardColor === 'string'
+          ? rawRecord.subCardColor
+          : DEFAULT_SUB_CARD_COLOR,
+      ),
     },
-    filterGroupColor: normalizeButtonChoice('filter', legacyFilter),
-    textColor: normalizeTextColorChoice(legacyText),
-    mainCardSurfaceColor: normalizeButtonChoice(
-      'mainCard',
-      typeof rawRecord?.mainCardSurfaceColor === 'string'
-        ? rawRecord.mainCardSurfaceColor
-        : DEFAULT_MAIN_CARD_SURFACE_COLOR,
-    ),
-    subCardColor: normalizeButtonChoice(
-      'subCard',
-      typeof rawRecord?.subCardColor === 'string'
-        ? rawRecord.subCardColor
-        : DEFAULT_SUB_CARD_COLOR,
-    ),
-  };
+    pageMode,
+  );
 }
 
 function isLegacyButtonTheme(raw: unknown): raw is ButtonGroupTheme {

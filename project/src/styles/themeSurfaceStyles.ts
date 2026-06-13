@@ -471,3 +471,35 @@ export const surfaceModalLgClass = [
   'rounded-t-3xl sm:rounded-3xl border shadow-2xl shadow-black/60',
   mainCardSurfaceColors,
 ].join(' ');
+
+/** Progress bar track — Category 4 input/filter surface. */
+export const progressTrackClass = [
+  'rounded-full overflow-hidden',
+  'bg-[var(--surface-input-bg)] border border-[var(--surface-input-border)]',
+].join(' ');
+
+/** Empty-state icon well — Category 7 sub-card depth. */
+export const emptyStateIconWellClass = [
+  'flex items-center justify-center rounded-full',
+  'bg-[var(--color-sub-cards)] border border-[var(--color-sub-cards-border)]',
+].join(' ');
+
+/** Dashed empty placeholder shell — Category 7 sub-card. */
+export const dashedEmptyStateClass = [
+  'rounded-xl border border-dashed',
+  'border-[var(--color-sub-cards-border)] bg-[var(--color-sub-cards)]',
+].join(' ');
+
+/** Selectable list row on sub-card surfaces — Category 7. */
+export const subCardListRowClass = [
+  'rounded-xl border p-4 text-start transition-all',
+  'border-[var(--color-sub-cards-border)] bg-[var(--color-sub-cards)]',
+  'hover:border-[var(--btn-primary-bg)]/40 hover:bg-[var(--btn-filter-hover)]',
+].join(' ');
+
+/** Interactive fieldset option inside forms — Category 7. */
+export const subCardOptionRowClass = [
+  'rounded-lg border p-3 transition-colors',
+  'border-[var(--color-sub-cards-border)]',
+  'hover:bg-[var(--btn-filter-hover)]',
+].join(' ');
