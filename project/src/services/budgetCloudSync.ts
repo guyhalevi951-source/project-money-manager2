@@ -8,7 +8,6 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { db } from '../firebase';
 import {
   createDefaultMonthlyBudgetMeta,
   DEFAULT_MONTHLY_BUDGET_ID,
@@ -19,6 +18,7 @@ import {
 } from './budgetArchitecture';
 import {
   EMPTY_USER_APP_DATA,
+  normalizeStoredExpense,
   parseSubBudgetsOriginalByMonth,
   type UserAppData,
 } from '../userDataStorage';
@@ -44,7 +44,9 @@ function parseRegistry(raw: Record<string, unknown> | undefined): BudgetRegistry
 function parseFinancial(raw: Record<string, unknown> | undefined): UserAppData {
   if (!raw) return { ...EMPTY_USER_APP_DATA };
   return {
-    expenses: Array.isArray(raw.expenses) ? raw.expenses : [],
+    expenses: Array.isArray(raw.expenses)
+      ? raw.expenses.map((expense) => normalizeStoredExpense(expense as UserAppData['expenses'][number]))
+      : [],
     customCategories: Array.isArray(raw.customCategories) ? raw.customCategories : [],
     budgetsByMonth:
       raw.budgetsByMonth && typeof raw.budgetsByMonth === 'object'

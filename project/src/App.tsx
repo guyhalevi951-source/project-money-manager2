@@ -78,7 +78,6 @@ import { formatTranslation, localizeCategoryLabel } from './translations';
 import {
   formatAmountParts,
   formatAmountWithSymbol,
-  formatMoneyPartsFromIls,
   symbolToCurrency,
   type AmountDisplayParts,
 } from './services/displayCurrencyUtils';
@@ -98,6 +97,7 @@ import {
 import {
   previewExpenseDisplayAmount,
   recordExpenseConversionToIlsAsync,
+  resolvePersistedExpenseConversionMeta,
 } from './services/expenseConversionService';
 import {
   currencySymbolTriggerClass,
@@ -169,6 +169,7 @@ import {
 import {
   EMPTY_USER_APP_DATA,
   loadFromLocalStorage,
+  normalizeStoredExpense,
   saveToLocalStorage,
   type StoredCustomCategory,
   type UserAppData,
@@ -201,7 +202,6 @@ import {
   armFinancialConversionGuard,
   clearFinancialConversionGuard,
   deriveRegistryTotalFromFinancialMonth,
-  projectBudgetMonthDisplayAmount,
   ensurePersonalBudgetFinancialSeeded,
   overlayFormMonthlySeed,
   isFinancialConversionGuardActive,
@@ -287,10 +287,10 @@ interface Expense {
   appliedFeePercent?: number;
   /** True when a manual exchange-rate override was used to convert this record. */
   manualRateUsed?: boolean;
-  /** Per-expense override: ignore manual rates, resolve to the historical base. */
-  disableManualRate?: boolean;
-  /** Per-expense override: drop any conversion fee multiplier for this record. */
-  disableFee?: boolean;
+  /** Persistent override: ignore manual rates, resolve from the date-scoped API rate. */
+  manualRateDisabled?: boolean;
+  /** Persistent override: drop any conversion fee multiplier for this record. */
+  feeDisabled?: boolean;
 }
 
 // Sentinel value used by the category <select> to trigger the "add custom" flow
@@ -3252,8 +3252,12 @@ function App() {
     currency: ExpenseCurrency;
     category: string;
     date: string;
-    disableManualRate: boolean;
-    disableFee: boolean;
+    manualRateDisabled: boolean;
+    feeDisabled: boolean;
+  } | null>(null);
+  const [editExpenseModifierContext, setEditExpenseModifierContext] = useState<{
+    showManualRate: boolean;
+    showFee: boolean;
   } | null>(null);
   const [editPreviewAmount, setEditPreviewAmount] = useState<number | null>(null);
   const [editExpenseRatesReady, setEditExpenseRatesReady] = useState(true);
@@ -3712,6 +3716,52 @@ function App() {
     financialLocalVersionRef.current[budgetId] = Date.now();
   }, []);
 
+  const commitFinancialPayload = useCallback(
+    (payload: UserAppData, options?: { cloud?: boolean }) => {
+      const budgetId = activeBudgetIdRef.current;
+      if (!budgetId || appShellViewRef.current !== 'active-budget') return;
+
+      writeFinancialToCache(budgetId, payload);
+      activeFinancialSnapshotRef.current = { budgetId, data: payload };
+
+      if (!options?.cloud) return;
+
+      const currentUser = auth.currentUser;
+      if (!currentUser || currentUser.isAnonymous) return;
+
+      if (financialPersistTimerRef.current != null) {
+        window.clearTimeout(financialPersistTimerRef.current);
+        financialPersistTimerRef.current = null;
+      }
+      void saveBudgetFinancialCloud(currentUser.uid, budgetId, payload).catch(() => {
+        // Non-blocking; debounced persist or a later edit will retry.
+      });
+    },
+    [writeFinancialToCache],
+  );
+
+  const buildCurrentFinancialPayload = useCallback(
+    (expenseOverride?: Expense[]): UserAppData =>
+      snapshotUserAppData({
+        expenses: expenseOverride ?? expenses,
+        customCategories,
+        budgetsByMonth,
+        budgetOriginalByMonth,
+        subBudgetsByMonth,
+        subBudgetsOriginalByMonth,
+        autoTransferByMonth,
+      }),
+    [
+      expenses,
+      customCategories,
+      budgetsByMonth,
+      budgetOriginalByMonth,
+      subBudgetsByMonth,
+      subBudgetsOriginalByMonth,
+      autoTransferByMonth,
+    ],
+  );
+
   const applyAppData = (
     data: typeof EMPTY_USER_APP_DATA,
     source = 'unspecified',
@@ -3735,7 +3785,12 @@ function App() {
       activeFinancialSnapshotRef.current = { budgetId, data: snapshot };
       writeFinancialToCache(budgetId, snapshot);
     }
-    setExpenses(data.expenses.map((e) => ({ ...e, date: normalizeDate(e.date) })));
+    setExpenses(
+      data.expenses.map((e) => ({
+        ...normalizeStoredExpense(e),
+        date: normalizeDate(e.date),
+      })),
+    );
     setCustomCategories(data.customCategories);
     setBudgetsByMonth(data.budgetsByMonth);
     setBudgetOriginalByMonth(
@@ -5106,6 +5161,8 @@ function App() {
         originalCurrency: inputCurrency,
         appliedFeePercent: conversion.appliedFeePercent,
         manualRateUsed: conversion.manualRateUsed,
+        manualRateDisabled: false,
+        feeDisabled: false,
       };
 
       const nextExpenses = [expense, ...expenses];
@@ -5197,14 +5254,19 @@ function App() {
       currency: editCurrency,
       category: expense.category,
       date: normalizeDate(expense.date),
-      disableManualRate: Boolean(expense.disableManualRate),
-      disableFee: Boolean(expense.disableFee),
+      manualRateDisabled: Boolean(expense.manualRateDisabled),
+      feeDisabled: Boolean(expense.feeDisabled),
+    });
+    setEditExpenseModifierContext({
+      showManualRate: Boolean(expense.manualRateUsed) || Boolean(expense.manualRateDisabled),
+      showFee: (expense.appliedFeePercent ?? 0) > 0 || Boolean(expense.feeDisabled),
     });
   };
 
   const handleEditExpenseCancel = () => {
     setEditingExpenseId(null);
     setEditExpenseDraft(null);
+    setEditExpenseModifierContext(null);
     setEditExpenseRatesReady(true);
     setEditPreviewAmount(null);
   };
@@ -5214,10 +5276,16 @@ function App() {
   const editDraftAmount = editExpenseDraft?.amount;
   const editDraftCurrency = editExpenseDraft?.currency;
   const editDraftDate = editExpenseDraft?.date;
-  const editDraftDisableManual = editExpenseDraft?.disableManualRate ?? false;
-  const editDraftDisableFee = editExpenseDraft?.disableFee ?? false;
+  const editDraftManualRateDisabled = editExpenseDraft?.manualRateDisabled ?? false;
+  const editDraftFeeDisabled = editExpenseDraft?.feeDisabled ?? false;
   useEffect(() => {
-    if (editDraftAmount == null || editDraftCurrency == null || editDraftDate == null) {
+    if (
+      editDraftAmount == null ||
+      editDraftCurrency == null ||
+      editDraftDate == null ||
+      !editExpenseModifierContext ||
+      (!editExpenseModifierContext.showManualRate && !editExpenseModifierContext.showFee)
+    ) {
       setEditPreviewAmount(null);
       return;
     }
@@ -5235,8 +5303,8 @@ function App() {
     void previewExpenseDisplayAmount(typed, editDraftCurrency, rates, {
       displayCurrency,
       transactionDate: date,
-      disableManualRate: editDraftDisableManual,
-      disableFee: editDraftDisableFee,
+      manualRateDisabled: editDraftManualRateDisabled,
+      feeDisabled: editDraftFeeDisabled,
     }).then((preview) => {
       if (!cancelled) {
         setEditPreviewAmount(preview?.displayAmount ?? null);
@@ -5250,8 +5318,9 @@ function App() {
     editDraftAmount,
     editDraftCurrency,
     editDraftDate,
-    editDraftDisableManual,
-    editDraftDisableFee,
+    editDraftManualRateDisabled,
+    editDraftFeeDisabled,
+    editExpenseModifierContext,
     displayCurrency,
   ]);
 
@@ -5261,7 +5330,8 @@ function App() {
     const typedAmount = parseFloat(editExpenseDraft.amount);
     if (isNaN(typedAmount) || !(typedAmount > 0)) return;
 
-    const { disableManualRate, disableFee } = editExpenseDraft;
+    const { manualRateDisabled, feeDisabled } = editExpenseDraft;
+    const prevExpense = expenses.find((expense) => expense.id === editingExpenseId);
 
     const resolveConversion = async (): Promise<{
       ilsAmount: number;
@@ -5280,8 +5350,8 @@ function App() {
         {
           displayCurrency,
           transactionDate: normalizedDate,
-          disableManualRate,
-          disableFee,
+          manualRateDisabled,
+          feeDisabled,
         },
       );
       if (recorded == null) return null;
@@ -5294,26 +5364,33 @@ function App() {
       const normalizedDate = normalizeDate(editExpenseDraft.date);
       const normalizedDescription = editExpenseDraft.description.trim();
       const roundedTypedAmount = roundMoneyAmount(typedAmount);
+      const persistedMeta = resolvePersistedExpenseConversionMeta(prevExpense, conversion, {
+        manualRateDisabled,
+        feeDisabled,
+      });
 
-      setExpenses((prev) =>
-        prev.map((expense) =>
-          expense.id === editingExpenseId
-            ? {
-                ...expense,
-                description: normalizedDescription,
-                amount: conversion.ilsAmount,
-                category: editExpenseDraft.category,
-                date: normalizedDate,
-                originalAmount: roundedTypedAmount,
-                originalCurrency: editExpenseDraft.currency,
-                appliedFeePercent: conversion.appliedFeePercent,
-                manualRateUsed: conversion.manualRateUsed,
-                disableManualRate,
-                disableFee,
-              }
-            : expense,
-        ),
+      const nextExpenses = expenses.map((expense) =>
+        expense.id === editingExpenseId
+          ? {
+              ...expense,
+              description: normalizedDescription,
+              amount: conversion.ilsAmount,
+              category: editExpenseDraft.category,
+              date: normalizedDate,
+              originalAmount: roundedTypedAmount,
+              originalCurrency: editExpenseDraft.currency,
+              appliedFeePercent: persistedMeta.appliedFeePercent,
+              manualRateUsed: persistedMeta.manualRateUsed,
+              manualRateDisabled,
+              feeDisabled,
+            }
+          : expense,
       );
+
+      const payload = buildCurrentFinancialPayload(nextExpenses);
+      setExpenses(nextExpenses);
+      commitFinancialPayload(payload, { cloud: true });
+      suppressCloudSaveRef.current = false;
 
       setRecentlyUpdatedExpenseId(editingExpenseId);
       window.setTimeout(() => {
@@ -5322,6 +5399,8 @@ function App() {
 
       setEditingExpenseId(null);
       setEditExpenseDraft(null);
+      setEditExpenseModifierContext(null);
+      setEditPreviewAmount(null);
       setEditExpenseRatesReady(true);
     });
   };
@@ -5448,64 +5527,33 @@ function App() {
   const totalExpenses = sumMoney(monthExpenses.map((expense) => expense.amount));
   const isOverBudget = totalExpenses > budget && budget > 0;
   const remaining = roundMoneyAmount(budget - totalExpenses);
-  const statusRates = getCachedExchangeRates();
-  const totalExpensesDisplayAmount = useMemo(() => {
-    if (displayCurrency === 'ILS') return roundMoneyAmount(totalExpenses);
-    if (!statusRates) return null;
-    // Hierarchical rollup: project EACH expense from its OWN immutable baseline
-    // directly into the display currency, then sum (no chained ILS conversion).
-    // Expenses with a matching baseline currency revert with zero math. Fees are
-    // off here: commission is already baked into the canonical ILS at entry, and
-    // per-line display is fee-less — so the total stays consistent with the rows.
-    const ctx = buildMoneyProjectionContext(displayCurrency, {
-      rates: statusRates,
-      applyFees: false,
-    });
-    const bases = monthExpenses.map((expense) => immutableFromExpense(expense));
-    return sumMoneyProjections(bases, displayCurrency, ctx);
-  }, [displayCurrency, monthExpenses, statusRates, totalExpenses]);
-  const budgetStatusDisplayAmount = useMemo(() => {
+  const financialProjection = useDisplayProjection();
+  const budgetOriginalForDisplay = useMemo(() => {
     const sourceKey = selectedBudgetSourceMonthKey ?? selectedMonthKey;
-    return projectBudgetMonthDisplayAmount(
-      budget,
-      sourceKey ? budgetOriginalByMonth[sourceKey] : undefined,
-      displayCurrency,
-      statusRates,
-    );
-  }, [
-    selectedBudgetSourceMonthKey,
-    selectedMonthKey,
-    budgetOriginalByMonth,
-    displayCurrency,
-    budget,
-    statusRates,
-  ]);
-  const remainingDisplayAmount = useMemo(() => {
-    if (budgetStatusDisplayAmount == null || totalExpensesDisplayAmount == null) return null;
-    return roundMoneyAmount(budgetStatusDisplayAmount - totalExpensesDisplayAmount);
-  }, [budgetStatusDisplayAmount, totalExpensesDisplayAmount]);
-  const selectedBudgetDisplayParts = useMemo(() => {
-    const sourceKey = selectedBudgetSourceMonthKey ?? selectedMonthKey;
-    const displayAmount = projectBudgetMonthDisplayAmount(
-      budget,
-      sourceKey ? budgetOriginalByMonth[sourceKey] : undefined,
-      displayCurrency,
-      statusRates,
-    );
-    if (displayAmount != null) {
-      return formatAmountParts(displayAmount, displayCurrency, {
-        forceTwoDecimals: displayCurrency !== 'ILS',
-      });
-    }
-    return formatMoneyPartsFromIls(budget, displayCurrency, statusRates);
-  }, [
-    selectedBudgetSourceMonthKey,
-    selectedMonthKey,
-    budgetOriginalByMonth,
-    displayCurrency,
-    budget,
-    statusRates,
-  ]);
+    return sourceKey ? budgetOriginalByMonth[sourceKey] : undefined;
+  }, [selectedBudgetSourceMonthKey, selectedMonthKey, budgetOriginalByMonth]);
+  const totalExpensesDisplayAmount = useMemo(
+    () => roundMoneyAmount(financialProjection.sumExpenses(monthExpenses)),
+    [financialProjection, monthExpenses],
+  );
+  const budgetDisplayAmount = useMemo(
+    () =>
+      roundMoneyAmount(
+        financialProjection.projectOriginalOrIls(budgetOriginalForDisplay, budget),
+      ),
+    [financialProjection, budgetOriginalForDisplay, budget],
+  );
+  const remainingDisplayAmount = useMemo(
+    () => roundMoneyAmount(budgetDisplayAmount - totalExpensesDisplayAmount),
+    [budgetDisplayAmount, totalExpensesDisplayAmount],
+  );
+  const selectedBudgetDisplayParts = useMemo(
+    () =>
+      formatAmountParts(budgetDisplayAmount, financialProjection.displayCurrency, {
+        forceTwoDecimals: financialProjection.displayCurrency !== 'ILS',
+      }),
+    [budgetDisplayAmount, financialProjection],
+  );
 
   useLayoutEffect(() => {
     if (appShellView !== 'active-budget' || activeTab !== 'dashboard') return;
@@ -5521,6 +5569,7 @@ function App() {
       budgetIls: budget,
       sourceMonthKey: selectedBudgetSourceMonthKey,
       displayLabel: selectedBudgetDisplayLabel,
+      budgetDisplayAmount,
       displayPartsAmount: selectedBudgetDisplayParts.amount,
       displayPartsSymbol: selectedBudgetDisplayParts.symbol,
       stateSource: 'App.tsx useState (NOT Context/Zustand)',
@@ -5540,20 +5589,24 @@ function App() {
     selectedBudgetSourceMonthKey,
     selectedBudgetDisplayLabel,
     selectedBudgetDisplayParts,
+    budgetDisplayAmount,
   ]);
 
-  const totalExpensesDisplayParts = useMemo(() => {
-    if (totalExpensesDisplayAmount != null) {
-      return formatAmountParts(totalExpensesDisplayAmount, displayCurrency);
-    }
-    return formatMoneyPartsFromIls(totalExpenses, displayCurrency, statusRates);
-  }, [totalExpensesDisplayAmount, displayCurrency, totalExpenses, statusRates]);
-  const remainingDisplayParts = useMemo(() => {
-    if (remainingDisplayAmount != null) {
-      return formatAmountParts(remainingDisplayAmount, displayCurrency);
-    }
-    return formatMoneyPartsFromIls(remaining, displayCurrency, statusRates);
-  }, [remainingDisplayAmount, displayCurrency, remaining, statusRates]);
+  const totalExpensesDisplayParts = useMemo(
+    () =>
+      formatAmountParts(totalExpensesDisplayAmount, financialProjection.displayCurrency, {
+        forceTwoDecimals: financialProjection.displayCurrency !== 'ILS',
+      }),
+    [totalExpensesDisplayAmount, financialProjection],
+  );
+  const remainingDisplayParts = useMemo(
+    () =>
+      formatAmountParts(remainingDisplayAmount, financialProjection.displayCurrency, {
+        forceTwoDecimals: financialProjection.displayCurrency !== 'ILS',
+      }),
+    [remainingDisplayAmount, financialProjection],
+  );
+  const statusRates = getCachedExchangeRates();
   const [financialCurrencyMenuAnchor, setFinancialCurrencyMenuAnchor] =
     useState<FinancialSummaryCurrencyAnchor | null>(null);
   const financialCurrencyMenuRef = useRef<HTMLDivElement>(null);
@@ -6266,12 +6319,12 @@ function App() {
                             variant="card"
                             showSecondaryLine={shouldShowExpenseEquivalentLine(expense, displayCurrency)}
                             manualBadgeLabel={
-                              !expense.disableManualRate && expense.manualRateUsed
+                              !expense.manualRateDisabled && expense.manualRateUsed
                                 ? tr('expenseManualRateBadge')
                                 : undefined
                             }
                             feeBadgeLabel={
-                              !expense.disableFee && (expense.appliedFeePercent ?? 0) > 0
+                              !expense.feeDisabled && (expense.appliedFeePercent ?? 0) > 0
                                 ? tr('expenseFeeBadge')
                                 : undefined
                             }
@@ -6350,12 +6403,12 @@ function App() {
                             originalCurrency={expense.originalCurrency}
                             showSecondaryLine={shouldShowExpenseEquivalentLine(expense, displayCurrency)}
                             manualBadgeLabel={
-                              !expense.disableManualRate && expense.manualRateUsed
+                              !expense.manualRateDisabled && expense.manualRateUsed
                                 ? tr('expenseManualRateBadge')
                                 : undefined
                             }
                             feeBadgeLabel={
-                              !expense.disableFee && (expense.appliedFeePercent ?? 0) > 0
+                              !expense.feeDisabled && (expense.appliedFeePercent ?? 0) > 0
                                 ? tr('expenseFeeBadge')
                                 : undefined
                             }
@@ -6527,55 +6580,64 @@ function App() {
                 </div>
               </div>
 
-              <div className="space-y-3 rounded-xl border border-[var(--color-sub-cards-border)] p-3 sm:p-4">
-                <label
-                  htmlFor="edit-expense-disable-manual"
-                  className="flex cursor-pointer items-center justify-between gap-3"
-                >
-                  <span className={`text-sm ${typographyBodyClass}`}>
-                    {tr('expenseRemoveManualRate')}
-                  </span>
-                  <input
-                    id="edit-expense-disable-manual"
-                    type="checkbox"
-                    checked={editExpenseDraft.disableManualRate}
-                    onChange={(e) =>
-                      setEditExpenseDraft((prev) =>
-                        prev ? { ...prev, disableManualRate: e.target.checked } : prev,
-                      )
-                    }
-                    className="h-5 w-5 shrink-0 rounded border-gray-600 bg-neutral-800 text-emerald-500 focus:ring-emerald-500/30"
-                  />
-                </label>
-                <label
-                  htmlFor="edit-expense-disable-fee"
-                  className="flex cursor-pointer items-center justify-between gap-3"
-                >
-                  <span className={`text-sm ${typographyBodyClass}`}>{tr('expenseRemoveFee')}</span>
-                  <input
-                    id="edit-expense-disable-fee"
-                    type="checkbox"
-                    checked={editExpenseDraft.disableFee}
-                    onChange={(e) =>
-                      setEditExpenseDraft((prev) =>
-                        prev ? { ...prev, disableFee: e.target.checked } : prev,
-                      )
-                    }
-                    className="h-5 w-5 shrink-0 rounded border-gray-600 bg-neutral-800 text-emerald-500 focus:ring-emerald-500/30"
-                  />
-                </label>
-                {editPreviewAmount != null && (
-                  <p className={`text-sm font-medium ${typographyBodyClass}`}>
-                    <LtrNumeric>
-                      {formatTranslation(lang, 'expenseCurrentChoicePreview', {
-                        amount: formatAmountWithSymbol(editPreviewAmount, displayCurrency, {
-                          forceTwoDecimals: displayCurrency !== 'ILS',
-                        }),
-                      })}
-                    </LtrNumeric>
-                  </p>
+              {editExpenseModifierContext &&
+                (editExpenseModifierContext.showManualRate || editExpenseModifierContext.showFee) && (
+                  <div className="space-y-3 rounded-xl border border-[var(--color-sub-cards-border)] p-3 sm:p-4">
+                    {editExpenseModifierContext.showManualRate && (
+                      <label
+                        htmlFor="edit-expense-disable-manual"
+                        className="flex cursor-pointer items-center justify-between gap-3"
+                      >
+                        <span className={`text-sm ${typographyBodyClass}`}>
+                          {tr('expenseRemoveManualRate')}
+                        </span>
+                        <input
+                          id="edit-expense-disable-manual"
+                          type="checkbox"
+                          checked={editExpenseDraft.manualRateDisabled}
+                          onChange={(e) =>
+                            setEditExpenseDraft((prev) =>
+                              prev ? { ...prev, manualRateDisabled: e.target.checked } : prev,
+                            )
+                          }
+                          className="h-5 w-5 shrink-0 rounded border-gray-600 bg-neutral-800 text-emerald-500 focus:ring-emerald-500/30"
+                        />
+                      </label>
+                    )}
+                    {editExpenseModifierContext.showFee && (
+                      <label
+                        htmlFor="edit-expense-disable-fee"
+                        className="flex cursor-pointer items-center justify-between gap-3"
+                      >
+                        <span className={`text-sm ${typographyBodyClass}`}>
+                          {tr('expenseRemoveFee')}
+                        </span>
+                        <input
+                          id="edit-expense-disable-fee"
+                          type="checkbox"
+                          checked={editExpenseDraft.feeDisabled}
+                          onChange={(e) =>
+                            setEditExpenseDraft((prev) =>
+                              prev ? { ...prev, feeDisabled: e.target.checked } : prev,
+                            )
+                          }
+                          className="h-5 w-5 shrink-0 rounded border-gray-600 bg-neutral-800 text-emerald-500 focus:ring-emerald-500/30"
+                        />
+                      </label>
+                    )}
+                    {editPreviewAmount != null && (
+                      <p className={`text-sm font-medium ${typographyBodyClass}`}>
+                        <LtrNumeric>
+                          {formatTranslation(lang, 'expenseCurrentChoicePreview', {
+                            amount: formatAmountWithSymbol(editPreviewAmount, displayCurrency, {
+                              forceTwoDecimals: displayCurrency !== 'ILS',
+                            }),
+                          })}
+                        </LtrNumeric>
+                      </p>
+                    )}
+                  </div>
                 )}
-              </div>
 
               <div className="flex items-center justify-end gap-2 pt-1">
                 <button

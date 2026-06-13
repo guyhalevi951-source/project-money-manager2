@@ -14,10 +14,30 @@ export interface StoredExpense {
   appliedFeePercent?: number;
   /** True when a manual exchange-rate override was used to convert this record. */
   manualRateUsed?: boolean;
-  /** Per-expense override: ignore manual rates, resolving to the historical base. */
-  disableManualRate?: boolean;
-  /** Per-expense override: drop any conversion fee multiplier for this record. */
-  disableFee?: boolean;
+  /** Persistent override: ignore manual rates, resolve from the date-scoped API rate. */
+  manualRateDisabled?: boolean;
+  /** Persistent override: drop any conversion fee multiplier for this record. */
+  feeDisabled?: boolean;
+}
+
+/** Normalize amounts, currency codes, and legacy override flag names on load. */
+export function normalizeStoredExpense(expense: StoredExpense): StoredExpense {
+  const legacy = expense as StoredExpense & {
+    disableManualRate?: boolean;
+    disableFee?: boolean;
+  };
+  return {
+    ...expense,
+    amount: roundMoney(Number(expense.amount ?? 0)),
+    originalAmount:
+      expense.originalAmount != null ? roundMoney(Number(expense.originalAmount)) : undefined,
+    originalCurrency:
+      expense.originalCurrency != null
+        ? normalizeStoredOriginalCurrency(expense.originalCurrency)
+        : undefined,
+    manualRateDisabled: Boolean(legacy.manualRateDisabled ?? legacy.disableManualRate),
+    feeDisabled: Boolean(legacy.feeDisabled ?? legacy.disableFee),
+  };
 }
 
 export interface StoredCustomCategory {
@@ -87,16 +107,7 @@ export function loadFromLocalStorage(): UserAppData {
 
   const savedExpenses = localStorage.getItem(LS_KEYS.expenses);
   if (savedExpenses) {
-    data.expenses = (JSON.parse(savedExpenses) as StoredExpense[]).map((expense) => ({
-      ...expense,
-      amount: roundMoney(Number(expense.amount ?? 0)),
-      originalAmount:
-        expense.originalAmount != null ? roundMoney(Number(expense.originalAmount)) : undefined,
-      originalCurrency:
-        expense.originalCurrency != null
-          ? normalizeStoredOriginalCurrency(expense.originalCurrency)
-          : undefined,
-    }));
+    data.expenses = (JSON.parse(savedExpenses) as StoredExpense[]).map(normalizeStoredExpense);
   }
 
   const savedCategories = localStorage.getItem(LS_KEYS.customCategories);

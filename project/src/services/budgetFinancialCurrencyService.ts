@@ -112,8 +112,14 @@ export function shouldRejectStaleIncomingFinancial(
   const incomingBudgets = JSON.stringify(incoming.budgetsByMonth ?? {});
   const cacheOriginal = JSON.stringify(cached.budgetOriginalByMonth ?? {});
   const incomingOriginal = JSON.stringify(incoming.budgetOriginalByMonth ?? {});
+  const cacheExpenses = JSON.stringify(cached.expenses ?? []);
+  const incomingExpenses = JSON.stringify(incoming.expenses ?? []);
 
-  return cacheBudgets !== incomingBudgets || cacheOriginal !== incomingOriginal;
+  return (
+    cacheBudgets !== incomingBudgets ||
+    cacheOriginal !== incomingOriginal ||
+    cacheExpenses !== incomingExpenses
+  );
 }
 
 export function resolveSeedMonthKey(meta: PersonalBudgetMeta): string {

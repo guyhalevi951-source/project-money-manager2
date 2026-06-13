@@ -7,10 +7,10 @@
  *   displayAmt  = project(finalIls) per resolveExpenseDisplayAmount rules
  *
  * Modifier combinations:
- *   A  Both active        → live manual (or spot) rate + fee%
- *   B  disableManualRate  → date-scoped apiRate only + fee%
- *   C  disableFee         → rate × 1.0
- *   D  Both disabled      → date-scoped apiRate × 1.0
+ *   A  Both active         → live manual (or spot) rate + fee%
+ *   B  manualRateDisabled  → date-scoped apiRate only + fee%
+ *   C  feeDisabled         → rate × 1.0
+ *   D  Both disabled       → date-scoped apiRate × 1.0
  */
 
 import { listActiveCurrencyCommissions } from './currencyCommissionService';
@@ -39,9 +39,9 @@ import {
 export type ConvertExpenseToIlsOptions = {
   displayCurrency?: ExpenseCurrency;
   /** Ignore manual overrides — resolve from the date-scoped `apiRate` only. */
-  disableManualRate?: boolean;
+  manualRateDisabled?: boolean;
   /** Drop any conversion fee/commission for this conversion. */
-  disableFee?: boolean;
+  feeDisabled?: boolean;
   /** Transaction date (`YYYY-MM-DD`) for date-scoped API rate resolution. */
   transactionDate?: string;
 };
@@ -57,8 +57,8 @@ export interface ExpenseDisplayPreview extends RecordedExpenseConversion {
 }
 
 /** Commission % for ledger conversion — honors source-currency rules (incl. global ALL). */
-function resolveExpenseLedgerFeePercent(fromCurrency: string, disableFee: boolean): number {
-  if (disableFee || fromCurrency === 'ILS') return 0;
+function resolveExpenseLedgerFeePercent(fromCurrency: string, feeDisabled: boolean): number {
+  if (feeDisabled || fromCurrency === 'ILS') return 0;
   const activeFees = toActiveFeesFromCommissionEntries(listActiveCurrencyCommissions());
   const percent = resolveActiveFeePercent(activeFees, fromCurrency) ?? 0;
   if (!(percent > 0) || percent > 100) return 0;
@@ -144,14 +144,14 @@ function computeExpenseIlsConversion(
   rates: ExchangeRates,
   options: {
     transactionDate: string;
-    disableManualRate: boolean;
-    disableFee: boolean;
+    manualRateDisabled: boolean;
+    feeDisabled: boolean;
     unitRate: number;
     manualRateUsed: boolean;
   },
 ): RecordedExpenseConversion {
   const rawIls = from === 'ILS' ? amount : smartRoundMoney(amount * options.unitRate);
-  const appliedFeePercent = resolveExpenseLedgerFeePercent(from, options.disableFee);
+  const appliedFeePercent = resolveExpenseLedgerFeePercent(from, options.feeDisabled);
   const ilsAmount = applyFeeMultiplier(rawIls, appliedFeePercent);
 
   return {
@@ -165,11 +165,11 @@ async function resolveUnitRateToIls(
   from: ExpenseCurrency,
   transactionDate: string,
   rates: ExchangeRates,
-  disableManualRate: boolean,
+  manualRateDisabled: boolean,
 ): Promise<{ rate: number; manualRateUsed: boolean } | null> {
   if (from === 'ILS') return { rate: 1, manualRateUsed: false };
 
-  if (disableManualRate) {
+  if (manualRateDisabled) {
     const apiRate = await resolveDateScopedApiRate(transactionDate, from, 'ILS', rates);
     if (apiRate == null || !(apiRate > 0)) return null;
     return { rate: apiRate, manualRateUsed: false };
@@ -182,11 +182,11 @@ function resolveUnitRateToIlsSync(
   from: ExpenseCurrency,
   transactionDate: string,
   rates: ExchangeRates,
-  disableManualRate: boolean,
+  manualRateDisabled: boolean,
 ): { rate: number; manualRateUsed: boolean } | null {
   if (from === 'ILS') return { rate: 1, manualRateUsed: false };
 
-  if (disableManualRate) {
+  if (manualRateDisabled) {
     const apiRate = resolveDateScopedApiRateSync(transactionDate, from, 'ILS', rates);
     if (apiRate == null || !(apiRate > 0)) return null;
     return { rate: apiRate, manualRateUsed: false };
@@ -211,6 +211,36 @@ export function projectExpensePrimaryDisplayAmount(
   return ilsAmount;
 }
 
+function readOverrideFlags(options?: ConvertExpenseToIlsOptions): {
+  manualRateDisabled: boolean;
+  feeDisabled: boolean;
+} {
+  const legacy = options as ConvertExpenseToIlsOptions & {
+    disableManualRate?: boolean;
+    disableFee?: boolean;
+  };
+  return {
+    manualRateDisabled: Boolean(legacy?.manualRateDisabled ?? legacy?.disableManualRate),
+    feeDisabled: Boolean(legacy?.feeDisabled ?? legacy?.disableFee),
+  };
+}
+
+/**
+ * Preserve immutable conversion metadata across edit sessions so override toggles
+ * stay reversible (manualRateUsed / appliedFeePercent are not wiped when disabled).
+ */
+export function resolvePersistedExpenseConversionMeta(
+  prev: { manualRateUsed?: boolean; appliedFeePercent?: number } | null | undefined,
+  conversion: RecordedExpenseConversion,
+  overrides: { manualRateDisabled: boolean; feeDisabled: boolean },
+): Pick<RecordedExpenseConversion, 'manualRateUsed' | 'appliedFeePercent'> {
+  const manualRateUsed = Boolean(prev?.manualRateUsed) || conversion.manualRateUsed;
+  const prevFee = prev?.appliedFeePercent ?? 0;
+  const appliedFeePercent =
+    overrides.feeDisabled && prevFee > 0 ? prevFee : conversion.appliedFeePercent;
+  return { manualRateUsed, appliedFeePercent };
+}
+
 export async function recordExpenseConversionToIlsAsync(
   amount: number,
   currency: string,
@@ -224,16 +254,15 @@ export async function recordExpenseConversionToIlsAsync(
   if (!liveRates) return null;
 
   const transactionDate = options?.transactionDate ?? getLocalTodayIso();
-  const disableManualRate = Boolean(options?.disableManualRate);
-  const disableFee = Boolean(options?.disableFee);
+  const { manualRateDisabled, feeDisabled } = readOverrideFlags(options);
 
-  const unit = await resolveUnitRateToIls(from, transactionDate, liveRates, disableManualRate);
+  const unit = await resolveUnitRateToIls(from, transactionDate, liveRates, manualRateDisabled);
   if (!unit) return null;
 
   return computeExpenseIlsConversion(amount, from, liveRates, {
     transactionDate,
-    disableManualRate,
-    disableFee,
+    manualRateDisabled,
+    feeDisabled,
     unitRate: unit.rate,
     manualRateUsed: unit.manualRateUsed,
   });
@@ -249,16 +278,15 @@ export function recordExpenseConversionToIls(
   if (!(amount > 0)) return null;
 
   const transactionDate = options?.transactionDate ?? getLocalTodayIso();
-  const disableManualRate = Boolean(options?.disableManualRate);
-  const disableFee = Boolean(options?.disableFee);
+  const { manualRateDisabled, feeDisabled } = readOverrideFlags(options);
 
-  const unit = resolveUnitRateToIlsSync(from, transactionDate, rates, disableManualRate);
+  const unit = resolveUnitRateToIlsSync(from, transactionDate, rates, manualRateDisabled);
   if (!unit) return null;
 
   return computeExpenseIlsConversion(amount, from, rates, {
     transactionDate,
-    disableManualRate,
-    disableFee,
+    manualRateDisabled,
+    feeDisabled,
     unitRate: unit.rate,
     manualRateUsed: unit.manualRateUsed,
   });

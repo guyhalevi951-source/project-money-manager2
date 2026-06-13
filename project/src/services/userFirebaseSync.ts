@@ -13,6 +13,7 @@ import { db } from '../firebase';
 import {
   EMPTY_USER_APP_DATA,
   loadFromLocalStorage,
+  normalizeStoredExpense,
   parseSubBudgetsOriginalByMonth,
   type StoredCustomCategory,
   type StoredExpense,
@@ -224,16 +225,7 @@ function parseCategories(raw: Record<string, unknown> | undefined): UserCategori
 }
 
 function parseExpenses(raw: Record<string, unknown> | undefined): StoredExpense[] {
-  return ((raw?.expenses as StoredExpense[] | undefined) ?? []).map((expense) => ({
-    ...expense,
-    amount: roundMoney(Number(expense.amount ?? 0)),
-    originalAmount:
-      expense.originalAmount != null ? roundMoney(Number(expense.originalAmount)) : undefined,
-    originalCurrency:
-      expense.originalCurrency != null
-        ? normalizeStoredOriginalCurrency(expense.originalCurrency)
-        : undefined,
-  }));
+  return ((raw?.expenses as StoredExpense[] | undefined) ?? []).map(normalizeStoredExpense);
 }
 
 function parseCloudCurrencyCommissions(
