@@ -25,11 +25,14 @@ export interface ActiveExchangeRates {
   /**
    * Optional manual pair overrides.
    * Each entry: 1 `fromCurrency` = `rate` × `toCurrency`.
+   * `pairSpecific = true`  → applies only to this exact currency pair.
+   * `pairSpecific = false` → global override; applies to every pair requested.
    */
   manualPairs?: ReadonlyArray<{
     fromCurrency: string;
     toCurrency: string;
     rate: number;
+    pairSpecific: boolean;
   }>;
 }
 
@@ -66,18 +69,25 @@ export function toActiveExchangeRatesFromSnapshot(
   rates: ExchangeRates,
   manualOverrides: ReadonlyArray<ManualExchangeOverrideEntry> = [],
 ): ActiveExchangeRates {
-  const manualPairs: Array<{ fromCurrency: string; toCurrency: string; rate: number }> = [];
+  const manualPairs: Array<{
+    fromCurrency: string;
+    toCurrency: string;
+    rate: number;
+    pairSpecific: boolean;
+  }> = [];
 
   for (const entry of manualOverrides) {
     manualPairs.push({
       fromCurrency: entry.baseCurrency,
       toCurrency: entry.quoteCurrency,
       rate: entry.rate,
+      pairSpecific: entry.pairSpecific,
     });
     manualPairs.push({
       fromCurrency: entry.quoteCurrency,
       toCurrency: entry.baseCurrency,
       rate: 1 / entry.rate,
+      pairSpecific: entry.pairSpecific,
     });
   }
 
@@ -151,11 +161,28 @@ function resolveManualPairRate(
   if (from === to) return 1;
 
   const pairs = activeExchangeRates.manualPairs ?? [];
-  const direct = pairs.find((pair) => pair.fromCurrency === from && pair.toCurrency === to);
-  if (direct && direct.rate > 0) return direct.rate;
 
-  const inverse = pairs.find((pair) => pair.fromCurrency === to && pair.toCurrency === from);
-  if (inverse && inverse.rate > 0) return 1 / inverse.rate;
+  // 1. Pair-specific match (exact currency pair only)
+  const directSpecific = pairs.find(
+    (p) => p.pairSpecific && p.fromCurrency === from && p.toCurrency === to,
+  );
+  if (directSpecific && directSpecific.rate > 0) return directSpecific.rate;
+
+  const inverseSpecific = pairs.find(
+    (p) => p.pairSpecific && p.fromCurrency === to && p.toCurrency === from,
+  );
+  if (inverseSpecific && inverseSpecific.rate > 0) return 1 / inverseSpecific.rate;
+
+  // 2. Global override (pairSpecific === false): applies to any pair via its stored direction
+  const directGlobal = pairs.find(
+    (p) => !p.pairSpecific && p.fromCurrency === from && p.toCurrency === to,
+  );
+  if (directGlobal && directGlobal.rate > 0) return directGlobal.rate;
+
+  const inverseGlobal = pairs.find(
+    (p) => !p.pairSpecific && p.fromCurrency === to && p.toCurrency === from,
+  );
+  if (inverseGlobal && inverseGlobal.rate > 0) return 1 / inverseGlobal.rate;
 
   return null;
 }

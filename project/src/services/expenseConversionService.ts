@@ -44,6 +44,18 @@ export type ConvertExpenseToIlsOptions = {
   feeDisabled?: boolean;
   /** Transaction date (`YYYY-MM-DD`) for date-scoped API rate resolution. */
   transactionDate?: string;
+  /**
+   * When set, bypass the live rate lookup and use this exact rate for
+   * the conversion (1 expense-currency = historicalManualRate × ILS).
+   * Marks `manualRateUsed = true` on the resulting record.
+   * Sourced from `historicalOverrideService.resolveHistoricalRateToIls`.
+   */
+  historicalManualRate?: number;
+  /**
+   * When set, override the live commission lookup with this exact percent.
+   * Sourced from a `HistoricalOverrideEntry.feePercent` the user accepted.
+   */
+  historicalFeePercent?: number;
 };
 
 export interface RecordedExpenseConversion {
@@ -57,8 +69,15 @@ export interface ExpenseDisplayPreview extends RecordedExpenseConversion {
 }
 
 /** Commission % for ledger conversion — honors source-currency rules (incl. global ALL). */
-function resolveExpenseLedgerFeePercent(fromCurrency: string, feeDisabled: boolean): number {
+function resolveExpenseLedgerFeePercent(
+  fromCurrency: string,
+  feeDisabled: boolean,
+  historicalFeePercent?: number,
+): number {
   if (feeDisabled || fromCurrency === 'ILS') return 0;
+  if (historicalFeePercent != null && historicalFeePercent > 0 && historicalFeePercent <= 100) {
+    return historicalFeePercent;
+  }
   const activeFees = toActiveFeesFromCommissionEntries(listActiveCurrencyCommissions());
   const percent = resolveActiveFeePercent(activeFees, fromCurrency) ?? 0;
   if (!(percent > 0) || percent > 100) return 0;
@@ -148,10 +167,15 @@ function computeExpenseIlsConversion(
     feeDisabled: boolean;
     unitRate: number;
     manualRateUsed: boolean;
+    historicalFeePercent?: number;
   },
 ): RecordedExpenseConversion {
   const rawIls = from === 'ILS' ? amount : smartRoundMoney(amount * options.unitRate);
-  const appliedFeePercent = resolveExpenseLedgerFeePercent(from, options.feeDisabled);
+  const appliedFeePercent = resolveExpenseLedgerFeePercent(
+    from,
+    options.feeDisabled,
+    options.historicalFeePercent,
+  );
   const ilsAmount = applyFeeMultiplier(rawIls, appliedFeePercent);
 
   return {
@@ -166,8 +190,14 @@ async function resolveUnitRateToIls(
   transactionDate: string,
   rates: ExchangeRates,
   manualRateDisabled: boolean,
+  historicalManualRate?: number,
 ): Promise<{ rate: number; manualRateUsed: boolean } | null> {
   if (from === 'ILS') return { rate: 1, manualRateUsed: false };
+
+  // Historical rate takes highest priority when the user accepted a past override.
+  if (historicalManualRate != null && historicalManualRate > 0) {
+    return { rate: historicalManualRate, manualRateUsed: true };
+  }
 
   if (manualRateDisabled) {
     const apiRate = await resolveDateScopedApiRate(transactionDate, from, 'ILS', rates);
@@ -183,8 +213,13 @@ function resolveUnitRateToIlsSync(
   transactionDate: string,
   rates: ExchangeRates,
   manualRateDisabled: boolean,
+  historicalManualRate?: number,
 ): { rate: number; manualRateUsed: boolean } | null {
   if (from === 'ILS') return { rate: 1, manualRateUsed: false };
+
+  if (historicalManualRate != null && historicalManualRate > 0) {
+    return { rate: historicalManualRate, manualRateUsed: true };
+  }
 
   if (manualRateDisabled) {
     const apiRate = resolveDateScopedApiRateSync(transactionDate, from, 'ILS', rates);
@@ -229,6 +264,25 @@ function readOverrideFlags(options?: ConvertExpenseToIlsOptions): {
  * Preserve immutable conversion metadata across edit sessions so override toggles
  * stay reversible (manualRateUsed / appliedFeePercent are not wiped when disabled).
  */
+export function resolveExpenseEditModifierVisibility(
+  expense: {
+    manualRateUsed?: boolean;
+    manualRateDisabled?: boolean;
+    appliedFeePercent?: number;
+    feeDisabled?: boolean;
+  } | null | undefined,
+  draft?: { manualRateDisabled?: boolean; feeDisabled?: boolean } | null,
+): { showManualRate: boolean; showFee: boolean } {
+  return {
+    showManualRate: Boolean(
+      expense?.manualRateUsed || expense?.manualRateDisabled || draft?.manualRateDisabled,
+    ),
+    showFee: Boolean(
+      (expense?.appliedFeePercent ?? 0) > 0 || expense?.feeDisabled || draft?.feeDisabled,
+    ),
+  };
+}
+
 export function resolvePersistedExpenseConversionMeta(
   prev: { manualRateUsed?: boolean; appliedFeePercent?: number } | null | undefined,
   conversion: RecordedExpenseConversion,
@@ -255,8 +309,16 @@ export async function recordExpenseConversionToIlsAsync(
 
   const transactionDate = options?.transactionDate ?? getLocalTodayIso();
   const { manualRateDisabled, feeDisabled } = readOverrideFlags(options);
+  const historicalManualRate = options?.historicalManualRate;
+  const historicalFeePercent = options?.historicalFeePercent;
 
-  const unit = await resolveUnitRateToIls(from, transactionDate, liveRates, manualRateDisabled);
+  const unit = await resolveUnitRateToIls(
+    from,
+    transactionDate,
+    liveRates,
+    manualRateDisabled,
+    historicalManualRate,
+  );
   if (!unit) return null;
 
   return computeExpenseIlsConversion(amount, from, liveRates, {
@@ -265,6 +327,7 @@ export async function recordExpenseConversionToIlsAsync(
     feeDisabled,
     unitRate: unit.rate,
     manualRateUsed: unit.manualRateUsed,
+    historicalFeePercent,
   });
 }
 
@@ -279,8 +342,16 @@ export function recordExpenseConversionToIls(
 
   const transactionDate = options?.transactionDate ?? getLocalTodayIso();
   const { manualRateDisabled, feeDisabled } = readOverrideFlags(options);
+  const historicalManualRate = options?.historicalManualRate;
+  const historicalFeePercent = options?.historicalFeePercent;
 
-  const unit = resolveUnitRateToIlsSync(from, transactionDate, rates, manualRateDisabled);
+  const unit = resolveUnitRateToIlsSync(
+    from,
+    transactionDate,
+    rates,
+    manualRateDisabled,
+    historicalManualRate,
+  );
   if (!unit) return null;
 
   return computeExpenseIlsConversion(amount, from, rates, {
@@ -289,6 +360,7 @@ export function recordExpenseConversionToIls(
     feeDisabled,
     unitRate: unit.rate,
     manualRateUsed: unit.manualRateUsed,
+    historicalFeePercent,
   });
 }
 

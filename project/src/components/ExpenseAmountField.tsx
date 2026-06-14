@@ -15,12 +15,18 @@ import {
   hasExchangeRate,
   type ExchangeRates,
 } from '../services/exchangeRateService';
-import { listActiveManualExchangeOverrides, subscribeManualOverridesUpdated } from '../services/manualExchangeOverrideService';
+import {
+  hasActiveManualOverrideForPair,
+  listActiveManualExchangeOverrides,
+  subscribeManualOverridesUpdated,
+} from '../services/manualExchangeOverrideService';
 import {
   processTransactionWithUserRules,
   toActiveExchangeRatesFromSnapshot,
   toActiveFeesFromCommissionEntries,
 } from '../services/transactionProcessingService';
+import { previewExpenseDisplayAmount } from '../services/expenseConversionService';
+import { getLocalTodayIso } from '../services/exchangeRateService';
 import CurrencyLibraryModal from './CurrencyLibraryModal';
 import CurrencyFlag from './CurrencyFlag';
 import CurrencyDetectionBanner from './CurrencyDetectionBanner';
@@ -66,6 +72,17 @@ interface ExpenseAmountFieldProps {
   onRatesReadyChange?: (ready: boolean) => void;
   lockToDisplayCurrency?: boolean;
   onOpenExchangeRatesSettings?: () => void;
+  /** Transaction date for date-scoped / historical conversion preview. */
+  transactionDate?: string;
+  /** Accepted historical manual rate (1 input currency = rate × ILS). */
+  historicalManualRate?: number;
+  /** Accepted historical commission percent for the expense currency. */
+  historicalFeePercent?: number;
+  /**
+   * Snap currency + amount + rates button to the column end (right under the amount label).
+   * Preview sub-text stacks below, left-aligned with the currency selector.
+   */
+  snapInputGroupToColumnEnd?: boolean;
 }
 
 export default function ExpenseAmountField({
@@ -76,6 +93,10 @@ export default function ExpenseAmountField({
   onRatesReadyChange,
   lockToDisplayCurrency = false,
   onOpenExchangeRatesSettings,
+  transactionDate,
+  historicalManualRate,
+  historicalFeePercent,
+  snapInputGroupToColumnEnd = false,
 }: ExpenseAmountFieldProps) {
   const { tr, displayCurrency } = useLanguage();
   const displayMeta = getCurrencyMeta(displayCurrency);
@@ -277,20 +298,114 @@ export default function ExpenseAmountField({
     );
   }, [showDisplayPreview, rates, parsedAmount, inputCurrency, displayCurrency, activeFees]);
 
-  const convertedDisplayAmount = processedPreview?.finalConvertedAmount ?? null;
-  const activeCommissionPercent = processedPreview?.appliedFeePercentage ?? 0;
+  const usesHistoricalPipeline =
+    (historicalManualRate != null && historicalManualRate > 0) ||
+    (historicalFeePercent != null && historicalFeePercent > 0);
+
+  const [historicalPreview, setHistoricalPreview] = useState<{
+    displayAmount: number;
+    appliedFeePercent: number;
+    manualRateUsed: boolean;
+  } | null>(null);
+  const [historicalPreviewLoading, setHistoricalPreviewLoading] = useState(false);
+
+  useEffect(() => {
+    if (!showDisplayPreview || !usesHistoricalPipeline || !rates || !(parsedAmount > 0)) {
+      setHistoricalPreview(null);
+      setHistoricalPreviewLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setHistoricalPreviewLoading(true);
+
+    void previewExpenseDisplayAmount(parsedAmount, inputCurrency, rates, {
+      displayCurrency,
+      transactionDate: transactionDate ?? getLocalTodayIso(),
+      historicalManualRate:
+        historicalManualRate != null && historicalManualRate > 0
+          ? historicalManualRate
+          : undefined,
+      historicalFeePercent:
+        historicalFeePercent != null && historicalFeePercent > 0
+          ? historicalFeePercent
+          : undefined,
+    })
+      .then((preview) => {
+        if (cancelled) return;
+        setHistoricalPreview(
+          preview
+            ? {
+                displayAmount: preview.displayAmount,
+                appliedFeePercent: preview.appliedFeePercent,
+                manualRateUsed: preview.manualRateUsed,
+              }
+            : null,
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setHistoricalPreviewLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    showDisplayPreview,
+    usesHistoricalPipeline,
+    rates,
+    parsedAmount,
+    inputCurrency,
+    displayCurrency,
+    transactionDate,
+    historicalManualRate,
+    historicalFeePercent,
+  ]);
+
+  const convertedDisplayAmount = usesHistoricalPipeline
+    ? historicalPreview?.displayAmount ?? null
+    : processedPreview?.finalConvertedAmount ?? null;
+  const activeCommissionPercent = usesHistoricalPipeline
+    ? historicalPreview?.appliedFeePercent ?? 0
+    : processedPreview?.appliedFeePercentage ?? 0;
 
   const convertedAmountFormatted = useMemo(() => {
     if (convertedDisplayAmount == null) return null;
     return formatAmountWithSymbol(convertedDisplayAmount, displayCurrency);
   }, [convertedDisplayAmount, displayCurrency]);
 
-  const hasActive24hManualOverride = useMemo(() => {
-    const now = Date.now();
-    return listActiveManualExchangeOverrides().some(
-      (entry) => entry.source === 'local_24h' && entry.expiresAt != null && entry.expiresAt > now,
-    );
-  }, [manualOverrideVersion]);
+  /**
+   * True only when a manual rate is genuinely active for the CURRENT pair
+   * (inputCurrency → displayCurrency), respecting the pairSpecific scope of each entry.
+   */
+  const hasActivePairManualOverride = useMemo(() => {
+    if (!showDisplayPreview) return false;
+    if (usesHistoricalPipeline && historicalPreview?.manualRateUsed) return true;
+    return hasActiveManualOverrideForPair(inputCurrency, displayCurrency);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    manualOverrideVersion,
+    showDisplayPreview,
+    inputCurrency,
+    displayCurrency,
+    usesHistoricalPipeline,
+    historicalPreview?.manualRateUsed,
+  ]);
+
+  const historicalRateLabel = useMemo(() => {
+    if (
+      !usesHistoricalPipeline ||
+      historicalManualRate == null ||
+      !(historicalManualRate > 0) ||
+      inputCurrency === 'ILS'
+    ) {
+      return null;
+    }
+    return `1 ${inputCurrency} = ${historicalManualRate.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 6,
+    })} ILS`;
+  }, [usesHistoricalPipeline, historicalManualRate, inputCurrency]);
 
   const amountInputSize = useMemo(() => getAmountInputWidth(amount), [amount]);
 
@@ -351,12 +466,29 @@ export default function ExpenseAmountField({
     setShowDetectionPrompt(false);
   }, []);
 
+  const inputRowClassName = `relative z-10 flex min-w-0 items-center gap-2 ${
+    snapInputGroupToColumnEnd ? 'w-fit max-w-full shrink-0' : 'w-full flex-wrap'
+  }`;
+
+  const previewMotionClassName = `flex min-w-0 flex-col items-start gap-1 text-sm leading-snug text-neutral-400 ${
+    snapInputGroupToColumnEnd ? 'w-full max-w-full' : 'w-full flex-wrap items-center justify-end gap-x-1.5 gap-y-1'
+  }`;
+
+  const controlsStackClassName = snapInputGroupToColumnEnd
+    ? 'ml-auto flex w-fit max-w-full min-w-0 flex-col gap-2'
+    : 'flex min-w-0 flex-col gap-2';
+
+  const controlsOuterClassName = snapInputGroupToColumnEnd
+    ? 'w-full min-w-0'
+    : 'flex min-w-0 flex-col gap-2';
+
   return (
-    <div className="flex w-full shrink-0 flex-col sm:w-auto">
+    <div className="flex w-full min-w-0 flex-col">
       <label className={`block text-sm font-medium mb-2 ${typographyLabelClass}`}>{tr('amountLabel')}</label>
 
-      <div className="flex w-full flex-col sm:w-auto">
-        <div dir="ltr" className="relative z-10 flex w-full items-center gap-2 sm:w-auto">
+      <div className={controlsOuterClassName} dir={snapInputGroupToColumnEnd ? 'ltr' : undefined}>
+        <div className={controlsStackClassName}>
+        <div dir="ltr" className={inputRowClassName}>
           <div ref={currencyMenuRef} className="relative z-20 shrink-0">
             {lockToDisplayCurrency ? (
               <div
@@ -460,7 +592,7 @@ export default function ExpenseAmountField({
             <button
               type="button"
               onClick={onOpenExchangeRatesSettings}
-              className={`h-12 ${currencyUtilityButtonLgClass}`}
+              className={`h-12 shrink-0 ${currencyUtilityButtonLgClass}`}
               title={tr('settingsCurrencySubExchange')}
               aria-label={tr('settingsCurrencySubExchange')}
             >
@@ -470,29 +602,18 @@ export default function ExpenseAmountField({
         </div>
 
         <AnimatePresence mode="wait">
-          {isMaxLengthReached ? (
-            <motion.p
-              key="amount-max-length"
-              initial={{ opacity: 0, y: -2 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2, ease: 'easeOut' }}
-              className="mt-1 text-xs text-red-500 whitespace-nowrap"
-              role="alert"
-            >
-              {tr('amountTooLarge')}
-            </motion.p>
-          ) : showDisplayPreview ? (
+          {!isMaxLengthReached && showDisplayPreview && (
             <motion.div
               key={`${inputCurrency}-${displayCurrency}-${amount}`}
-              initial={{ opacity: 0, y: -2 }}
-              animate={{ opacity: 1, y: 0 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2, ease: 'easeOut' }}
-              className="mt-1.5 max-w-full text-sm leading-snug text-neutral-400"
+              dir="ltr"
+              className={previewMotionClassName}
               aria-live="polite"
             >
-              {loading ? (
+              {loading || (usesHistoricalPipeline && historicalPreviewLoading) ? (
                 <span className="inline-flex items-center gap-1.5 text-neutral-500">
                   <Loader2 className="w-3 h-3 animate-spin shrink-0" aria-hidden />
                   {tr('loadingExchangeRates')}
@@ -500,36 +621,49 @@ export default function ExpenseAmountField({
               ) : error ? (
                 <span className="text-amber-400/80">{tr('exchangeRatesUnavailable')}</span>
               ) : convertedAmountFormatted ? (
-                <div className="flex flex-col gap-0.5">
-                  <div
-                    dir="rtl"
-                    className="flex flex-wrap items-center justify-end gap-x-1.5 gap-y-0.5 max-w-full"
-                  >
-                    <span className="inline-flex shrink-0 items-center gap-x-1.5" dir="ltr">
-                      <LtrNumeric className="inline-flex font-medium tabular-nums text-neutral-300/90 whitespace-nowrap">
-                        (≈ {convertedAmountFormatted})
-                      </LtrNumeric>
-                      <CurrencyFlag countryCode={displayMeta.countryCode} size="text" alt="" />
-                    </span>
+                <>
+                  <span className="inline-flex shrink-0 items-center gap-x-1.5">
+                    <CurrencyFlag countryCode={displayMeta.countryCode} size="text" alt="" />
+                    <LtrNumeric className="font-medium tabular-nums text-neutral-300/90 whitespace-nowrap">
+                      ≈ {convertedAmountFormatted}
+                    </LtrNumeric>
                     {activeCommissionPercent > 0 && (
-                      <span className="shrink-0 whitespace-nowrap text-neutral-500">
+                      <span className="shrink-0 whitespace-nowrap text-neutral-500 text-xs">
                         {tr('inclFeeShort')}
                       </span>
                     )}
-                  </div>
-                  {hasActive24hManualOverride && (
-                    <p className={`text-xs leading-snug text-amber-400/75 ${typographyMutedClass}`}>
+                  </span>
+                  {hasActivePairManualOverride && (
+                    <span className={`shrink-0 whitespace-nowrap text-xs text-amber-400/75 ${typographyMutedClass}`}>
                       {tr('expenseManualRateActiveReminder')}
-                    </p>
+                    </span>
                   )}
-                </div>
+                  {historicalRateLabel && (
+                    <LtrNumeric className="shrink-0 whitespace-nowrap text-xs font-medium tabular-nums text-amber-300/90">
+                      ({historicalRateLabel})
+                    </LtrNumeric>
+                  )}
+                </>
               ) : (
                 <span className="text-amber-400/80">{tr('exchangeRatesUnavailable')}</span>
               )}
             </motion.div>
-          ) : null}
+          )}
         </AnimatePresence>
+        </div>
       </div>
+
+      {isMaxLengthReached && (
+        <p
+          className={`mt-1.5 text-xs text-red-500 whitespace-nowrap ${
+            snapInputGroupToColumnEnd ? 'ml-auto w-fit max-w-full' : ''
+          }`}
+          role="alert"
+          dir="ltr"
+        >
+          {tr('amountTooLarge')}
+        </p>
+      )}
 
       <AnimatePresence>
         {!lockToDisplayCurrency && showDetectionPrompt && detectedCurrency && (

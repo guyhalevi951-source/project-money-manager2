@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   Check,
@@ -69,7 +69,10 @@ import {
 } from '../services/buttonThemeService';
 import { SETTINGS_SYNC_DEBOUNCE_MS } from '../services/settingsPersistenceEngine';
 import type { ExpenseCurrency } from '../services/exchangeRateService';
-import ProfileSettingsSections, { type ProfileCurrencySubSection } from './ProfileSettingsSections';
+import ProfileSettingsSections, {
+  SETTINGS_NAVIGATE_EVENT,
+  type ProfileCurrencySubSection,
+} from './ProfileSettingsSections';
 
 function createFreshDefaultTheme(pageMode: PageThemeMode): ThemePreferences {
   const base = pageMode === 'light' ? DEFAULT_LIGHT_THEME_PREFERENCES : DEFAULT_DARK_THEME_PREFERENCES;
@@ -176,8 +179,17 @@ export default function ProfilePage({
     buttons: { ...themePreferences.buttons },
   }));
   const [themeResetState, setThemeResetState] = useState<ThemeResetFeedback>('idle');
-  const [isThemeMasterOpen, setIsThemeMasterOpen] = useState(false);
-  const [openThemeSections, setOpenThemeSections] = useState<Set<ThemeAccordionSection>>(() => new Set());
+  const [isThemeMasterOpen, setIsThemeMasterOpen] = useState(() => {
+    const hashKey = window.location.hash.replace(/^#/, '').trim();
+    return hashKey.startsWith('settings-theme');
+  });
+  const [openThemeSections, setOpenThemeSections] = useState<Set<ThemeAccordionSection>>(() => {
+    const hashKey = window.location.hash.replace(/^#/, '').trim();
+    const next = new Set<ThemeAccordionSection>();
+    if (hashKey === 'settings-theme-page') next.add('page');
+    if (hashKey === 'settings-theme-buttons') next.add('buttons');
+    return next;
+  });
   const resetToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const toggleThemeMaster = useCallback(() => {
@@ -236,6 +248,64 @@ export default function ProfilePage({
   useEffect(() => {
     setSelectedAvatar(sanitizeAvatarUrl(currentAvatarUrl, DEFAULT_GUEST_AVATAR_URL));
   }, [currentAvatarUrl]);
+
+  // ---------------------------------------------------------------------------
+  // Hash navigation — theme accordion sections
+  // Extends the generic system to cover the theme master (settings-theme,
+  // settings-theme-page, settings-theme-buttons).
+  // useLayoutEffect + instant scroll; first mount defers 50 ms so layout settles.
+  // ---------------------------------------------------------------------------
+  useLayoutEffect(() => {
+    const THEME_HASH_MAP: Readonly<Record<string, ThemeAccordionSection | null>> = {
+      'settings-theme': null,               // open master only, no sub
+      'settings-theme-page': 'page',
+      'settings-theme-buttons': 'buttons',
+    };
+
+    let mountTimer: ReturnType<typeof setTimeout> | undefined;
+
+    function applyThemeHash(hashKey: string): void {
+      if (!(hashKey in THEME_HASH_MAP)) return;
+
+      // Always open the master.
+      setIsThemeMasterOpen(true);
+
+      // Open sub-section if required (idempotent).
+      const sub = THEME_HASH_MAP[hashKey];
+      if (sub) {
+        setOpenThemeSections((prev) =>
+          prev.has(sub) ? prev : new Set([...prev, sub]),
+        );
+      }
+
+      const el = document.getElementById(hashKey);
+      if (el) el.scrollIntoView({ behavior: 'auto', block: 'center' });
+    }
+
+    function scheduleThemeHash(hashKey: string, deferLayout: boolean): void {
+      if (!deferLayout) {
+        applyThemeHash(hashKey);
+        return;
+      }
+      if (mountTimer !== undefined) clearTimeout(mountTimer);
+      mountTimer = setTimeout(() => applyThemeHash(hashKey), 50);
+    }
+
+    // First mount: brief buffer so accordions finish layout before scroll.
+    const mountHash = window.location.hash.replace(/^#/, '').trim();
+    if (mountHash) scheduleThemeHash(mountHash, true);
+
+    // Runtime navigation when profile is already visible — scroll immediately.
+    function onNavigate(e: Event) {
+      scheduleThemeHash((e as CustomEvent<string>).detail, false);
+    }
+    window.addEventListener(SETTINGS_NAVIGATE_EVENT, onNavigate);
+
+    return () => {
+      window.removeEventListener(SETTINGS_NAVIGATE_EVENT, onNavigate);
+      if (mountTimer !== undefined) clearTimeout(mountTimer);
+    };
+  }, []); // deps: none — state setters stable; THEME_HASH_MAP is local constant
 
   const avatarOptions = useMemo(() => {
     const options: string[] = [];
@@ -364,7 +434,11 @@ export default function ProfilePage({
 
       {/* ── Color theme customization — master rounded enclosure ── */}
       <div className={subCardMasterCategoryStackClass}>
-        <MasterCategoryPanel expanded={isThemeMasterOpen} {...themeCategoryProps('mainCard')}>
+        <MasterCategoryPanel
+          id="settings-theme"
+          expanded={isThemeMasterOpen}
+          {...themeCategoryProps('mainCard')}
+        >
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -400,7 +474,7 @@ export default function ProfilePage({
               <motion.div key="theme-master-panel" {...masterCategoryBodyMotion}>
                 <MasterCategoryPanelBody>
                   <SubCardNestedStack variant="capsuleOnMain">
-                <SubCategorySectionCard>
+                <SubCategorySectionCard id="settings-theme-page">
                 <button
                   type="button"
                   onClick={() => toggleThemeSection('page')}
@@ -462,7 +536,7 @@ export default function ProfilePage({
                 </AnimatePresence>
                 </SubCategorySectionCard>
 
-                <SubCategorySectionCard>
+                <SubCategorySectionCard id="settings-theme-buttons">
                 <button
                   type="button"
                   onClick={() => toggleThemeSection('buttons')}

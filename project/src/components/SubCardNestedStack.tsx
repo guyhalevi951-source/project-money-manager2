@@ -73,9 +73,18 @@ export function SubCardNestedStack({ className, children, variant = 'capsule' }:
  * Rounded outer perimeter wrapper for one sub-category block (header + expanded body).
  * Example: מטבע תצוגה — trigger and DisplayCurrencySelector live inside this frame.
  */
-export function SubCategorySectionCard({ className, children }: { className?: string; children: ReactNode }) {
+export function SubCategorySectionCard({
+  id,
+  className,
+  children,
+}: {
+  id?: string;
+  className?: string;
+  children: ReactNode;
+}) {
   return (
     <article
+      id={id}
       className={[subCardNestedSectionCapsuleClass, className].filter(Boolean).join(' ')}
       data-sub-category-section
       {...{ [NESTED_LIST_ITEM_ATTR]: '' }}

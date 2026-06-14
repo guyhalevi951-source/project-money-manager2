@@ -45,6 +45,8 @@ import {
 import { roundMoney } from './money';
 import { parseRateCacheStore, type RateCacheStore } from './rateCacheService';
 import { normalizeStoredOriginalCurrency } from './displayCurrencyUtils';
+import { isSupportedCurrency } from '../constants/currencies';
+import { type HistoricalOverrideEntry, historicalEntryKey } from './historicalOverrideService';
 
 const DOC_ID = 'data';
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -84,6 +86,7 @@ export interface CloudManualExchangeOverride {
   quoteCurrency: ExpenseCurrency;
   rate: number;
   updatedAt: number;
+  pairSpecific?: boolean;
 }
 
 export interface CloudCurrencyCommission {
@@ -130,6 +133,7 @@ const settingsRef = (uid: string) => doc(db, 'users', uid, 'settings', DOC_ID);
 const manualOverridesRef = (uid: string) => doc(db, 'users', uid, 'manual_exchange_overrides', DOC_ID);
 const currencyCommissionsRef = (uid: string) => doc(db, 'users', uid, 'currency_commissions', DOC_ID);
 const rateCacheRef = (uid: string) => doc(db, 'users', uid, 'rate_cache', DOC_ID);
+const historicalOverridesRef = (uid: string) => doc(db, 'users', uid, 'historical_overrides', DOC_ID);
 const legacyAppRef = (uid: string) => doc(db, 'users', uid, 'data', 'app');
 
 export type SnapshotMeta = { hasPendingWrites: boolean; exists: boolean };
@@ -271,7 +275,8 @@ function parseCloudManualOverrides(
       const quoteCurrency = normalizeDisplayCurrency(item.quoteCurrency);
       const rate = typeof item.rate === 'number' ? item.rate : 0;
       const updatedAt = typeof item.updatedAt === 'number' ? item.updatedAt : Date.now();
-      return { baseCurrency, quoteCurrency, rate, updatedAt };
+      const pairSpecific = item.pairSpecific !== false;
+      return { baseCurrency, quoteCurrency, rate, updatedAt, pairSpecific };
     })
     .filter(
       (item) =>
@@ -689,6 +694,7 @@ export async function saveManualExchangeOverrideToCloud(
   fromCurrency: ExpenseCurrency,
   toCurrency: ExpenseCurrency,
   rate: number,
+  pairSpecific = true,
 ): Promise<void> {
   const normalized = normalizeOverridePair(fromCurrency, toCurrency, rate);
   if (!normalized) return;
@@ -702,6 +708,7 @@ export async function saveManualExchangeOverrideToCloud(
           baseCurrency: normalized.baseCurrency,
           quoteCurrency: normalized.quoteCurrency,
           rate: normalized.normalizedRate,
+          pairSpecific,
           createdAt: serverTimestamp(),
           updatedAt: Date.now(),
         },
@@ -846,6 +853,101 @@ export function appendSavedColor(colors: string[], hex: string): string[] {
   if (!isCustomHexColor(normalized)) return colors;
   if (colors.includes(normalized)) return colors;
   return [...colors, normalized];
+}
+
+// ---------------------------------------------------------------------------
+// Historical Overrides — cloud persistence
+// ---------------------------------------------------------------------------
+
+/** Persist a single historical override entry to Firestore (merge/upsert). */
+export async function saveHistoricalOverrideToCloud(
+  uid: string,
+  entry: HistoricalOverrideEntry,
+): Promise<void> {
+  const key = historicalEntryKey(entry);
+  await setDoc(
+    historicalOverridesRef(uid),
+    {
+      entries: {
+        [key]: {
+          date: entry.startDate,
+          startDate: entry.startDate,
+          endDate: entry.endDate,
+          fromCurrency: entry.fromCurrency,
+          toCurrency: entry.toCurrency,
+          manualRate: entry.manualRate ?? null,
+          feePercent: entry.feePercent ?? null,
+          updatedAt: entry.updatedAt,
+        },
+      },
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+/** Permanently delete a single historical override entry from Firestore. */
+export async function deleteHistoricalOverrideFromCloud(
+  uid: string,
+  entry: HistoricalOverrideEntry,
+): Promise<void> {
+  const key = historicalEntryKey(entry);
+  await setDoc(
+    historicalOverridesRef(uid),
+    {
+      entries: { [key]: deleteField() },
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+/** Load all historical overrides from Firestore for the current user. */
+export async function loadHistoricalOverridesFromCloud(
+  uid: string,
+): Promise<HistoricalOverrideEntry[]> {
+  const snap = await getDoc(historicalOverridesRef(uid));
+  if (!snap.exists()) return [];
+  const raw = (snap.data()?.entries ?? {}) as Record<string, unknown>;
+
+  return Object.values(raw)
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+    .map((item) => {
+      const legacyDate = typeof item.date === 'string' ? item.date : '';
+      const startDate =
+        typeof item.startDate === 'string' && item.startDate.length === 10
+          ? item.startDate
+          : legacyDate;
+      let endDate: string | null;
+      if (item.endDate === null || item.endDate === 'Forever' || item.endDate === 'forever') {
+        endDate = null;
+      } else if (typeof item.endDate === 'string' && item.endDate.length === 10) {
+        endDate = item.endDate;
+      } else {
+        endDate = startDate.length === 10 ? startDate : null;
+      }
+
+      return {
+        date: startDate,
+        startDate,
+        endDate,
+        fromCurrency: String(item.fromCurrency ?? '') as HistoricalOverrideEntry['fromCurrency'],
+        toCurrency: String(item.toCurrency ?? '') as HistoricalOverrideEntry['toCurrency'],
+        manualRate:
+          typeof item.manualRate === 'number' && item.manualRate > 0 ? item.manualRate : null,
+        feePercent:
+          typeof item.feePercent === 'number' && item.feePercent > 0 ? item.feePercent : null,
+        updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : Date.now(),
+      };
+    })
+    .filter(
+      (e): e is HistoricalOverrideEntry =>
+        e.startDate.length === 10 &&
+        (e.endDate === null || e.endDate.length === 10) &&
+        e.startDate <= (e.endDate ?? e.startDate) &&
+        isSupportedCurrency(e.fromCurrency) &&
+        isSupportedCurrency(e.toCurrency),
+    );
 }
 
 export { EMPTY_USER_APP_DATA };

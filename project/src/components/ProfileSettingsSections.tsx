@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronDown, ChevronUp, Coins, Languages, SlidersHorizontal } from 'lucide-react';
-import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useState, type Dispatch, type SetStateAction } from 'react';
 import { useLanguage } from '../LanguageContext';
 import { writePreferredLanguage } from '../services/authLanguagePreference';
 import type { ExpenseCurrency } from '../services/exchangeRateService';
@@ -34,6 +34,34 @@ import {
 
 export type ProfileCurrencySubSection = 'display' | 'exchange' | 'manual-rate' | 'commissions';
 type MainSection = 'general' | 'currencies';
+
+// ---------------------------------------------------------------------------
+// Hash-based navigation config
+// ---------------------------------------------------------------------------
+
+/** Custom DOM event name for same-page Settings navigation. */
+export const SETTINGS_NAVIGATE_EVENT = 'settings:navigate';
+
+type HashTarget = {
+  master: MainSection;
+  sub?: ProfileCurrencySubSection;
+};
+
+/**
+ * Maps a URL hash key (without `#`) to the accordion state that must be opened
+ * and the element `id` that should be scrolled into view.
+ *
+ * Hash keys use the `settings-` prefix to avoid collision with any other anchors.
+ * The element `id` equals the hash key exactly, so `document.getElementById(hashKey)` works.
+ */
+const SETTINGS_HASH_MAP: Readonly<Record<string, HashTarget>> = {
+  'settings-currencies': { master: 'currencies' },
+  'settings-display':    { master: 'currencies', sub: 'display' },
+  'settings-exchange':   { master: 'currencies', sub: 'exchange' },
+  'settings-manual-rate': { master: 'currencies', sub: 'manual-rate' },
+  'settings-commissions': { master: 'currencies', sub: 'commissions' },
+  'settings-general':    { master: 'general' },
+};
 
 const masterCategoryBodyMotion = {
   initial: { opacity: 0 },
@@ -72,18 +100,86 @@ export default function ProfileSettingsSections({
 }: ProfileSettingsSectionsProps) {
   const { tr, lang, dir, setLang, keepOriginalValues, setKeepOriginalValues } = useLanguage();
 
-  const [mainOpen, setMainOpen] = useState<Set<MainSection>>(() =>
-    initialCurrencySections?.length ? new Set(['currencies']) : new Set(),
-  );
-  const [currencySubOpen, setCurrencySubOpen] = useState<Set<ProfileCurrencySubSection>>(
-    () => new Set(initialCurrencySections ?? []),
-  );
+  const [mainOpen, setMainOpen] = useState<Set<MainSection>>(() => {
+    const next = new Set<MainSection>();
+    if (initialCurrencySections?.length) {
+      next.add('currencies');
+    }
+    const hashKey = window.location.hash.replace(/^#/, '').trim();
+    const hashTarget = hashKey ? SETTINGS_HASH_MAP[hashKey] : undefined;
+    if (hashTarget) {
+      next.add(hashTarget.master);
+    }
+    return next;
+  });
+  const [currencySubOpen, setCurrencySubOpen] = useState<Set<ProfileCurrencySubSection>>(() => {
+    const next = new Set<ProfileCurrencySubSection>(initialCurrencySections ?? []);
+    const hashKey = window.location.hash.replace(/^#/, '').trim();
+    const hashTarget = hashKey ? SETTINGS_HASH_MAP[hashKey] : undefined;
+    if (hashTarget?.sub) {
+      next.add(hashTarget.sub);
+    }
+    return next;
+  });
 
   useEffect(() => {
     if (!initialCurrencySections?.length) return;
     setMainOpen((prev) => new Set([...prev, 'currencies']));
     setCurrencySubOpen(new Set(initialCurrencySections));
   }, [initialCurrencySections]);
+
+  // ---------------------------------------------------------------------------
+  // Generic hash / anchor navigation
+  // Handles both fresh mounts (URL already has a hash) and same-page navigation
+  // (profile tab already visible — triggered via the SETTINGS_NAVIGATE_EVENT).
+  // useLayoutEffect + instant scroll; first mount defers 50 ms so layout settles.
+  // ---------------------------------------------------------------------------
+  useLayoutEffect(() => {
+    let mountTimer: ReturnType<typeof setTimeout> | undefined;
+
+    function applyHash(hashKey: string): void {
+      const target = SETTINGS_HASH_MAP[hashKey];
+      if (!target) return;
+
+      // Open master section (idempotent).
+      setMainOpen((prev) =>
+        prev.has(target.master) ? prev : new Set([...prev, target.master]),
+      );
+      // Open sub-section if required (idempotent).
+      if (target.sub) {
+        setCurrencySubOpen((prev) =>
+          prev.has(target.sub!) ? prev : new Set([...prev, target.sub!]),
+        );
+      }
+
+      const el = document.getElementById(hashKey);
+      if (el) el.scrollIntoView({ behavior: 'auto', block: 'center' });
+    }
+
+    function scheduleHash(hashKey: string, deferLayout: boolean): void {
+      if (!deferLayout) {
+        applyHash(hashKey);
+        return;
+      }
+      if (mountTimer !== undefined) clearTimeout(mountTimer);
+      mountTimer = setTimeout(() => applyHash(hashKey), 50);
+    }
+
+    // First mount: brief buffer so accordions finish layout before scroll.
+    const mountHash = window.location.hash.replace(/^#/, '').trim();
+    if (mountHash) scheduleHash(mountHash, true);
+
+    // Runtime navigation when profile is already visible — scroll immediately.
+    function onNavigate(e: Event) {
+      scheduleHash((e as CustomEvent<string>).detail, false);
+    }
+    window.addEventListener(SETTINGS_NAVIGATE_EVENT, onNavigate);
+
+    return () => {
+      window.removeEventListener(SETTINGS_NAVIGATE_EVENT, onNavigate);
+      if (mountTimer !== undefined) clearTimeout(mountTimer);
+    };
+  }, []); // deps: none — state setters are stable; SETTINGS_HASH_MAP is module-level constant
 
   const isMainOpen = useCallback((section: MainSection) => mainOpen.has(section), [mainOpen]);
   const toggleMain = useCallback(
@@ -107,7 +203,11 @@ export default function ProfileSettingsSections({
 
   return (
     <section className={subCardMasterCategoryStackClass}>
-      <MasterCategoryPanel expanded={isMainOpen('currencies')} {...themeCategoryProps('mainCard')}>
+      <MasterCategoryPanel
+        id="settings-currencies"
+        expanded={isMainOpen('currencies')}
+        {...themeCategoryProps('mainCard')}
+      >
         <button
           type="button"
           onClick={() => toggleMain('currencies')}
@@ -141,7 +241,7 @@ export default function ProfileSettingsSections({
             <motion.div key="profile-settings-currencies" {...masterCategoryBodyMotion}>
               <MasterCategoryPanelBody>
                 <SubCardNestedStack variant="capsuleOnMain">
-                  <SubCategorySectionCard>
+                  <SubCategorySectionCard id="settings-display">
                     <button
                       type="button"
                       onClick={() => toggleCurrencySub('display')}
@@ -174,7 +274,7 @@ export default function ProfileSettingsSections({
                     </AnimatePresence>
                   </SubCategorySectionCard>
 
-                  <SubCategorySectionCard>
+                  <SubCategorySectionCard id="settings-exchange">
                     <button
                       type="button"
                       onClick={() => toggleCurrencySub('exchange')}
@@ -213,7 +313,7 @@ export default function ProfileSettingsSections({
                     </AnimatePresence>
                   </SubCategorySectionCard>
 
-                  <SubCategorySectionCard>
+                  <SubCategorySectionCard id="settings-manual-rate">
                     <button
                       type="button"
                       onClick={() => toggleCurrencySub('manual-rate')}
@@ -252,7 +352,7 @@ export default function ProfileSettingsSections({
                     </AnimatePresence>
                   </SubCategorySectionCard>
 
-                  <SubCategorySectionCard>
+                  <SubCategorySectionCard id="settings-commissions">
                     <button
                       type="button"
                       onClick={() => toggleCurrencySub('commissions')}
@@ -297,7 +397,11 @@ export default function ProfileSettingsSections({
         </AnimatePresence>
       </MasterCategoryPanel>
 
-      <MasterCategoryPanel expanded={isMainOpen('general')} {...themeCategoryProps('mainCard')}>
+      <MasterCategoryPanel
+        id="settings-general"
+        expanded={isMainOpen('general')}
+        {...themeCategoryProps('mainCard')}
+      >
         <button
           type="button"
           onClick={() => toggleMain('general')}

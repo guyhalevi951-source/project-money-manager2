@@ -37,6 +37,7 @@ export function normalizeStoredExpense(expense: StoredExpense): StoredExpense {
         : undefined,
     manualRateDisabled: Boolean(legacy.manualRateDisabled ?? legacy.disableManualRate),
     feeDisabled: Boolean(legacy.feeDisabled ?? legacy.disableFee),
+    manualRateUsed: Boolean(expense.manualRateUsed),
   };
 }
 
