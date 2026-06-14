@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowRight, Globe, History, Pencil, RotateCcw, Search, Trash2, X } from 'lucide-react';
+import { Globe, History, Pencil, RotateCcw, Search, Trash2, X } from 'lucide-react';
 import { auth } from '../firebase';
 import { LtrNumeric, useLanguage } from '../LanguageContext';
 import {
@@ -22,11 +22,16 @@ import {
 } from '../services/currencyCommissionService';
 import CurrencyFlag from './CurrencyFlag';
 import {
+  canonicalizeHistoricalRatePair,
   deleteHistoricalOverrideEntry,
   historicalDateInRange,
   historicalEntryKey,
   listHistoricalOverrides,
+  normalizeHistoricalRateEntry,
+  normalizeRateValueForCanonicalStorage,
+  resolveHistoricalFeeCurrency,
   subscribeHistoricalOverridesUpdated,
+  validateHistoricalOverrideUpdate,
   updateHistoricalOverrideEntry,
   type HistoricalOverrideEntry,
 } from '../services/historicalOverrideService';
@@ -66,18 +71,19 @@ interface HistoricalLogModalProps {
   onUpdateEntry?: (
     previousEntry: HistoricalOverrideEntry,
     updatedEntry: HistoricalOverrideEntry,
-  ) => void | Promise<void>;
+  ) => boolean | void | Promise<boolean | void>;
 }
 
 interface HistoricalEditDraft {
   startDate: string;
   endDate: string;
-  endForever: boolean;
   fromCurrency: ExpenseCurrency;
   toCurrency: ExpenseCurrency;
   manualRate: string;
   feePercent: string;
   feeCurrency: CommissionCurrency;
+  applyAutomatically: boolean;
+  hideBannerPermanently: boolean;
 }
 
 const RATE_CURRENCY_OPTIONS = CORE_CURRENCY_CODES as readonly ExpenseCurrency[];
@@ -117,42 +123,62 @@ function isGlobalHistoricalFeeEntry(entry: HistoricalOverrideEntry): boolean {
   );
 }
 
-function resolveHistoricalFeeCurrency(entry: HistoricalOverrideEntry): ExpenseCurrency | null {
-  if (isGlobalHistoricalFeeEntry(entry)) return null;
-  if (entry.fromCurrency === 'ILS') return entry.toCurrency;
-  if (entry.toCurrency === 'ILS') return entry.fromCurrency;
-  return entry.fromCurrency;
+function resolveHistoricalFeeCurrencyLocal(entry: HistoricalOverrideEntry): ExpenseCurrency | null {
+  const code = resolveHistoricalFeeCurrency(entry);
+  return code === GLOBAL_COMMISSION_CURRENCY ? null : code;
 }
 
-function formatDateRangeLabel(
-  entry: HistoricalOverrideEntry,
-  foreverLabel: string,
-): string {
-  if (entry.endDate === null) {
-    return `${entry.startDate} ➡️ ${foreverLabel}`;
-  }
+function formatDateRangeLabel(entry: HistoricalOverrideEntry): string {
   if (entry.startDate === entry.endDate) {
     return entry.startDate;
   }
   return `${entry.startDate} ➡️ ${entry.endDate}`;
 }
 
+function canonicalRateEditDraft(draft: HistoricalEditDraft): HistoricalEditDraft {
+  if (draft.fromCurrency === draft.toCurrency) return draft;
+
+  const { fromCurrency, toCurrency } = canonicalizeHistoricalRatePair(
+    draft.fromCurrency,
+    draft.toCurrency,
+  );
+
+  if (fromCurrency === draft.fromCurrency && toCurrency === draft.toCurrency) {
+    return draft;
+  }
+
+  const parsedRate = Number.parseFloat(draft.manualRate.replace(/,/g, ''));
+  const manualRate =
+    Number.isFinite(parsedRate) && parsedRate > 0
+      ? formatRateValue(1 / parsedRate)
+      : draft.manualRate;
+
+  return { ...draft, fromCurrency, toCurrency, manualRate };
+}
+
 function buildEditDraft(entry: HistoricalOverrideEntry, scope: HistoricalLogScope): HistoricalEditDraft {
+  const rateEntry =
+    scope === 'rate' && entry.manualRate != null && entry.manualRate > 0
+      ? normalizeHistoricalRateEntry(entry)
+      : entry;
   const feeCurrency: CommissionCurrency = isGlobalHistoricalFeeEntry(entry)
     ? GLOBAL_COMMISSION_CURRENCY
-    : (resolveHistoricalFeeCurrency(entry) ?? entry.fromCurrency);
+    : (resolveHistoricalFeeCurrencyLocal(entry) ?? entry.fromCurrency);
 
   return {
-    startDate: entry.startDate,
-    endDate: entry.endDate ?? entry.startDate,
-    endForever: entry.endDate === null,
-    fromCurrency: entry.fromCurrency,
-    toCurrency: entry.toCurrency,
+    startDate: rateEntry.startDate,
+    endDate: rateEntry.endDate,
+    fromCurrency: rateEntry.fromCurrency,
+    toCurrency: rateEntry.toCurrency,
     manualRate:
-      entry.manualRate != null && entry.manualRate > 0 ? formatRateValue(entry.manualRate) : '',
+      rateEntry.manualRate != null && rateEntry.manualRate > 0
+        ? formatRateValue(rateEntry.manualRate)
+        : '',
     feePercent:
       entry.feePercent != null && entry.feePercent > 0 ? entry.feePercent.toFixed(2) : '',
     feeCurrency,
+    applyAutomatically: entry.applyAutomatically ?? false,
+    hideBannerPermanently: entry.hideBannerPermanently ?? false,
   };
 }
 
@@ -174,26 +200,33 @@ function buildUpdatedEntryFromDraft(
   draft: HistoricalEditDraft,
   scope: HistoricalLogScope,
 ): HistoricalOverrideEntry | null {
-  if (!draft.startDate) return null;
-  if (!draft.endForever && !draft.endDate) return null;
-  if (!draft.endForever && draft.startDate > draft.endDate) return null;
+  if (!draft.startDate || !draft.endDate) return null;
+  if (draft.startDate > draft.endDate) return null;
 
-  const endDate = draft.endForever ? null : draft.endDate;
+  const endDate = draft.endDate;
 
   if (scope === 'rate') {
     const rate = Number.parseFloat(draft.manualRate.replace(/,/g, ''));
     if (!Number.isFinite(rate) || rate <= 0) return null;
     if (draft.fromCurrency === draft.toCurrency) return null;
 
+    const canonical = normalizeRateValueForCanonicalStorage(
+      draft.fromCurrency,
+      draft.toCurrency,
+      rate,
+    );
+
     return {
       ...previous,
       date: draft.startDate,
       startDate: draft.startDate,
       endDate,
-      fromCurrency: draft.fromCurrency,
-      toCurrency: draft.toCurrency,
-      manualRate: rate,
+      fromCurrency: canonical.fromCurrency,
+      toCurrency: canonical.toCurrency,
+      manualRate: canonical.manualRate,
       feePercent: previous.feePercent,
+      applyAutomatically: draft.applyAutomatically,
+      hideBannerPermanently: draft.hideBannerPermanently,
     };
   }
 
@@ -213,6 +246,8 @@ function buildUpdatedEntryFromDraft(
     toCurrency: pair.toCurrency,
     manualRate: null,
     feePercent: fee,
+    applyAutomatically: draft.applyAutomatically,
+    hideBannerPermanently: draft.hideBannerPermanently,
   };
 }
 
@@ -250,13 +285,15 @@ function HistoryRow({
   const isDeleting = deletingKey === rowKey;
   const restoreKind = !editMode && onRestore ? resolveRestoreKind(entry, scope) : null;
 
-  const fromMeta = getCurrencyMeta(entry.fromCurrency);
-  const toMeta = getCurrencyMeta(entry.toCurrency);
+  const displayRateEntry =
+    entry.manualRate != null && entry.manualRate > 0 ? normalizeHistoricalRateEntry(entry) : entry;
+  const displayFromMeta = getCurrencyMeta(displayRateEntry.fromCurrency);
+  const displayToMeta = getCurrencyMeta(displayRateEntry.toCurrency);
 
   const hasRate = entry.manualRate != null && entry.manualRate > 0;
   const hasFee = entry.feePercent != null && entry.feePercent > 0;
   const isFeeOnlyEntry = hasFee && !hasRate;
-  const feeCurrency = isFeeOnlyEntry ? resolveHistoricalFeeCurrency(entry) : null;
+  const feeCurrency = isFeeOnlyEntry ? resolveHistoricalFeeCurrencyLocal(entry) : null;
   const isGlobalFee = isFeeOnlyEntry && isGlobalHistoricalFeeEntry(entry);
 
   const draft = isEditing ? editDraft : null;
@@ -281,37 +318,20 @@ function HistoryRow({
               aria-label={tr('historicalLogStartDate')}
               className={`w-full [color-scheme:dark] ${surfaceInputSmClass}`}
             />
-            <div className="flex items-center gap-1">
-              <input
-                type="date"
-                value={draft.endForever ? '' : draft.endDate}
-                disabled={draft.endForever}
-                onChange={(e) => onDraftChange({ endDate: e.target.value, endForever: false })}
-                aria-label={tr('historicalLogEndDate')}
-                className={`min-w-0 flex-1 [color-scheme:dark] disabled:opacity-50 ${surfaceInputSmClass}`}
-              />
-            </div>
-            <label className="flex items-center gap-1.5 text-[10px] text-neutral-400">
-              <input
-                type="checkbox"
-                checked={draft.endForever}
-                onChange={(e) =>
-                  onDraftChange({
-                    endForever: e.target.checked,
-                    endDate: e.target.checked ? draft.startDate : draft.endDate,
-                  })
-                }
-                className="rounded border-neutral-600"
-              />
-              {tr('historicalLogEndDateForever')}
-            </label>
+            <input
+              type="date"
+              value={draft.endDate}
+              onChange={(e) => onDraftChange({ endDate: e.target.value })}
+              aria-label={tr('historicalLogEndDate')}
+              className={`w-full [color-scheme:dark] ${surfaceInputSmClass}`}
+            />
           </>
         ) : (
           <span
             dir="ltr"
             className="inline-flex shrink-0 items-center rounded-lg border border-neutral-700/60 bg-neutral-800/60 px-2.5 py-1 font-mono text-[11px] font-semibold tabular-nums text-neutral-300"
           >
-            {formatDateRangeLabel(entry, tr('historicalLogEndDateForever'))}
+            {formatDateRangeLabel(entry)}
           </span>
         )}
       </div>
@@ -342,7 +362,12 @@ function HistoryRow({
                 <select
                   value={draft.fromCurrency}
                   onChange={(e) =>
-                    onDraftChange({ fromCurrency: e.target.value as ExpenseCurrency })
+                    onDraftChange(
+                      canonicalRateEditDraft({
+                        ...draft,
+                        fromCurrency: e.target.value as ExpenseCurrency,
+                      }),
+                    )
                   }
                   className={`min-w-[5rem] ${surfaceInputSmClass}`}
                   aria-label={tr('exchangeRateMainCurrency')}
@@ -351,11 +376,22 @@ function HistoryRow({
                     <option key={`from-${code}`} value={code}>{code}</option>
                   ))}
                 </select>
-                <ArrowRight className="h-3.5 w-3.5 shrink-0 text-neutral-500" aria-hidden />
+                <span
+                  className="shrink-0 text-xs font-semibold text-neutral-400"
+                  aria-hidden
+                  title={tr('historicalLogBidirectionalPair')}
+                >
+                  ↔
+                </span>
                 <select
                   value={draft.toCurrency}
                   onChange={(e) =>
-                    onDraftChange({ toCurrency: e.target.value as ExpenseCurrency })
+                    onDraftChange(
+                      canonicalRateEditDraft({
+                        ...draft,
+                        toCurrency: e.target.value as ExpenseCurrency,
+                      }),
+                    )
                   }
                   className={`min-w-[5rem] ${surfaceInputSmClass}`}
                   aria-label={tr('exchangeRateSecondaryCurrency')}
@@ -385,13 +421,18 @@ function HistoryRow({
           ) : (
             <>
               <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-neutral-200">
-                <CurrencyFlag countryCode={fromMeta.countryCode} size="xs" alt={fromMeta.name} />
-                <span dir="ltr">{entry.fromCurrency}</span>
+                <CurrencyFlag countryCode={displayFromMeta.countryCode} size="xs" alt={displayFromMeta.name} />
+                <span dir="ltr">{displayRateEntry.fromCurrency}</span>
               </span>
-              <ArrowRight className="h-3.5 w-3.5 shrink-0 text-neutral-500" aria-hidden />
+              <span
+                className="shrink-0 text-xs font-semibold text-neutral-500"
+                aria-label={tr('historicalLogBidirectionalPair')}
+              >
+                ↔
+              </span>
               <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-neutral-200">
-                <CurrencyFlag countryCode={toMeta.countryCode} size="xs" alt={toMeta.name} />
-                <span dir="ltr">{entry.toCurrency}</span>
+                <CurrencyFlag countryCode={displayToMeta.countryCode} size="xs" alt={displayToMeta.name} />
+                <span dir="ltr">{displayRateEntry.toCurrency}</span>
               </span>
             </>
           )}
@@ -428,9 +469,12 @@ function HistoryRow({
             <>
               {hasRate && (
                 <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-300">
-                  <span className={themeTextMutedClass + ' text-[10px]'}>{tr('historicalLogRate')}</span>
+                  <span className={themeTextMutedClass + ' text-[10px]'}>
+                    {tr('historicalLogRateCanonical')}
+                  </span>
                   <LtrNumeric className="font-semibold tabular-nums">
-                    {formatRateValue(entry.manualRate!)}
+                    1 {displayRateEntry.fromCurrency} = {formatRateValue(displayRateEntry.manualRate!)}{' '}
+                    {displayRateEntry.toCurrency}
                   </LtrNumeric>
                 </span>
               )}
@@ -448,6 +492,29 @@ function HistoryRow({
 
         {isEditing && editError && (
           <p className="text-[11px] text-rose-300" role="alert">{editError}</p>
+        )}
+
+        {isEditing && draft && (
+          <div className="flex flex-col gap-2 pt-1">
+            <label className="flex items-start gap-2 text-[11px] text-neutral-300">
+              <input
+                type="checkbox"
+                checked={draft.applyAutomatically}
+                onChange={(e) => onDraftChange({ applyAutomatically: e.target.checked })}
+                className="mt-0.5 rounded border-neutral-600"
+              />
+              <span>{tr('historicalLogApplyAutomatically')}</span>
+            </label>
+            <label className="flex items-start gap-2 text-[11px] text-neutral-300">
+              <input
+                type="checkbox"
+                checked={draft.hideBannerPermanently}
+                onChange={(e) => onDraftChange({ hideBannerPermanently: e.target.checked })}
+                className="mt-0.5 rounded border-neutral-600"
+              />
+              <span>{tr('historicalLogHideBannerPermanently')}</span>
+            </label>
+          </div>
         )}
       </div>
 
@@ -632,7 +699,11 @@ export default function HistoricalLogModal({
   const handleSaveEdit = useCallback(async () => {
     if (!editingEntry || !editDraft) return;
 
-    if (!editDraft.endForever && editDraft.startDate > editDraft.endDate) {
+    if (!editDraft.endDate) {
+      setEditError(tr('historicalLogDateRangeInvalid'));
+      return;
+    }
+    if (editDraft.startDate > editDraft.endDate) {
       setEditError(tr('historicalLogDateRangeInvalid'));
       return;
     }
@@ -643,12 +714,30 @@ export default function HistoricalLogModal({
       return;
     }
 
+    const validationFailure = validateHistoricalOverrideUpdate(editingEntry, updated);
+    if (validationFailure) {
+      setEditError(
+        validationFailure === 'overlap'
+          ? tr('historicalLogDateRangeOverlap')
+          : tr('historicalLogDateRangeInvalid'),
+      );
+      return;
+    }
+
     if (onUpdateEntry) {
-      await onUpdateEntry(editingEntry, updated).catch(() => {});
+      const parentOk = await onUpdateEntry(editingEntry, updated);
+      if (parentOk === false) {
+        setEditError(tr('historicalLogDateRangeOverlap'));
+        return;
+      }
     } else {
-      const ok = updateHistoricalOverrideEntry(editingEntry, updated);
-      if (!ok) {
-        setEditError(tr('historicalLogDateRangeInvalid'));
+      const result = updateHistoricalOverrideEntry(editingEntry, updated);
+      if (!result.ok) {
+        setEditError(
+          result.reason === 'overlap'
+            ? tr('historicalLogDateRangeOverlap')
+            : tr('historicalLogDateRangeInvalid'),
+        );
         return;
       }
     }

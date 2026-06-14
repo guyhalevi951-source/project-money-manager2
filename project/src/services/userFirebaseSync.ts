@@ -878,6 +878,9 @@ export async function saveHistoricalOverrideToCloud(
           manualRate: entry.manualRate ?? null,
           feePercent: entry.feePercent ?? null,
           updatedAt: entry.updatedAt,
+          applyAutomatically: entry.applyAutomatically ?? false,
+          hideBannerPermanently: entry.hideBannerPermanently ?? false,
+          automationApplyMode: entry.automationApplyMode ?? null,
         },
       },
       updatedAt: serverTimestamp(),
@@ -918,13 +921,11 @@ export async function loadHistoricalOverridesFromCloud(
         typeof item.startDate === 'string' && item.startDate.length === 10
           ? item.startDate
           : legacyDate;
-      let endDate: string | null;
-      if (item.endDate === null || item.endDate === 'Forever' || item.endDate === 'forever') {
-        endDate = null;
-      } else if (typeof item.endDate === 'string' && item.endDate.length === 10) {
+      let endDate: string;
+      if (typeof item.endDate === 'string' && item.endDate.length === 10) {
         endDate = item.endDate;
       } else {
-        endDate = startDate.length === 10 ? startDate : null;
+        endDate = startDate.length === 10 ? startDate : '';
       }
 
       return {
@@ -938,13 +939,22 @@ export async function loadHistoricalOverridesFromCloud(
         feePercent:
           typeof item.feePercent === 'number' && item.feePercent > 0 ? item.feePercent : null,
         updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : Date.now(),
+        applyAutomatically: item.applyAutomatically === true,
+        hideBannerPermanently: item.hideBannerPermanently === true,
+        automationApplyMode:
+          item.automationApplyMode === 'both' ||
+          item.automationApplyMode === 'rateOnly' ||
+          item.automationApplyMode === 'feeOnly' ||
+          item.automationApplyMode === 'none'
+            ? item.automationApplyMode
+            : undefined,
       };
     })
     .filter(
       (e): e is HistoricalOverrideEntry =>
         e.startDate.length === 10 &&
-        (e.endDate === null || e.endDate.length === 10) &&
-        e.startDate <= (e.endDate ?? e.startDate) &&
+        e.endDate.length === 10 &&
+        e.startDate <= e.endDate &&
         isSupportedCurrency(e.fromCurrency) &&
         isSupportedCurrency(e.toCurrency),
     );

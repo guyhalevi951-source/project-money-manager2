@@ -1009,9 +1009,9 @@ export default function ExchangeRateSimulator({
   );
 
   const handleUpdateHistoricalEntry = useCallback(
-    async (previous: HistoricalOverrideEntry, updated: HistoricalOverrideEntry) => {
-      const ok = updateHistoricalOverrideEntry(previous, updated);
-      if (!ok) return;
+    async (previous: HistoricalOverrideEntry, updated: HistoricalOverrideEntry): Promise<boolean> => {
+      const result = updateHistoricalOverrideEntry(previous, updated);
+      if (!result.ok) return false;
 
       const currentUser = auth.currentUser;
       if (currentUser && !currentUser.isAnonymous) {
@@ -1020,8 +1020,9 @@ export default function ExchangeRateSimulator({
         if (prevKey !== nextKey) {
           await deleteHistoricalOverrideFromCloud(currentUser.uid, previous).catch(() => {});
         }
-        await saveHistoricalOverrideToCloud(currentUser.uid, updated).catch(() => {});
+        await saveHistoricalOverrideToCloud(currentUser.uid, result.entry).catch(() => {});
       }
+      return true;
     },
     [],
   );

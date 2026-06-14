@@ -162,12 +162,19 @@ import {
   replaceCloudManualExchangeOverrides,
 } from './services/manualExchangeOverrideService';
 import {
-  lookupHistoricalOverridesForCurrency,
-  lookupHistoricalOverrideForCurrency,
+  appliedFromHistoricalChoice,
+  applyBannerAutomationFromChoice,
+  inferHistoricalChoiceFromApplied,
+  historicalAppliedContextFromEntries,
   mergeHistoricalOverridesFromCloud,
+  resolveHistoricalAppliedForSubmit,
+  resolveNewExpenseHistoricalState,
   resolveHistoricalRateToIls,
   subscribeHistoricalOverridesUpdated,
+  type HistoricalOverridesUpdatedDetail,
+  type HistoricalOverrideBannerOptions,
   type HistoricalOverrideEntry,
+  type NewExpenseHistoricalApplied,
 } from './services/historicalOverrideService';
 import {
   convertForeignToIls,
@@ -482,15 +489,16 @@ const findNearestPriorMonthWithSubBudgets = (
   return candidates[0] ?? null;
 };
 
-type NewExpenseHistoricalApplied = {
-  rateEntry: HistoricalOverrideEntry | null;
-  feeEntry: HistoricalOverrideEntry | null;
-};
-
 const EMPTY_NEW_EXPENSE_HISTORICAL_APPLIED: NewExpenseHistoricalApplied = {
   rateEntry: null,
   feeEntry: null,
 };
+
+function isAutomationOnlyHistoricalUpdate(event: Event): boolean {
+  if (!(event instanceof CustomEvent)) return false;
+  const detail = event.detail as HistoricalOverridesUpdatedDetail | undefined;
+  return detail?.automationOnly === true;
+}
 
 // Top-level navigation tabs.
 const TABS = [
@@ -3292,12 +3300,18 @@ function App() {
     useState<HistoricalOverrideBannerContext | null>(null);
   const [newExpenseHistoricalApplied, setNewExpenseHistoricalApplied] =
     useState<NewExpenseHistoricalApplied>(EMPTY_NEW_EXPENSE_HISTORICAL_APPLIED);
+  /** Last explicit banner button choice for the current date/currency context (submit source of truth). */
+  const [newExpenseHistoricalLastChoice, setNewExpenseHistoricalLastChoice] =
+    useState<HistoricalOverrideApplyChoice | null>(null);
+  /** Live banner checkbox state — used to persist automation on submit without re-clicking buttons. */
+  const [newExpenseHistoricalBannerOptions, setNewExpenseHistoricalBannerOptions] =
+    useState<HistoricalOverrideBannerOptions | null>(null);
 
   // Historical override prompt — edit expense modal
-  const [editHistoricalCandidate, setEditHistoricalCandidate] =
-    useState<HistoricalOverrideEntry | null>(null);
-  const [editHistoricalAccepted, setEditHistoricalAccepted] =
-    useState<HistoricalOverrideEntry | null>(null);
+  const [editHistoricalBanner, setEditHistoricalBanner] =
+    useState<HistoricalOverrideBannerContext | null>(null);
+  const [editHistoricalApplied, setEditHistoricalApplied] =
+    useState<NewExpenseHistoricalApplied>(EMPTY_NEW_EXPENSE_HISTORICAL_APPLIED);
   const [showBudgetSaved, setShowBudgetSaved] = useState(false);
   const [autoTransferByMonth, setAutoTransferByMonth] = useState<Record<string, boolean>>({});
 
@@ -3405,50 +3419,131 @@ function App() {
 
   // Reactive watcher: detect historical overrides when the user picks a past date + currency
   // in the New Expense form.
-  useEffect(() => {
+  const refreshNewExpenseHistoricalState = useCallback(() => {
     const isoDate = normalizeDate(newExpense.date);
-    setNewExpenseHistoricalBanner(null);
-    setNewExpenseHistoricalApplied(EMPTY_NEW_EXPENSE_HISTORICAL_APPLIED);
 
-    if (isoDate >= getLocalTodayIso()) return;
+    setNewExpenseHistoricalLastChoice(null);
+    setNewExpenseHistoricalBannerOptions(null);
 
-    if (newExpense.currency === 'ILS') return;
-    const { rateEntry, feeEntry } = lookupHistoricalOverridesForCurrency(
+    if (isoDate >= getLocalTodayIso() || newExpense.currency === 'ILS') {
+      setNewExpenseHistoricalBanner(null);
+      setNewExpenseHistoricalApplied(EMPTY_NEW_EXPENSE_HISTORICAL_APPLIED);
+      return;
+    }
+
+    const resolved = resolveNewExpenseHistoricalState(
       isoDate,
       newExpense.currency as ExpenseCurrency,
     );
-    if (rateEntry || feeEntry) {
-      setNewExpenseHistoricalBanner({ rateEntry, feeEntry });
+
+    setNewExpenseHistoricalApplied(resolved.autoApplied);
+    if (resolved.showBanner && resolved.bannerContext) {
+      setNewExpenseHistoricalBanner(resolved.bannerContext);
+    } else {
+      setNewExpenseHistoricalBanner(null);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [newExpense.date, newExpense.currency]);
+
+  /** After automation-flag patches — refresh banner visibility / auto-apply without clearing one-shot injections. */
+  const refreshNewExpenseHistoricalFromAutomation = useCallback(() => {
+    const isoDate = normalizeDate(newExpense.date);
+    if (isoDate >= getLocalTodayIso() || newExpense.currency === 'ILS') return;
+
+    const resolved = resolveNewExpenseHistoricalState(
+      isoDate,
+      newExpense.currency as ExpenseCurrency,
+    );
+
+    if (resolved.autoApplied.rateEntry || resolved.autoApplied.feeEntry) {
+      setNewExpenseHistoricalApplied(resolved.autoApplied);
+    }
+
+    if (resolved.showBanner && resolved.bannerContext) {
+      setNewExpenseHistoricalBanner(resolved.bannerContext);
+    } else if (!resolved.showBanner) {
+      setNewExpenseHistoricalBanner(null);
+    }
+  }, [newExpense.date, newExpense.currency]);
+
+  useEffect(() => {
+    refreshNewExpenseHistoricalState();
+  }, [refreshNewExpenseHistoricalState]);
+
+  useEffect(() => {
+    return subscribeHistoricalOverridesUpdated((event) => {
+      if (isAutomationOnlyHistoricalUpdate(event)) {
+        refreshNewExpenseHistoricalFromAutomation();
+      } else {
+        refreshNewExpenseHistoricalState();
+      }
+    });
+  }, [refreshNewExpenseHistoricalState, refreshNewExpenseHistoricalFromAutomation]);
 
   // Reactive watcher: detect historical overrides when the user changes date / currency
   // in the Edit Expense modal.
-  useEffect(() => {
+  const refreshEditExpenseHistoricalState = useCallback(() => {
     if (!editExpenseDraft) {
-      setEditHistoricalCandidate(null);
-      setEditHistoricalAccepted(null);
+      setEditHistoricalBanner(null);
+      setEditHistoricalApplied(EMPTY_NEW_EXPENSE_HISTORICAL_APPLIED);
       return;
     }
+
     const isoDate = normalizeDate(editExpenseDraft.date);
-    setEditHistoricalCandidate(null);
-    setEditHistoricalAccepted(null);
 
-    // Strict today-guard: never trigger the historical prompt for the current calendar
-    // day, even if a same-day entry exists in the archive (user-forced saves).
-    if (isoDate >= getLocalTodayIso()) return;
+    if (isoDate >= getLocalTodayIso() || editExpenseDraft.currency === 'ILS') {
+      setEditHistoricalBanner(null);
+      setEditHistoricalApplied(EMPTY_NEW_EXPENSE_HISTORICAL_APPLIED);
+      return;
+    }
 
-    if (editExpenseDraft.currency === 'ILS') return;
-    const candidate = lookupHistoricalOverrideForCurrency(
+    const resolved = resolveNewExpenseHistoricalState(
       isoDate,
       editExpenseDraft.currency as ExpenseCurrency,
     );
-    if (candidate) {
-      setEditHistoricalCandidate(candidate);
+
+    setEditHistoricalApplied(resolved.autoApplied);
+    if (resolved.showBanner && resolved.bannerContext) {
+      setEditHistoricalBanner(resolved.bannerContext);
+    } else {
+      setEditHistoricalBanner(null);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editExpenseDraft?.date, editExpenseDraft?.currency]);
+  }, [editExpenseDraft]);
+
+  const refreshEditExpenseHistoricalFromAutomation = useCallback(() => {
+    if (!editExpenseDraft) return;
+
+    const isoDate = normalizeDate(editExpenseDraft.date);
+    if (isoDate >= getLocalTodayIso() || editExpenseDraft.currency === 'ILS') return;
+
+    const resolved = resolveNewExpenseHistoricalState(
+      isoDate,
+      editExpenseDraft.currency as ExpenseCurrency,
+    );
+
+    if (resolved.autoApplied.rateEntry || resolved.autoApplied.feeEntry) {
+      setEditHistoricalApplied(resolved.autoApplied);
+    }
+
+    if (resolved.showBanner && resolved.bannerContext) {
+      setEditHistoricalBanner(resolved.bannerContext);
+    } else if (!resolved.showBanner) {
+      setEditHistoricalBanner(null);
+    }
+  }, [editExpenseDraft]);
+
+  useEffect(() => {
+    refreshEditExpenseHistoricalState();
+  }, [refreshEditExpenseHistoricalState]);
+
+  useEffect(() => {
+    return subscribeHistoricalOverridesUpdated((event) => {
+      if (isAutomationOnlyHistoricalUpdate(event)) {
+        refreshEditExpenseHistoricalFromAutomation();
+      } else {
+        refreshEditExpenseHistoricalState();
+      }
+    });
+  }, [refreshEditExpenseHistoricalState, refreshEditExpenseHistoricalFromAutomation]);
 
   const newExpenseIsoDate = normalizeDate(newExpense.date);
   const newExpenseHistoricalManualRate = useMemo(() => {
@@ -3466,62 +3561,61 @@ function App() {
   }, [newExpenseHistoricalApplied.feeEntry]);
 
   const editHistoricalManualRate = useMemo(() => {
-    if (!editHistoricalAccepted || !editExpenseDraft) return undefined;
+    if (!editHistoricalApplied.rateEntry || !editExpenseDraft) return undefined;
     const rate = resolveHistoricalRateToIls(
-      editHistoricalAccepted,
+      editHistoricalApplied.rateEntry,
       editExpenseDraft.currency as ExpenseCurrency,
     );
     return rate != null && rate > 0 ? rate : undefined;
-  }, [editHistoricalAccepted, editExpenseDraft?.currency]);
+  }, [editHistoricalApplied.rateEntry, editExpenseDraft?.currency]);
 
   const editHistoricalFeePercent = useMemo(() => {
-    const fee = editHistoricalAccepted?.feePercent;
+    const fee = editHistoricalApplied.feeEntry?.feePercent;
     return fee != null && fee > 0 && fee <= 100 ? fee : undefined;
-  }, [editHistoricalAccepted]);
+  }, [editHistoricalApplied.feeEntry]);
 
-  const handleNewExpenseHistoricalChoice = useCallback(
-    (choice: HistoricalOverrideApplyChoice) => {
-      if (!newExpenseHistoricalBanner) return;
-
-      const { rateEntry, feeEntry } = newExpenseHistoricalBanner;
-      const hasRate =
-        rateEntry != null && rateEntry.manualRate != null && rateEntry.manualRate > 0;
-      const hasFee =
-        feeEntry != null && feeEntry.feePercent != null && feeEntry.feePercent > 0;
-
-      switch (choice) {
-        case 'both':
-          setNewExpenseHistoricalApplied({
-            rateEntry: hasRate ? rateEntry : null,
-            feeEntry: hasFee ? feeEntry : null,
-          });
-          break;
-        case 'rateOnly':
-          setNewExpenseHistoricalApplied({
-            rateEntry: hasRate ? rateEntry : null,
-            feeEntry: null,
-          });
-          break;
-        case 'feeOnly':
-          setNewExpenseHistoricalApplied({
-            rateEntry: null,
-            feeEntry: hasFee ? feeEntry : null,
-          });
-          break;
-        case 'none':
-          setNewExpenseHistoricalApplied(EMPTY_NEW_EXPENSE_HISTORICAL_APPLIED);
-          break;
+  const persistHistoricalAutomationUpdates = useCallback(
+    async (updatedEntries: HistoricalOverrideEntry[]) => {
+      const currentUser = auth.currentUser;
+      if (!shouldSyncToFirestore(currentUser)) return;
+      for (const entry of updatedEntries) {
+        await saveHistoricalOverrideToCloud(currentUser.uid, entry).catch(() => {});
       }
-
-      setNewExpenseHistoricalBanner(null);
     },
-    [newExpenseHistoricalBanner],
+    [],
   );
 
-  const applyEditExpenseHistorical = useCallback((entry: HistoricalOverrideEntry) => {
-    setEditHistoricalAccepted(entry);
-    setEditHistoricalCandidate(null);
-  }, []);
+  const handleNewExpenseHistoricalChoice = useCallback(
+    (choice: HistoricalOverrideApplyChoice, options: HistoricalOverrideBannerOptions) => {
+      if (!newExpenseHistoricalBanner) return;
+
+      const context = newExpenseHistoricalBanner;
+
+      setNewExpenseHistoricalLastChoice(choice);
+      setNewExpenseHistoricalBannerOptions(options);
+      setNewExpenseHistoricalApplied(appliedFromHistoricalChoice(choice, context));
+      setNewExpenseHistoricalBanner(null);
+
+      const updatedEntries = applyBannerAutomationFromChoice(choice, context, options);
+      void persistHistoricalAutomationUpdates(updatedEntries);
+    },
+    [newExpenseHistoricalBanner, persistHistoricalAutomationUpdates],
+  );
+
+  const handleEditExpenseHistoricalChoice = useCallback(
+    (choice: HistoricalOverrideApplyChoice, options: HistoricalOverrideBannerOptions) => {
+      if (!editHistoricalBanner) return;
+
+      const context = editHistoricalBanner;
+
+      setEditHistoricalApplied(appliedFromHistoricalChoice(choice, context));
+      setEditHistoricalBanner(null);
+
+      const updatedEntries = applyBannerAutomationFromChoice(choice, context, options);
+      void persistHistoricalAutomationUpdates(updatedEntries);
+    },
+    [editHistoricalBanner, persistHistoricalAutomationUpdates],
+  );
 
   // Sync newly archived historical overrides to Firestore whenever a new entry is written.
   useEffect(() => {
@@ -5326,6 +5420,27 @@ function App() {
 
     if (isNaN(enteredAmount) || !(enteredAmount > 0)) return;
 
+    const submitApplied = resolveHistoricalAppliedForSubmit(
+      newExpenseHistoricalBanner,
+      newExpenseHistoricalApplied,
+      newExpenseHistoricalLastChoice,
+    );
+
+    const persistAutomationOnSubmit = async (): Promise<void> => {
+      const options = newExpenseHistoricalBannerOptions;
+      if (!options?.applyAutomatically) return;
+
+      const context =
+        newExpenseHistoricalBanner ?? historicalAppliedContextFromEntries(submitApplied);
+      if (!context) return;
+
+      const choice =
+        newExpenseHistoricalLastChoice ?? inferHistoricalChoiceFromApplied(submitApplied);
+
+      const updatedEntries = applyBannerAutomationFromChoice(choice, context, options);
+      await persistHistoricalAutomationUpdates(updatedEntries);
+    };
+
     const resolveConversion = async (): Promise<{
       ilsAmount: number;
       appliedFeePercent: number;
@@ -5338,14 +5453,13 @@ function App() {
       const rates = getCachedExchangeRates();
       const isoDate = normalizeDate(newExpense.date);
 
-      // If the user accepted a historical override for this date + currency, inject it.
-      const historicalManualRate = newExpenseHistoricalApplied.rateEntry
+      const historicalManualRate = submitApplied.rateEntry
         ? (resolveHistoricalRateToIls(
-            newExpenseHistoricalApplied.rateEntry,
+            submitApplied.rateEntry,
             inputCurrency as ExpenseCurrency,
           ) ?? undefined)
         : undefined;
-      const historicalFeePercent = newExpenseHistoricalApplied.feeEntry?.feePercent ?? undefined;
+      const historicalFeePercent = submitApplied.feeEntry?.feePercent ?? undefined;
 
       const recorded = await recordExpenseConversionToIlsAsync(enteredAmount, inputCurrency, rates, {
         displayCurrency,
@@ -5358,36 +5472,39 @@ function App() {
       return { ...recorded, ilsAmount: roundMoneyAmount(recorded.ilsAmount) };
     };
 
-    void resolveConversion().then((conversion) => {
-      if (conversion == null || !(conversion.ilsAmount > 0)) return;
+    void persistAutomationOnSubmit().then(() => {
+      void resolveConversion().then((conversion) => {
+        if (conversion == null || !(conversion.ilsAmount > 0)) return;
 
-      const isoDate = normalizeDate(newExpense.date);
-      const expense: Expense = {
-        id: Date.now().toString(),
-        description: newExpense.description.trim(),
-        amount: conversion.ilsAmount,
-        category: newExpense.category,
-        date: isoDate,
-        originalAmount: roundMoneyAmount(enteredAmount),
-        originalCurrency: inputCurrency,
-        appliedFeePercent: conversion.appliedFeePercent,
-        manualRateUsed: conversion.manualRateUsed,
-        manualRateDisabled: false,
-        feeDisabled: false,
-      };
+        const isoDate = normalizeDate(newExpense.date);
+        const expense: Expense = {
+          id: Date.now().toString(),
+          description: newExpense.description.trim(),
+          amount: conversion.ilsAmount,
+          category: newExpense.category,
+          date: isoDate,
+          originalAmount: roundMoneyAmount(enteredAmount),
+          originalCurrency: inputCurrency,
+          appliedFeePercent: conversion.appliedFeePercent,
+          manualRateUsed: conversion.manualRateUsed,
+          manualRateDisabled: false,
+          feeDisabled: false,
+        };
 
-      const nextExpenses = [expense, ...expenses];
-      setExpenses(nextExpenses);
-      setNewExpense((prev) => ({
-        description: '',
-        amount: '',
-        currency: prev.currency,
-        category: prev.category,
-        date: toISODate(new Date()),
-      }));
-      setNewExpenseHistoricalBanner(null);
-      setNewExpenseHistoricalApplied(EMPTY_NEW_EXPENSE_HISTORICAL_APPLIED);
-      setExpenseRatesReady(true);
+        const nextExpenses = [expense, ...expenses];
+        setExpenses(nextExpenses);
+        setNewExpense((prev) => ({
+          description: '',
+          amount: '',
+          currency: prev.currency,
+          category: prev.category,
+          date: toISODate(new Date()),
+        }));
+        setNewExpenseHistoricalBanner(null);
+        setNewExpenseHistoricalApplied(EMPTY_NEW_EXPENSE_HISTORICAL_APPLIED);
+        setNewExpenseHistoricalLastChoice(null);
+        setNewExpenseHistoricalBannerOptions(null);
+        setExpenseRatesReady(true);
 
       // Dual-write (Task 2): mirror expense into main budget when source budget is linked.
       const linkedMeta = resolveLinkedBudgetMeta(activeBudgetId, budgetRegistry);
@@ -5429,6 +5546,7 @@ function App() {
 
       const [y, m] = isoDate.split('-').map((n) => parseInt(n, 10));
       setSelectedDate(new Date(y, m - 1, 1));
+      });
     });
   };
 
@@ -5562,13 +5680,13 @@ function App() {
       const rates = getCachedExchangeRates();
 
       // If user accepted a historical override for this date + currency, inject it.
-      const editHistManualRate = editHistoricalAccepted
+      const editHistManualRate = editHistoricalApplied.rateEntry
         ? (resolveHistoricalRateToIls(
-            editHistoricalAccepted,
+            editHistoricalApplied.rateEntry,
             editExpenseDraft.currency as ExpenseCurrency,
           ) ?? undefined)
         : undefined;
-      const editHistFeePercent = editHistoricalAccepted?.feePercent ?? undefined;
+      const editHistFeePercent = editHistoricalApplied.feeEntry?.feePercent ?? undefined;
 
       const recorded = await recordExpenseConversionToIlsAsync(
         typedAmount,
@@ -6370,7 +6488,7 @@ function App() {
               <div className="shrink-0 w-full sm:w-auto">
                 <button
                   type="submit"
-                  disabled={expenseSubmitBlocked || !!newExpenseHistoricalBanner}
+                  disabled={expenseSubmitBlocked}
                   className={`h-12 w-full min-w-[10.5rem] shrink-0 px-6 flex items-center justify-center gap-2 ${primaryActionButtonClass} ${primaryActionDisabled}`}
                 >
                   <Plus className="w-5 h-5" />
@@ -6385,6 +6503,7 @@ function App() {
                 <HistoricalOverridePrompt
                   context={newExpenseHistoricalBanner}
                   onChoice={handleNewExpenseHistoricalChoice}
+                  onOptionsChange={setNewExpenseHistoricalBannerOptions}
                 />
               )}
             </AnimatePresence>
@@ -6905,7 +7024,7 @@ function App() {
                   onClick={handleEditExpenseSave}
                   disabled={
                     editExpenseSubmitBlocked ||
-                    !!editHistoricalCandidate ||
+                    !!editHistoricalBanner ||
                     !editExpenseDraft.amount.trim() ||
                     !editExpenseDraft.category.trim() ||
                     !editExpenseDraft.date.trim()
@@ -6918,14 +7037,10 @@ function App() {
 
               {/* Historical override prompt inside edit modal */}
               <AnimatePresence>
-                {editHistoricalCandidate && (
+                {editHistoricalBanner && (
                   <HistoricalOverridePrompt
-                    entry={editHistoricalCandidate}
-                    onApply={() => applyEditExpenseHistorical(editHistoricalCandidate)}
-                    onDismiss={() => {
-                      setEditHistoricalAccepted(null);
-                      setEditHistoricalCandidate(null);
-                    }}
+                    context={editHistoricalBanner}
+                    onChoice={handleEditExpenseHistoricalChoice}
                   />
                 )}
               </AnimatePresence>

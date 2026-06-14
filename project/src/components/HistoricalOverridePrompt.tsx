@@ -6,25 +6,25 @@
  * form and the Edit Expense modal.
  */
 
+import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { History } from 'lucide-react';
 import { useLanguage } from '../LanguageContext';
 import { formatTranslation } from '../translations';
-import { type HistoricalOverrideEntry } from '../services/historicalOverrideService';
+import {
+  resolveBannerCheckboxDefaults,
+  type HistoricalOverrideAutomationApplyMode,
+  type HistoricalOverrideBannerContext,
+  type HistoricalOverrideBannerOptions,
+} from '../services/historicalOverrideService';
 import {
   primaryActionButtonSemiboldClass,
   utilityNavCompactButtonClass,
 } from '../styles/actionButtonStyles';
 import { themeTextMutedClass } from '../styles/themeSurfaceStyles';
 
-/** User choice when both historical rate and fee are available. */
-export type HistoricalOverrideApplyChoice = 'both' | 'rateOnly' | 'feeOnly' | 'none';
-
-/** Split lookup result for rate vs fee archived overrides. */
-export interface HistoricalOverrideBannerContext {
-  rateEntry: HistoricalOverrideEntry | null;
-  feeEntry: HistoricalOverrideEntry | null;
-}
+/** User choice when historical rate and/or fee are available. */
+export type HistoricalOverrideApplyChoice = HistoricalOverrideAutomationApplyMode;
 
 export type HistoricalOverridePromptMode = 'rateOnly' | 'feeOnly' | 'both';
 
@@ -44,34 +44,85 @@ export function resolveHistoricalOverridePromptMode(
   return null;
 }
 
-type HistoricalOverridePromptProps =
-  | {
-      /** Legacy single-entry prompt (edit expense modal). */
-      entry: HistoricalOverrideEntry;
-      onApply: () => void;
-      onDismiss: () => void;
-      context?: never;
-      onChoice?: never;
-    }
-  | {
-      /** Split rate/fee context (new expense form). */
-      context: HistoricalOverrideBannerContext;
-      onChoice: (choice: HistoricalOverrideApplyChoice) => void;
-      entry?: never;
-      onApply?: never;
-      onDismiss?: never;
-    };
+type HistoricalOverridePromptProps = {
+  context: HistoricalOverrideBannerContext;
+  onChoice: (
+    choice: HistoricalOverrideApplyChoice,
+    options: HistoricalOverrideBannerOptions,
+  ) => void;
+  /** Live checkbox state for parent submit handler (automation persist without re-clicking buttons). */
+  onOptionsChange?: (options: HistoricalOverrideBannerOptions) => void;
+};
 
-export default function HistoricalOverridePrompt(props: HistoricalOverridePromptProps) {
+function HistoricalOverrideAutomationCheckboxes({
+  applyAutomatically,
+  hideBannerPermanently,
+  onApplyAutomaticallyChange,
+  onHideBannerChange,
+}: {
+  applyAutomatically: boolean;
+  hideBannerPermanently: boolean;
+  onApplyAutomaticallyChange: (checked: boolean) => void;
+  onHideBannerChange: (checked: boolean) => void;
+}) {
+  const { tr } = useLanguage();
+
+  return (
+    <div className="mt-3 flex flex-col gap-2 border-t border-amber-500/15 pt-3">
+      <label className="flex cursor-pointer items-start gap-2.5 text-xs leading-snug text-amber-100/90">
+        <input
+          type="checkbox"
+          checked={applyAutomatically}
+          onChange={(e) => onApplyAutomaticallyChange(e.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border-amber-500/40 bg-black/20 text-amber-400 focus:ring-amber-500/30"
+        />
+        <span>{tr('historicalOverridePromptSaveForFuture')}</span>
+      </label>
+      <label className="flex cursor-pointer items-start gap-2.5 text-xs leading-snug text-amber-100/90">
+        <input
+          type="checkbox"
+          checked={hideBannerPermanently}
+          onChange={(e) => onHideBannerChange(e.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border-amber-500/40 bg-black/20 text-amber-400 focus:ring-amber-500/30"
+        />
+        <span>{tr('historicalOverridePromptHideBanner')}</span>
+      </label>
+    </div>
+  );
+}
+
+export default function HistoricalOverridePrompt({
+  context,
+  onChoice,
+  onOptionsChange,
+}: HistoricalOverridePromptProps) {
   const { tr, lang } = useLanguage();
 
-  if (props.entry) {
-    return <LegacyHistoricalOverridePrompt entry={props.entry} onApply={props.onApply} onDismiss={props.onDismiss} />;
-  }
-
-  const { context, onChoice } = props;
   const mode = resolveHistoricalOverridePromptMode(context);
+  const checkboxDefaults = useMemo(() => resolveBannerCheckboxDefaults(context), [context]);
+  const [applyAutomatically, setApplyAutomatically] = useState(checkboxDefaults.applyAutomatically);
+  const [hideBannerPermanently, setHideBannerPermanently] = useState(
+    checkboxDefaults.hideBannerPermanently,
+  );
+
+  useEffect(() => {
+    setApplyAutomatically(checkboxDefaults.applyAutomatically);
+    setHideBannerPermanently(checkboxDefaults.hideBannerPermanently);
+  }, [checkboxDefaults]);
+
+  useEffect(() => {
+    onOptionsChange?.({
+      applyAutomatically,
+      hideBannerPermanently,
+    });
+  }, [applyAutomatically, hideBannerPermanently, onOptionsChange]);
+
   if (!mode) return null;
+
+  const bannerOptions: HistoricalOverrideBannerOptions = {
+    applyAutomatically,
+    hideBannerPermanently,
+  };
 
   const promptText =
     mode === 'both'
@@ -84,6 +135,11 @@ export default function HistoricalOverridePrompt(props: HistoricalOverridePrompt
 
   const dismissLabel =
     mode === 'feeOnly' ? tr('historicalOverridePromptDismissFee') : tr('historicalOverridePromptDismiss');
+
+  const handleChoice = (choice: HistoricalOverrideApplyChoice) => {
+    // Form injection is handled by the parent onChoice; checkboxes only affect persisted flags.
+    onChoice(choice, bannerOptions);
+  };
 
   return (
     <motion.div
@@ -103,33 +159,40 @@ export default function HistoricalOverridePrompt(props: HistoricalOverridePrompt
         <span>{promptText}</span>
       </p>
 
+      <HistoricalOverrideAutomationCheckboxes
+        applyAutomatically={applyAutomatically}
+        hideBannerPermanently={hideBannerPermanently}
+        onApplyAutomaticallyChange={setApplyAutomatically}
+        onHideBannerChange={setHideBannerPermanently}
+      />
+
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {mode === 'both' ? (
           <>
             <button
               type="button"
-              onClick={() => onChoice('both')}
+              onClick={() => handleChoice('both')}
               className={`rounded-lg px-3.5 py-2 text-xs sm:text-sm ${primaryActionButtonSemiboldClass}`}
             >
               {tr('historicalOverridePromptApplyBoth')}
             </button>
             <button
               type="button"
-              onClick={() => onChoice('rateOnly')}
+              onClick={() => handleChoice('rateOnly')}
               className={`rounded-lg px-3.5 py-2 text-xs sm:text-sm ${utilityNavCompactButtonClass}`}
             >
               {tr('historicalOverridePromptApplyRateOnly')}
             </button>
             <button
               type="button"
-              onClick={() => onChoice('feeOnly')}
+              onClick={() => handleChoice('feeOnly')}
               className={`rounded-lg px-3.5 py-2 text-xs sm:text-sm ${utilityNavCompactButtonClass}`}
             >
               {tr('historicalOverridePromptApplyFeeOnly')}
             </button>
             <button
               type="button"
-              onClick={() => onChoice('none')}
+              onClick={() => handleChoice('none')}
               className={`rounded-lg px-3.5 py-2 text-xs sm:text-sm font-medium transition-all active:scale-[0.98] hover:text-neutral-200 hover:bg-white/10 ${themeTextMutedClass}`}
             >
               {tr('historicalOverridePromptApplyNone')}
@@ -139,82 +202,20 @@ export default function HistoricalOverridePrompt(props: HistoricalOverridePrompt
           <>
             <button
               type="button"
-              onClick={() =>
-                onChoice(mode === 'feeOnly' ? 'feeOnly' : 'rateOnly')
-              }
+              onClick={() => handleChoice(mode === 'feeOnly' ? 'feeOnly' : 'rateOnly')}
               className={`rounded-lg px-3.5 py-2 text-xs sm:text-sm ${primaryActionButtonSemiboldClass}`}
             >
               {tr('historicalOverridePromptApply')}
             </button>
             <button
               type="button"
-              onClick={() => onChoice('none')}
+              onClick={() => handleChoice('none')}
               className={`rounded-lg px-3.5 py-2 text-xs sm:text-sm font-medium transition-all active:scale-[0.98] hover:text-neutral-200 hover:bg-white/10 ${themeTextMutedClass}`}
             >
               {dismissLabel}
             </button>
           </>
         )}
-      </div>
-    </motion.div>
-  );
-}
-
-function LegacyHistoricalOverridePrompt({
-  entry,
-  onApply,
-  onDismiss,
-}: {
-  entry: HistoricalOverrideEntry;
-  onApply: () => void;
-  onDismiss: () => void;
-}) {
-  const { tr, lang } = useLanguage();
-
-  const hasRate = entry.manualRate != null && entry.manualRate > 0;
-  const hasFee = entry.feePercent != null && entry.feePercent > 0;
-
-  let whatKey: 'historicalOverridePromptManualRate' | 'historicalOverridePromptFee' | 'historicalOverridePromptBoth';
-  if (hasRate && hasFee) whatKey = 'historicalOverridePromptBoth';
-  else if (hasFee) whatKey = 'historicalOverridePromptFee';
-  else whatKey = 'historicalOverridePromptManualRate';
-
-  const what = tr(whatKey);
-  const promptText = formatTranslation(lang, 'historicalOverridePromptText', { what });
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: -6 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -4 }}
-      transition={{ duration: 0.22, ease: 'easeOut' }}
-      role="alertdialog"
-      aria-labelledby="historical-override-title-legacy"
-      className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3.5 py-3 shadow-sm shadow-black/20"
-    >
-      <p
-        id="historical-override-title-legacy"
-        className="flex items-start gap-2 text-sm leading-snug text-amber-100/95"
-      >
-        <History className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" aria-hidden />
-        <span>{promptText}</span>
-      </p>
-
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={onApply}
-          className={`rounded-lg px-3.5 py-2 text-xs sm:text-sm ${primaryActionButtonSemiboldClass}`}
-        >
-          {tr('historicalOverridePromptApply')}
-        </button>
-        <button
-          type="button"
-          onClick={onDismiss}
-          className={`rounded-lg px-3.5 py-2 text-xs sm:text-sm font-medium transition-all active:scale-[0.98] hover:text-neutral-200 hover:bg-white/10 ${themeTextMutedClass}`}
-        >
-          {hasFee && !hasRate ? tr('historicalOverridePromptDismissFee') : tr('historicalOverridePromptDismiss')}
-        </button>
       </div>
     </motion.div>
   );
