@@ -1,0 +1,9 @@
+{
+  "name": "project-money-manager",
+  "private": true,
+  "scripts": {
+    "build": "npm run build --prefix project",
+    "dev": "npm run dev --prefix project",
+    "install:app": "npm install --prefix project"
+  }
+}
