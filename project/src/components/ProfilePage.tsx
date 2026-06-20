@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   Check,
@@ -71,10 +72,14 @@ import { SETTINGS_SYNC_DEBOUNCE_MS } from '../services/settingsPersistenceEngine
 import type { ExpenseCurrency } from '../services/exchangeRateService';
 import ProfileSettingsSections, {
   PROFILE_PLAIN_OPEN_EVENT,
-  scrollProfileRouteToTop,
   SETTINGS_NAVIGATE_EVENT,
   type ProfileCurrencySubSection,
 } from './ProfileSettingsSections';
+import {
+  readProfileSettingsHash,
+  scrollProfileRouteToTop,
+  scrollProfileToSectionWhenReady,
+} from '../navigation/profileRouteNavigation';
 
 function createFreshDefaultTheme(pageMode: PageThemeMode): ThemePreferences {
   const base = pageMode === 'light' ? DEFAULT_LIGHT_THEME_PREFERENCES : DEFAULT_DARK_THEME_PREFERENCES;
@@ -131,20 +136,11 @@ const GROUP_ICONS: Record<ButtonGroupKey, string> = {
 
 type ThemeAccordionSection = 'page' | 'buttons';
 
-/** Sub-category body inside a section capsule — opacity only so rounded frame stays intact. */
-const subCategoryPanelMotion = {
-  initial: { opacity: 0 },
+const profilePanelMotion = {
+  initial: { opacity: 1 },
   animate: { opacity: 1 },
-  exit: { opacity: 0 },
-  transition: { duration: 0.18, ease: 'easeOut' as const },
-};
-
-/** Master category body — opacity only so rounded-2xl perimeter stays intact. */
-const masterCategoryBodyMotion = {
-  initial: { opacity: 0 },
-  animate: { opacity: 1 },
-  exit: { opacity: 0 },
-  transition: { duration: 0.2, ease: 'easeOut' as const },
+  exit: { opacity: 1 },
+  transition: { duration: 0 },
 };
 
 function MasterChevron({ open }: { open: boolean }) {
@@ -256,64 +252,48 @@ export default function ProfilePage({
     scrollProfileRouteToTop();
   }, [initialCurrencySections]);
 
-  // ---------------------------------------------------------------------------
-  // Hash navigation — theme accordion sections
-  // Extends the generic system to cover the theme master (settings-theme,
-  // settings-theme-page, settings-theme-buttons).
-  // useLayoutEffect + instant scroll; first mount defers 50 ms so layout settles.
-  // ---------------------------------------------------------------------------
+  // Theme hash navigation — synchronous open + instant scroll (matches settings sections).
   useLayoutEffect(() => {
     const THEME_HASH_MAP: Readonly<Record<string, ThemeAccordionSection | null>> = {
-      'settings-theme': null,               // open master only, no sub
+      'settings-theme': null,
       'settings-theme-page': 'page',
       'settings-theme-buttons': 'buttons',
     };
 
-    let mountTimer: ReturnType<typeof setTimeout> | undefined;
-
-    function applyThemeHash(hashKey: string): void {
+    function openSectionsForHash(hashKey: string): void {
       if (!(hashKey in THEME_HASH_MAP)) return;
 
-      // Always open the master.
-      setIsThemeMasterOpen(true);
-
-      // Open sub-section if required (idempotent).
-      const sub = THEME_HASH_MAP[hashKey];
-      if (sub) {
-        setOpenThemeSections((prev) =>
-          prev.has(sub) ? prev : new Set([...prev, sub]),
-        );
-      }
-
-      const el = document.getElementById(hashKey);
-      if (el) el.scrollIntoView({ behavior: 'auto', block: 'center' });
+      flushSync(() => {
+        setIsThemeMasterOpen(true);
+        const sub = THEME_HASH_MAP[hashKey];
+        if (sub) {
+          setOpenThemeSections((prev) =>
+            prev.has(sub) ? prev : new Set([...prev, sub]),
+          );
+        }
+      });
     }
 
-    function scheduleThemeHash(hashKey: string, deferLayout: boolean): void {
-      if (!deferLayout) {
-        applyThemeHash(hashKey);
-        return;
-      }
-      if (mountTimer !== undefined) clearTimeout(mountTimer);
-      mountTimer = setTimeout(() => applyThemeHash(hashKey), 50);
+    function navigateToHash(hashKey: string, openSections: boolean): void {
+      if (!(hashKey in THEME_HASH_MAP)) return;
+      if (openSections) openSectionsForHash(hashKey);
+      scrollProfileToSectionWhenReady(hashKey);
     }
 
     function resetThemeAccordions(): void {
-      if (mountTimer !== undefined) {
-        clearTimeout(mountTimer);
-        mountTimer = undefined;
-      }
-      setIsThemeMasterOpen(false);
-      setOpenThemeSections(new Set());
+      flushSync(() => {
+        setIsThemeMasterOpen(false);
+        setOpenThemeSections(new Set());
+      });
     }
 
-    // First mount: brief buffer so accordions finish layout before scroll.
-    const mountHash = window.location.hash.replace(/^#/, '').trim();
-    if (mountHash) scheduleThemeHash(mountHash, true);
+    const mountHash = readProfileSettingsHash();
+    if (mountHash && mountHash in THEME_HASH_MAP) {
+      navigateToHash(mountHash, false);
+    }
 
-    // Runtime navigation when profile is already visible — scroll immediately.
     function onNavigate(e: Event) {
-      scheduleThemeHash((e as CustomEvent<string>).detail, false);
+      navigateToHash((e as CustomEvent<string>).detail, true);
     }
 
     function onPlainOpen() {
@@ -326,9 +306,8 @@ export default function ProfilePage({
     return () => {
       window.removeEventListener(SETTINGS_NAVIGATE_EVENT, onNavigate);
       window.removeEventListener(PROFILE_PLAIN_OPEN_EVENT, onPlainOpen);
-      if (mountTimer !== undefined) clearTimeout(mountTimer);
     };
-  }, []); // deps: none — state setters stable; THEME_HASH_MAP is local constant
+  }, []);
 
   const avatarOptions = useMemo(() => {
     const options: string[] = [];
@@ -494,7 +473,7 @@ export default function ProfilePage({
 
           <AnimatePresence initial={false}>
             {isThemeMasterOpen && (
-              <motion.div key="theme-master-panel" {...masterCategoryBodyMotion}>
+              <motion.div key="theme-master-panel" {...profilePanelMotion}>
                 <MasterCategoryPanelBody>
                   <SubCardNestedStack variant="capsuleOnMain">
                 <SubCategorySectionCard id="settings-theme-page">
@@ -529,7 +508,7 @@ export default function ProfilePage({
 
                 <AnimatePresence initial={false}>
                   {isThemeSectionOpen('page') && (
-                    <motion.div key="profile-theme-page" {...subCategoryPanelMotion}>
+                    <motion.div key="profile-theme-page" {...profilePanelMotion}>
                       <SubCategorySectionBody>
                         <div className="mb-3 flex items-start gap-2">
                           <span className="mt-0.5 text-base leading-none" aria-hidden="true">
@@ -598,7 +577,7 @@ export default function ProfilePage({
                       const currentChoice = getGroupColorChoice(draftTheme, groupKey);
 
                       return (
-                        <motion.div key={`profile-theme-group-${groupKey}`} {...subCategoryPanelMotion}>
+                        <motion.div key={`profile-theme-group-${groupKey}`} {...profilePanelMotion}>
                           <SubCategorySectionCard>
                             <div className="mb-3 flex items-start gap-2">
                               <span className="mt-0.5 text-base leading-none" aria-hidden="true">

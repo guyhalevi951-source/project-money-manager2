@@ -1,9 +1,15 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronDown, ChevronUp, Coins, Languages, SlidersHorizontal } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useState, type Dispatch, type SetStateAction } from 'react';
+import { flushSync } from 'react-dom';
 import { useLanguage } from '../LanguageContext';
 import { writePreferredLanguage } from '../services/authLanguagePreference';
 import type { ExpenseCurrency } from '../services/exchangeRateService';
+import {
+  readProfileSettingsHash,
+  scrollProfileRouteToTop,
+  scrollProfileToSectionWhenReady,
+} from '../navigation/profileRouteNavigation';
 import { themeCategoryProps } from '../services/buttonThemeService';
 import {
   filterBarContainerClass,
@@ -45,12 +51,12 @@ export const SETTINGS_NAVIGATE_EVENT = 'settings:navigate';
 /** Plain profile entry (avatar / bottom nav) — reset accordions and scroll to top. */
 export const PROFILE_PLAIN_OPEN_EVENT = 'profile:plain-open';
 
-export function scrollProfileRouteToTop(): void {
-  const main = document.querySelector('main');
-  if (main instanceof HTMLElement) {
-    main.scrollTo({ top: 0, behavior: 'auto' });
-  }
-}
+export {
+  scrollProfileRouteToTop,
+  scrollProfileToSection,
+  scrollProfileToSectionWhenReady,
+  readProfileSettingsHash,
+} from '../navigation/profileRouteNavigation';
 
 type HashTarget = {
   master: MainSection;
@@ -73,18 +79,11 @@ const SETTINGS_HASH_MAP: Readonly<Record<string, HashTarget>> = {
   'settings-general':    { master: 'general' },
 };
 
-const masterCategoryBodyMotion = {
-  initial: { opacity: 0 },
+const profilePanelMotion = {
+  initial: { opacity: 1 },
   animate: { opacity: 1 },
-  exit: { opacity: 0 },
-  transition: { duration: 0.2, ease: 'easeOut' as const },
-};
-
-const currencySubPanelMotion = {
-  initial: { opacity: 0 },
-  animate: { opacity: 1 },
-  exit: { opacity: 0 },
-  transition: { duration: 0.2, ease: 'easeOut' as const },
+  exit: { opacity: 1 },
+  transition: { duration: 0 },
 };
 
 function toggleSetMember<T>(key: T, setState: Dispatch<SetStateAction<Set<T>>>) {
@@ -138,60 +137,46 @@ export default function ProfileSettingsSections({
     setCurrencySubOpen(new Set(initialCurrencySections));
   }, [initialCurrencySections]);
 
-  // ---------------------------------------------------------------------------
-  // Generic hash / anchor navigation
-  // Handles both fresh mounts (URL already has a hash) and same-page navigation
-  // (profile tab already visible — triggered via the SETTINGS_NAVIGATE_EVENT).
-  // useLayoutEffect + instant scroll; first mount defers 50 ms so layout settles.
-  // ---------------------------------------------------------------------------
+  // Hash navigation — open target sections synchronously, then snap scroll (no deferred jump).
   useLayoutEffect(() => {
-    let mountTimer: ReturnType<typeof setTimeout> | undefined;
-
-    function applyHash(hashKey: string): void {
+    function openSectionsForHash(hashKey: string): void {
       const target = SETTINGS_HASH_MAP[hashKey];
       if (!target) return;
 
-      // Open master section (idempotent).
-      setMainOpen((prev) =>
-        prev.has(target.master) ? prev : new Set([...prev, target.master]),
-      );
-      // Open sub-section if required (idempotent).
-      if (target.sub) {
-        setCurrencySubOpen((prev) =>
-          prev.has(target.sub!) ? prev : new Set([...prev, target.sub!]),
+      flushSync(() => {
+        setMainOpen((prev) =>
+          prev.has(target.master) ? prev : new Set([...prev, target.master]),
         );
-      }
-
-      const el = document.getElementById(hashKey);
-      if (el) el.scrollIntoView({ behavior: 'auto', block: 'center' });
+        if (target.sub) {
+          setCurrencySubOpen((prev) =>
+            prev.has(target.sub!) ? prev : new Set([...prev, target.sub!]),
+          );
+        }
+      });
     }
 
-    function scheduleHash(hashKey: string, deferLayout: boolean): void {
-      if (!deferLayout) {
-        applyHash(hashKey);
-        return;
-      }
-      if (mountTimer !== undefined) clearTimeout(mountTimer);
-      mountTimer = setTimeout(() => applyHash(hashKey), 50);
+    function navigateToHash(hashKey: string, openSections: boolean): void {
+      if (!SETTINGS_HASH_MAP[hashKey]) return;
+      if (openSections) openSectionsForHash(hashKey);
+      scrollProfileToSectionWhenReady(hashKey);
     }
 
     function resetToPlainProfileView(): void {
-      if (mountTimer !== undefined) {
-        clearTimeout(mountTimer);
-        mountTimer = undefined;
-      }
-      setMainOpen(new Set());
-      setCurrencySubOpen(new Set());
+      flushSync(() => {
+        setMainOpen(new Set());
+        setCurrencySubOpen(new Set());
+      });
       scrollProfileRouteToTop();
     }
 
-    // First mount: brief buffer so accordions finish layout before scroll.
-    const mountHash = window.location.hash.replace(/^#/, '').trim();
-    if (mountHash) scheduleHash(mountHash, true);
+    const mountHash = readProfileSettingsHash();
+    if (mountHash && SETTINGS_HASH_MAP[mountHash]) {
+      // Initial useState already opened the right accordions — only snap scroll.
+      navigateToHash(mountHash, false);
+    }
 
-    // Runtime navigation when profile is already visible — scroll immediately.
     function onNavigate(e: Event) {
-      scheduleHash((e as CustomEvent<string>).detail, false);
+      navigateToHash((e as CustomEvent<string>).detail, true);
     }
 
     function onPlainOpen() {
@@ -204,9 +189,8 @@ export default function ProfileSettingsSections({
     return () => {
       window.removeEventListener(SETTINGS_NAVIGATE_EVENT, onNavigate);
       window.removeEventListener(PROFILE_PLAIN_OPEN_EVENT, onPlainOpen);
-      if (mountTimer !== undefined) clearTimeout(mountTimer);
     };
-  }, []); // deps: none — state setters are stable; SETTINGS_HASH_MAP is module-level constant
+  }, []);
 
   const isMainOpen = useCallback((section: MainSection) => mainOpen.has(section), [mainOpen]);
   const toggleMain = useCallback(
@@ -265,7 +249,7 @@ export default function ProfileSettingsSections({
 
         <AnimatePresence initial={false}>
           {isMainOpen('currencies') && (
-            <motion.div key="profile-settings-currencies" {...masterCategoryBodyMotion}>
+            <motion.div key="profile-settings-currencies" {...profilePanelMotion}>
               <MasterCategoryPanelBody>
                 <SubCardNestedStack variant="capsuleOnMain">
                   <SubCategorySectionCard id="settings-display">
@@ -292,7 +276,7 @@ export default function ProfileSettingsSections({
                     </button>
                     <AnimatePresence initial={false}>
                       {isCurrencySubOpen('display') && (
-                        <motion.div key="profile-currency-display" {...currencySubPanelMotion} className="h-fit">
+                        <motion.div key="profile-currency-display" {...profilePanelMotion} className="h-fit">
                           <SubCategorySectionBody>
                             <DisplayCurrencySelector recentExpenseCurrencies={recentExpenseCurrencies} />
                           </SubCategorySectionBody>
@@ -328,7 +312,7 @@ export default function ProfileSettingsSections({
                     </button>
                     <AnimatePresence initial={false}>
                       {isCurrencySubOpen('exchange') && (
-                        <motion.div key="profile-currency-exchange" {...currencySubPanelMotion} className="h-fit text-start">
+                        <motion.div key="profile-currency-exchange" {...profilePanelMotion} className="h-fit text-start">
                           <SubCategorySectionBody>
                             <ExchangeRateSimulator
                               section="exchange"
@@ -367,7 +351,7 @@ export default function ProfileSettingsSections({
                     </button>
                     <AnimatePresence initial={false}>
                       {isCurrencySubOpen('manual-rate') && (
-                        <motion.div key="profile-currency-manual-rate" {...currencySubPanelMotion} className="h-fit text-start">
+                        <motion.div key="profile-currency-manual-rate" {...profilePanelMotion} className="h-fit text-start">
                           <SubCategorySectionBody>
                             <ExchangeRateSimulator
                               section="manual-rate"
@@ -406,7 +390,7 @@ export default function ProfileSettingsSections({
                     </button>
                     <AnimatePresence initial={false}>
                       {isCurrencySubOpen('commissions') && (
-                        <motion.div key="profile-currency-commissions" {...currencySubPanelMotion} className="h-fit text-start">
+                        <motion.div key="profile-currency-commissions" {...profilePanelMotion} className="h-fit text-start">
                           <SubCategorySectionBody>
                             <ExchangeRateSimulator
                               section="commissions"
@@ -459,7 +443,7 @@ export default function ProfileSettingsSections({
 
         <AnimatePresence initial={false}>
           {isMainOpen('general') && (
-            <motion.div key="profile-settings-general" {...masterCategoryBodyMotion}>
+            <motion.div key="profile-settings-general" {...profilePanelMotion}>
               <MasterCategoryPanelBody>
                 <SubCardNestedStack variant="capsuleOnMain">
                   <SubCategorySectionCard>

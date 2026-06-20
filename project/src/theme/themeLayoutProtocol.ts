@@ -84,7 +84,7 @@ export const themeAccordionHeaderLayerClass = [
  */
 export const themeScrollViewportClass = [
   'min-h-0 flex-1 overflow-y-auto overflow-x-visible',
-  'scroll-smooth touch-pan-y',
+  'scroll-auto touch-pan-y',
   '[-webkit-overflow-scrolling:touch]',
 ].join(' ');
 

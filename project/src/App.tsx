@@ -58,7 +58,7 @@ import { auth, signOutUser } from './firebase';
 import AuthPage from './components/AuthPage';
 import UserProfileMenu from './components/UserProfileMenu';
 import ProfilePage from './components/ProfilePage';
-import { PROFILE_PLAIN_OPEN_EVENT, scrollProfileRouteToTop, SETTINGS_NAVIGATE_EVENT } from './components/ProfileSettingsSections';
+import { PROFILE_PLAIN_OPEN_EVENT, SETTINGS_NAVIGATE_EVENT } from './components/ProfileSettingsSections';
 import BudgetDrawerMenu from './components/BudgetDrawerMenu';
 import PersonalBudgetsPage, { type CreatePersonalBudgetInput } from './components/PersonalBudgetsPage';
 import SharedBudgetsPage from './components/SharedBudgetsPage';
@@ -3380,7 +3380,7 @@ function App() {
    *
    * Uses `history.replaceState` (no native browser jump) and then dispatches
    * `SETTINGS_NAVIGATE_EVENT` so `ProfileSettingsSections` / `ProfilePage`
-   * open the right accordion and smooth-scroll to the element — whether the
+   * open the right accordion and snap scroll to the element — whether the
    * profile tab is freshly mounted or already visible.
    */
   const navigateToSettingsSection = useCallback((hashKey: string) => {
@@ -3394,9 +3394,6 @@ function App() {
 
   const finishPlainProfileOpen = useCallback(() => {
     window.dispatchEvent(new CustomEvent(PROFILE_PLAIN_OPEN_EVENT));
-    requestAnimationFrame(() => {
-      scrollProfileRouteToTop();
-    });
   }, []);
 
   const openProfile = useCallback(
@@ -3426,7 +3423,7 @@ function App() {
     [activeTab, activeBudgetId, clearProfileSettingsHash, finishPlainProfileOpen],
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (activeTab !== 'profile' || !pendingPlainProfileOpenRef.current) return;
     pendingPlainProfileOpenRef.current = false;
     finishPlainProfileOpen();
