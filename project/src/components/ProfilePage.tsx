@@ -71,6 +71,7 @@ import { SETTINGS_SYNC_DEBOUNCE_MS } from '../services/settingsPersistenceEngine
 import type { ExpenseCurrency } from '../services/exchangeRateService';
 import ProfileSettingsSections, {
   PROFILE_PLAIN_OPEN_EVENT,
+  scrollProfileRouteToTop,
   SETTINGS_NAVIGATE_EVENT,
   type ProfileCurrencySubSection,
 } from './ProfileSettingsSections';
@@ -249,6 +250,11 @@ export default function ProfilePage({
   useEffect(() => {
     setSelectedAvatar(sanitizeAvatarUrl(currentAvatarUrl, DEFAULT_GUEST_AVATAR_URL));
   }, [currentAvatarUrl]);
+
+  useLayoutEffect(() => {
+    if (initialCurrencySections?.length) return;
+    scrollProfileRouteToTop();
+  }, [initialCurrencySections]);
 
   // ---------------------------------------------------------------------------
   // Hash navigation — theme accordion sections

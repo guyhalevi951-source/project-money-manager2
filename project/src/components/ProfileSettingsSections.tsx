@@ -45,7 +45,7 @@ export const SETTINGS_NAVIGATE_EVENT = 'settings:navigate';
 /** Plain profile entry (avatar / bottom nav) — reset accordions and scroll to top. */
 export const PROFILE_PLAIN_OPEN_EVENT = 'profile:plain-open';
 
-function scrollProfileRouteToTop(): void {
+export function scrollProfileRouteToTop(): void {
   const main = document.querySelector('main');
   if (main instanceof HTMLElement) {
     main.scrollTo({ top: 0, behavior: 'auto' });

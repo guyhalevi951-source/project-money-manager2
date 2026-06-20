@@ -58,7 +58,7 @@ import { auth, signOutUser } from './firebase';
 import AuthPage from './components/AuthPage';
 import UserProfileMenu from './components/UserProfileMenu';
 import ProfilePage from './components/ProfilePage';
-import { PROFILE_PLAIN_OPEN_EVENT, SETTINGS_NAVIGATE_EVENT } from './components/ProfileSettingsSections';
+import { PROFILE_PLAIN_OPEN_EVENT, scrollProfileRouteToTop, SETTINGS_NAVIGATE_EVENT } from './components/ProfileSettingsSections';
 import BudgetDrawerMenu from './components/BudgetDrawerMenu';
 import PersonalBudgetsPage, { type CreatePersonalBudgetInput } from './components/PersonalBudgetsPage';
 import SharedBudgetsPage from './components/SharedBudgetsPage';
@@ -3321,6 +3321,7 @@ function App() {
     ('display' | 'exchange' | 'manual-rate' | 'commissions')[] | null
   >(null);
   const profileReturnTabRef = useRef<MainTabId>('dashboard');
+  const pendingPlainProfileOpenRef = useRef(false);
   const [navOpen, setNavOpen] = useState(false);
   const [budgetDrawerOpen, setBudgetDrawerOpen] = useState(false);
   const [appShellView, setAppShellView] = useState<AppShellView>('active-budget');
@@ -3391,6 +3392,13 @@ function App() {
     window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
   }, []);
 
+  const finishPlainProfileOpen = useCallback(() => {
+    window.dispatchEvent(new CustomEvent(PROFILE_PLAIN_OPEN_EVENT));
+    requestAnimationFrame(() => {
+      scrollProfileRouteToTop();
+    });
+  }, []);
+
   const openProfile = useCallback(
     (currencySections?: ('display' | 'exchange' | 'manual-rate' | 'commissions')[] | null) => {
       setNavOpen(false);
@@ -3406,13 +3414,23 @@ function App() {
         // Deep-link helpers set the hash before calling openProfile.
       } else {
         clearProfileSettingsHash();
-        window.dispatchEvent(new CustomEvent(PROFILE_PLAIN_OPEN_EVENT));
+        if (activeTab === 'profile') {
+          finishPlainProfileOpen();
+        } else {
+          pendingPlainProfileOpenRef.current = true;
+        }
       }
 
       setActiveTab('profile');
     },
-    [activeTab, activeBudgetId, clearProfileSettingsHash],
+    [activeTab, activeBudgetId, clearProfileSettingsHash, finishPlainProfileOpen],
   );
+
+  useEffect(() => {
+    if (activeTab !== 'profile' || !pendingPlainProfileOpenRef.current) return;
+    pendingPlainProfileOpenRef.current = false;
+    finishPlainProfileOpen();
+  }, [activeTab, finishPlainProfileOpen]);
 
   const openSettingsExchangeRates = useCallback(() => {
     navigateToSettingsSection('settings-exchange');
