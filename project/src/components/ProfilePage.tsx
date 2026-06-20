@@ -70,6 +70,7 @@ import {
 import { SETTINGS_SYNC_DEBOUNCE_MS } from '../services/settingsPersistenceEngine';
 import type { ExpenseCurrency } from '../services/exchangeRateService';
 import ProfileSettingsSections, {
+  PROFILE_PLAIN_OPEN_EVENT,
   SETTINGS_NAVIGATE_EVENT,
   type ProfileCurrencySubSection,
 } from './ProfileSettingsSections';
@@ -291,6 +292,15 @@ export default function ProfilePage({
       mountTimer = setTimeout(() => applyThemeHash(hashKey), 50);
     }
 
+    function resetThemeAccordions(): void {
+      if (mountTimer !== undefined) {
+        clearTimeout(mountTimer);
+        mountTimer = undefined;
+      }
+      setIsThemeMasterOpen(false);
+      setOpenThemeSections(new Set());
+    }
+
     // First mount: brief buffer so accordions finish layout before scroll.
     const mountHash = window.location.hash.replace(/^#/, '').trim();
     if (mountHash) scheduleThemeHash(mountHash, true);
@@ -299,10 +309,17 @@ export default function ProfilePage({
     function onNavigate(e: Event) {
       scheduleThemeHash((e as CustomEvent<string>).detail, false);
     }
+
+    function onPlainOpen() {
+      resetThemeAccordions();
+    }
+
     window.addEventListener(SETTINGS_NAVIGATE_EVENT, onNavigate);
+    window.addEventListener(PROFILE_PLAIN_OPEN_EVENT, onPlainOpen);
 
     return () => {
       window.removeEventListener(SETTINGS_NAVIGATE_EVENT, onNavigate);
+      window.removeEventListener(PROFILE_PLAIN_OPEN_EVENT, onPlainOpen);
       if (mountTimer !== undefined) clearTimeout(mountTimer);
     };
   }, []); // deps: none — state setters stable; THEME_HASH_MAP is local constant

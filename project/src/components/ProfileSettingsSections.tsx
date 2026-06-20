@@ -42,6 +42,16 @@ type MainSection = 'general' | 'currencies';
 /** Custom DOM event name for same-page Settings navigation. */
 export const SETTINGS_NAVIGATE_EVENT = 'settings:navigate';
 
+/** Plain profile entry (avatar / bottom nav) — reset accordions and scroll to top. */
+export const PROFILE_PLAIN_OPEN_EVENT = 'profile:plain-open';
+
+function scrollProfileRouteToTop(): void {
+  const main = document.querySelector('main');
+  if (main instanceof HTMLElement) {
+    main.scrollTo({ top: 0, behavior: 'auto' });
+  }
+}
+
 type HashTarget = {
   master: MainSection;
   sub?: ProfileCurrencySubSection;
@@ -165,6 +175,16 @@ export default function ProfileSettingsSections({
       mountTimer = setTimeout(() => applyHash(hashKey), 50);
     }
 
+    function resetToPlainProfileView(): void {
+      if (mountTimer !== undefined) {
+        clearTimeout(mountTimer);
+        mountTimer = undefined;
+      }
+      setMainOpen(new Set());
+      setCurrencySubOpen(new Set());
+      scrollProfileRouteToTop();
+    }
+
     // First mount: brief buffer so accordions finish layout before scroll.
     const mountHash = window.location.hash.replace(/^#/, '').trim();
     if (mountHash) scheduleHash(mountHash, true);
@@ -173,10 +193,17 @@ export default function ProfileSettingsSections({
     function onNavigate(e: Event) {
       scheduleHash((e as CustomEvent<string>).detail, false);
     }
+
+    function onPlainOpen() {
+      resetToPlainProfileView();
+    }
+
     window.addEventListener(SETTINGS_NAVIGATE_EVENT, onNavigate);
+    window.addEventListener(PROFILE_PLAIN_OPEN_EVENT, onPlainOpen);
 
     return () => {
       window.removeEventListener(SETTINGS_NAVIGATE_EVENT, onNavigate);
+      window.removeEventListener(PROFILE_PLAIN_OPEN_EVENT, onPlainOpen);
       if (mountTimer !== undefined) clearTimeout(mountTimer);
     };
   }, []); // deps: none — state setters are stable; SETTINGS_HASH_MAP is module-level constant

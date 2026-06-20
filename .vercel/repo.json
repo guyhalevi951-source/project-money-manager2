@@ -1,0 +1,11 @@
+{
+  "remoteName": "origin",
+  "projects": [
+    {
+      "id": "prj_zFSS1oNkK2V2RHFrBe7xynE7YkRZ",
+      "name": "project-money-manager2",
+      "directory": ".",
+      "orgId": "team_EuNLMi9RV0A5pKNsO3cvCoB0"
+    }
+  ]
+}

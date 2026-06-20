@@ -58,7 +58,7 @@ import { auth, signOutUser } from './firebase';
 import AuthPage from './components/AuthPage';
 import UserProfileMenu from './components/UserProfileMenu';
 import ProfilePage from './components/ProfilePage';
-import { SETTINGS_NAVIGATE_EVENT } from './components/ProfileSettingsSections';
+import { PROFILE_PLAIN_OPEN_EVENT, SETTINGS_NAVIGATE_EVENT } from './components/ProfileSettingsSections';
 import BudgetDrawerMenu from './components/BudgetDrawerMenu';
 import PersonalBudgetsPage, { type CreatePersonalBudgetInput } from './components/PersonalBudgetsPage';
 import SharedBudgetsPage from './components/SharedBudgetsPage';
@@ -3387,6 +3387,10 @@ function App() {
     window.dispatchEvent(new CustomEvent(SETTINGS_NAVIGATE_EVENT, { detail: hashKey }));
   }, []);
 
+  const clearProfileSettingsHash = useCallback(() => {
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+  }, []);
+
   const openProfile = useCallback(
     (currencySections?: ('display' | 'exchange' | 'manual-rate' | 'commissions')[] | null) => {
       setNavOpen(false);
@@ -3397,9 +3401,17 @@ function App() {
       if (activeTab !== 'profile') {
         profileReturnTabRef.current = activeTab as MainTabId;
       }
+
+      if (sections) {
+        // Deep-link helpers set the hash before calling openProfile.
+      } else {
+        clearProfileSettingsHash();
+        window.dispatchEvent(new CustomEvent(PROFILE_PLAIN_OPEN_EVENT));
+      }
+
       setActiveTab('profile');
     },
-    [activeTab, activeBudgetId],
+    [activeTab, activeBudgetId, clearProfileSettingsHash],
   );
 
   const openSettingsExchangeRates = useCallback(() => {
@@ -3645,6 +3657,7 @@ function App() {
 
   const closeProfile = () => {
     setProfileInitialCurrencySections(null);
+    clearProfileSettingsHash();
     setActiveTab(profileReturnTabRef.current);
   };
 
