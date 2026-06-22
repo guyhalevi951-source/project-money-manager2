@@ -2087,7 +2087,9 @@ function SubBudgetCollapsibleSection({
   children: ReactNode;
 }) {
   return (
-    <div className={`${subCardAccordionShellClass} overflow-visible`}>
+    // Shell owns rounded corners + overflow-hidden + outer padding.
+    // Content is always inset from the edges — corners never look sharp.
+    <div className={subCardAccordionShellClass}>
       <button
         type="button"
         onClick={() => onExpandedChange(!expanded)}
@@ -2107,9 +2109,10 @@ function SubBudgetCollapsibleSection({
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="overflow-hidden"
+            // No overflow-hidden here — the outer shell owns the clip boundary.
+            style={{ overflow: 'visible' }}
           >
-            <div className={`${subCardAccordionBodyClass} p-4 sm:p-5`}>
+            <div className={subCardAccordionBodyClass}>
               <div className={subCardAccordionContentClass}>{children}</div>
             </div>
           </motion.div>

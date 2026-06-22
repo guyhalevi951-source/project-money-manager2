@@ -100,11 +100,23 @@ export const themeCardLgClass = [
   'shadow-lg shadow-black/25',
 ].join(' ');
 
-/** Group 7 — full outer accordion shell (header + body) nested inside a master surface. */
+/**
+ * Group 7 — full outer accordion shell (header + body) nested inside a master surface.
+ *
+ * Design matches the settings-page sub-category capsule pattern:
+ *   • rounded-xl + 1px border + outer p-4/p-5 padding so content is always inset from
+ *     the rounded edges — no inner element ever touches a corner.
+ *   • overflow-hidden clips animated content to the rounded perimeter during expand/
+ *     collapse.  Safe here because accordion shells never host floating pickers.
+ *   • Trigger is flush + transparent (no own padding/border-b).  A border-t separator
+ *     is added by subCardAccordionBodyClass only when the body is open.
+ *   • Never add overflow-hidden to the motion.div — the shell owns the clip boundary.
+ */
 export const subCardAccordionShellClass = [
-  'rounded-3xl border overflow-visible',
+  'rounded-xl border overflow-hidden',
   subCardSurfaceColors,
-  'shadow-lg shadow-black/20',
+  'p-4 sm:p-5',
+  'shadow-sm shadow-black/15',
 ].join(' ');
 
 /** Group 7 — master accordion title strip (top header row inside a shell). */
@@ -120,21 +132,30 @@ export const subCardAccordionTriggerClass = [
   'hover:opacity-90 active:opacity-95',
 ].join(' ');
 
-/** Group 7 — trigger flush inside an accordion shell (no outer radius clash). */
+/**
+ * Group 7 — flush trigger inside a subCardAccordionShellClass wrapper.
+ * No own padding / background / border — the outer shell provides all of those.
+ * Identical contract to subCardNestedAccordionTriggerClass so any future accordion
+ * that uses this shell automatically inherits the correct capsule look.
+ */
 export const subCardAccordionShellTriggerClass = [
-  'w-full cursor-pointer border-0 border-b border-[var(--color-sub-cards-border)] p-4 text-start transition-opacity',
-  'bg-[var(--color-sub-cards)]',
-  'hover:opacity-90 active:opacity-95',
-].join(' ');
-
-/** Group 7 — expanded accordion body panel inside a shell. */
-export const subCardAccordionBodyClass = [
-  'overflow-visible bg-[var(--color-sub-cards)]',
-  'border-t border-[var(--color-sub-cards-border)]',
+  'w-full cursor-pointer border-0 bg-transparent p-0 text-start',
+  'transition-colors duration-150',
 ].join(' ');
 
 /**
- * @deprecated Removed — bulky square body shell. Use subCardAccordionContentClass instead.
+ * Group 7 — expanded body panel inside a shell.
+ * Adds a top separator + vertical breathing room, no background (shell provides it).
+ * Mirrors subCardNestedExpandedClass so the shell pattern is truly reusable.
+ */
+export const subCardAccordionBodyClass = [
+  'overflow-visible',
+  'border-t border-[var(--color-sub-cards-border)]',
+  'mt-4 pt-4 sm:mt-5 sm:pt-5',
+].join(' ');
+
+/**
+ * @deprecated Alias — use subCardAccordionBodyClass.
  */
 export const subCardAccordionBodyInsetClass = subCardAccordionBodyClass;
 
