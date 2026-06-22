@@ -239,7 +239,7 @@ const he: TranslationDict = {
   tabAnalytics: 'גרפים וניתוח נתונים',
   tabAnalyticsDesc:
     'הצגה ויזואלית של התפלגות ההוצאות, מגמות תקציב חודשיות וסטטיסטיקות מתקדמות.',
-  tabSubbudgets: 'הוספת וניהול תתי תקציבים',
+  tabSubbudgets: 'תקציבי משנה ותתי תקציבים',
   tabExpenses: 'היסטוריית הוצאות',
   closeMenu: 'סגור תפריט',
   budgetDrawerToggle: 'תפריט תקציבים',
@@ -356,7 +356,7 @@ const he: TranslationDict = {
   addExpenseToSeeBreakdown: 'הוסף הוצאה כדי לראות את הפילוח',
 
   // Sub-budgets
-  subBudgetsTitle: 'תקציבי משנה',
+  subBudgetsTitle: 'חלוקה מרכזית',
   subBudgetsSubtitle: 'חלוקת התקציב לקטגוריות',
   setMonthlyBudgetFirst: 'הגדר תחילה תקציב חודשי',
   thenSplitSubBudgets: 'לאחר מכן תוכל לחלק אותו לתקציבי משנה',
@@ -670,7 +670,7 @@ const en: TranslationDict = {
   tabAnalytics: 'Charts & data analysis',
   tabAnalyticsDesc:
     'Visual breakdown of expenses, monthly budget trends, and advanced statistics.',
-  tabSubbudgets: 'Add & manage sub-budgets',
+  tabSubbudgets: 'Master & sub-budgets',
   tabExpenses: 'Expense history',
   closeMenu: 'Close menu',
   budgetDrawerToggle: 'Budget menu',
@@ -777,7 +777,7 @@ const en: TranslationDict = {
   nextDay: 'Next day',
   noExpensesOnDate: 'No expenses on this date',
   addExpenseToSeeBreakdown: 'Add an expense to see the breakdown',
-  subBudgetsTitle: 'Sub-budgets',
+  subBudgetsTitle: 'Central allocation',
   subBudgetsSubtitle: 'Budget allocation by category',
   setMonthlyBudgetFirst: 'Set a monthly budget first',
   thenSplitSubBudgets: 'Then split it into sub-budgets',

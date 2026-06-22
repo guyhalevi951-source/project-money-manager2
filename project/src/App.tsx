@@ -3237,6 +3237,9 @@ function App() {
     data: UserAppData;
   }>({ budgetId: null, data: { ...EMPTY_USER_APP_DATA } });
   const locallyEditedSubBudgetMonthsRef = useRef<Set<string>>(new Set());
+  const commitFinancialPayloadRef = useRef<
+    (payload: UserAppData, options?: { cloud?: boolean }) => void
+  >(() => {});
   const skipNextSettingsSaveRef = useRef(false);
   const skipDisplayCurrencyConversionRef = useRef(false);
   const scopedDisplayCurrencyRef = useRef<ExpenseCurrency>('ILS');
@@ -3680,6 +3683,8 @@ function App() {
 
   const handleLogout = async () => {
     try {
+      cancelPendingFinancialCloudSave();
+      flushActiveBudgetFinancial({ cloud: true });
       clearAllCurrencyCommissionsLocal();
       clearAllManualExchangeOverridesLocal();
       clearCloudCurrencyCommissions();
@@ -3935,34 +3940,43 @@ function App() {
       ) => Record<string, { amount: number; currency: ExpenseCurrency }>,
     ) => {
       locallyEditedSubBudgetMonthsRef.current.add(monthKey);
-      const nextOriginal = originalPatch
+
+      const currentMonth = subBudgetsByMonth[monthKey] ?? {};
+      const patchedMonth = patch(currentMonth);
+      const nextSubBudgetsByMonth = { ...subBudgetsByMonth, [monthKey]: patchedMonth };
+
+      const nextSubBudgetsOriginalByMonth = originalPatch
         ? {
             ...subBudgetsOriginalByMonth,
             [monthKey]: originalPatch(subBudgetsOriginalByMonth[monthKey] ?? {}),
           }
         : subBudgetsOriginalByMonth;
+
       if (originalPatch) {
-        setSubBudgetsOriginalByMonth(nextOriginal);
+        setSubBudgetsOriginalByMonth(nextSubBudgetsOriginalByMonth);
       }
-      setSubBudgetsByMonth((prev) => {
-        const currentMonth = prev[monthKey] ?? {};
-        const patchedMonth = patch(currentMonth);
-        const next = { ...prev, [monthKey]: patchedMonth };
-        if (dataReady && user?.isAnonymous) {
-          saveToLocalStorage({
-            expenses,
-            customCategories,
-            budgetsByMonth,
-            budgetOriginalByMonth,
-            autoTransferByMonth,
-            subBudgetsByMonth: next,
-            subBudgetsOriginalByMonth: nextOriginal,
-          });
-        }
-        return next;
+      setSubBudgetsByMonth(nextSubBudgetsByMonth);
+
+      if (!dataReady) return;
+
+      const payload = snapshotUserAppData({
+        expenses,
+        customCategories,
+        budgetsByMonth,
+        budgetOriginalByMonth,
+        subBudgetsByMonth: nextSubBudgetsByMonth,
+        subBudgetsOriginalByMonth: nextSubBudgetsOriginalByMonth,
+        autoTransferByMonth,
       });
+
+      if (user?.isAnonymous) {
+        saveToLocalStorage(payload);
+      }
+
+      commitFinancialPayloadRef.current(payload, { cloud: true });
     },
     [
+      subBudgetsByMonth,
       subBudgetsOriginalByMonth,
       budgetsByMonth,
       budgetOriginalByMonth,
@@ -4053,6 +4067,7 @@ function App() {
     },
     [writeFinancialToCache],
   );
+  commitFinancialPayloadRef.current = commitFinancialPayload;
 
   const buildCurrentFinancialPayload = useCallback(
     (expenseOverride?: Expense[]): UserAppData =>
@@ -4087,6 +4102,7 @@ function App() {
       budgetsByMonth: data.budgetsByMonth,
       budgetOriginalByMonth: data.budgetOriginalByMonth,
       subBudgetsByMonth: data.subBudgetsByMonth,
+      subBudgetsOriginalByMonth: data.subBudgetsOriginalByMonth,
       autoTransferByMonth: data.autoTransferByMonth,
     });
     const budgetId = budgetIdOverride ?? activeBudgetIdRef.current;
@@ -5839,7 +5855,7 @@ function App() {
 
   // Sub-budget handlers — allocations are keyed by category ID (1:1 with categories).
   const handleSaveSubBudgets = useCallback(
-    async (
+    (
       draft: Record<string, number>,
       draftOriginal: Record<string, { amount: number; currency: ExpenseCurrency }>,
     ) => {
@@ -5874,11 +5890,8 @@ function App() {
           return next;
         },
       );
-      if (user && !user.isAnonymous) {
-        await new Promise<void>((resolve) => window.setTimeout(resolve, 450));
-      }
     },
-    [allCategories, patchSubBudgetsByMonth, selectedMonthKey, user],
+    [allCategories, patchSubBudgetsByMonth, selectedMonthKey],
   );
 
   // Month navigation (selectedMonthKey is derived above with budget/subBudgets).
