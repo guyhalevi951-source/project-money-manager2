@@ -29,7 +29,6 @@ import { previewExpenseDisplayAmount } from '../services/expenseConversionServic
 import { getLocalTodayIso } from '../services/exchangeRateService';
 import CurrencyLibraryModal from './CurrencyLibraryModal';
 import CurrencyFlag from './CurrencyFlag';
-import CurrencyDetectionBanner from './CurrencyDetectionBanner';
 import {
   currencyUtilityButtonLgClass,
   filterDropdownWrapperClass,
@@ -37,14 +36,6 @@ import {
   primaryActionSelectedChipClass,
 } from '../styles/actionButtonStyles';
 import { typographyLabelClass, typographyMutedClass } from '../styles/themeSurfaceStyles';
-import {
-  detectLocalCurrency,
-  isDetectedCurrencyAccepted,
-} from '../services/currencyDetectionService';
-import {
-  getCurrencyAutoDetectPref,
-  setCurrencyAutoDetectPref,
-} from '../services/currencyDetectionPreference';
 
 const expenseFormControlClass = `h-12 text-base ${filterFormControlClass}`;
 
@@ -104,10 +95,7 @@ export default function ExpenseAmountField({
   const pinnedCurrencies = usePinnedCurrencies();
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [isCurrencyMenuOpen, setIsCurrencyMenuOpen] = useState(false);
-  const [showDetectionPrompt, setShowDetectionPrompt] = useState(false);
-  const [detectedCurrency, setDetectedCurrency] = useState<CurrencyCode | null>(null);
   const currencyMenuRef = useRef<HTMLDivElement>(null);
-  const detectionRanRef = useRef(false);
 
   const needsRatesForStorage = inputCurrency !== 'ILS';
   const needsRatesForFetch = needsRatesForStorage || (!lockToDisplayCurrency && displayCurrency !== inputCurrency);
@@ -416,56 +404,6 @@ export default function ExpenseAmountField({
     [onCurrencyChange],
   );
 
-  useEffect(() => {
-    if (lockToDisplayCurrency) return;
-    if (detectionRanRef.current) return;
-    detectionRanRef.current = true;
-
-    const pref = getCurrencyAutoDetectPref();
-    if (pref === 'never') return;
-
-    let cancelled = false;
-
-    void detectLocalCurrency().then((detected) => {
-      if (
-        cancelled ||
-        !detected ||
-        !isDetectedCurrencyAccepted(detected) ||
-        detected === displayCurrency
-      ) {
-        return;
-      }
-
-      if (pref === 'always') {
-        onCurrencyChange(detected);
-        return;
-      }
-
-      setDetectedCurrency(detected);
-      setShowDetectionPrompt(true);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [displayCurrency, onCurrencyChange, lockToDisplayCurrency]);
-
-  const handleDetectionConfirm = useCallback(() => {
-    if (detectedCurrency) onCurrencyChange(detectedCurrency);
-    setShowDetectionPrompt(false);
-  }, [detectedCurrency, onCurrencyChange]);
-
-  const handleDetectionAlways = useCallback(() => {
-    setCurrencyAutoDetectPref('always');
-    if (detectedCurrency) onCurrencyChange(detectedCurrency);
-    setShowDetectionPrompt(false);
-  }, [detectedCurrency, onCurrencyChange]);
-
-  const handleDetectionNever = useCallback(() => {
-    setCurrencyAutoDetectPref('never');
-    setShowDetectionPrompt(false);
-  }, []);
-
   const inputRowClassName = `relative z-10 flex min-w-0 items-center gap-2 ${
     snapInputGroupToColumnEnd ? 'w-fit max-w-full shrink-0' : 'w-full flex-wrap'
   }`;
@@ -664,17 +602,6 @@ export default function ExpenseAmountField({
           {tr('amountTooLarge')}
         </p>
       )}
-
-      <AnimatePresence>
-        {!lockToDisplayCurrency && showDetectionPrompt && detectedCurrency && (
-          <CurrencyDetectionBanner
-            detectedCurrency={detectedCurrency}
-            onConfirmSwitch={handleDetectionConfirm}
-            onAlwaysSwitch={handleDetectionAlways}
-            onNeverAsk={handleDetectionNever}
-          />
-        )}
-      </AnimatePresence>
 
       <CurrencyLibraryModal
         open={libraryOpen}
