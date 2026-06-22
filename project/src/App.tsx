@@ -2459,6 +2459,29 @@ function SubBudgetTracker({
   );
 
   const activeSubChart = subCategoryCharts[subChartSlide] ?? null;
+  const activeSubChartPieData = useMemo(() => {
+    if (!activeSubChart) return [];
+    const slices = [
+      {
+        id: 'spent' as const,
+        value: Math.max(activeSubChart.spentAmount, 0),
+        fill: activeSubChart.hex,
+      },
+      {
+        id: 'remaining' as const,
+        value: Math.max(activeSubChart.remainingAmount, 0),
+        fill: remainingFill(activeSubChart.hex),
+      },
+    ].filter((item) => item.value > 0);
+    if (slices.length > 0) return slices;
+    return [
+      {
+        id: 'remaining' as const,
+        value: 1,
+        fill: remainingFill(activeSubChart.hex),
+      },
+    ];
+  }, [activeSubChart]);
   const activeSubOverLabel =
     activeSubChart && activeSubChart.isOverBudget
       ? formatTranslation(lang, 'overBudgetExceededBy', { amount: projection.format(activeSubChart.exceededAmount) })
@@ -2653,18 +2676,7 @@ function SubBudgetTracker({
                             <ResponsiveContainer width="100%" height="100%">
                               <PieChart>
                                 <Pie
-                                  data={[
-                                    {
-                                      id: 'spent',
-                                      value: Math.max(activeSubChart.spentAmount, 0),
-                                      fill: activeSubChart.hex,
-                                    },
-                                    {
-                                      id: 'remaining',
-                                      value: Math.max(activeSubChart.remainingAmount, 0),
-                                      fill: remainingFill(activeSubChart.hex),
-                                    },
-                                  ].filter((item) => item.value > 0)}
+                                  data={activeSubChartPieData}
                                   dataKey="value"
                                   nameKey="id"
                                   cx="50%"
@@ -2676,8 +2688,9 @@ function SubBudgetTracker({
                                   strokeWidth={2}
                                   isAnimationActive={false}
                                 >
-                                  <Cell fill={activeSubChart.hex} />
-                                  <Cell fill={remainingFill(activeSubChart.hex)} />
+                                  {activeSubChartPieData.map((slice) => (
+                                    <Cell key={slice.id} fill={slice.fill} />
+                                  ))}
                                 </Pie>
                               </PieChart>
                             </ResponsiveContainer>
