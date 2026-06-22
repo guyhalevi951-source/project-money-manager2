@@ -2072,9 +2072,11 @@ interface SubBudgetTrackerProps {
   linkedBudgetsExpanded: boolean;
   regularBudgetsExpanded: boolean;
   subBudgetPreviewExpanded: boolean;
+  subBudgetOverviewExpanded: boolean;
   onLinkedBudgetsExpandedChange: (expanded: boolean) => void;
   onRegularBudgetsExpandedChange: (expanded: boolean) => void;
   onSubBudgetPreviewExpandedChange: (expanded: boolean) => void;
+  onSubBudgetOverviewExpandedChange: (expanded: boolean) => void;
 }
 
 function SubBudgetCollapsibleSection({
@@ -2272,9 +2274,11 @@ function SubBudgetTracker({
   linkedBudgetsExpanded,
   regularBudgetsExpanded,
   subBudgetPreviewExpanded,
+  subBudgetOverviewExpanded,
   onLinkedBudgetsExpandedChange,
   onRegularBudgetsExpandedChange,
   onSubBudgetPreviewExpandedChange,
+  onSubBudgetOverviewExpandedChange,
 }: SubBudgetTrackerProps) {
   const { tr, ensureUserContents, dir, lang, displayCurrency } = useLanguage();
   // Visualization projection layer: every chart/stat below is computed from each
@@ -2526,11 +2530,9 @@ function SubBudgetTracker({
   return (
     <div className={`${themeCardClass} p-4 sm:p-6 mb-6 sm:mb-8`}>
       <div className="mb-4">
-        <h2 className={`text-base sm:text-lg font-semibold flex items-center gap-2 ${typographyTitleClass}`}>
-          <PieChartIcon className="w-5 h-5 text-violet-400" />
-          {tr('subBudgetsTitle')}
-        </h2>
-        <p className="text-sm text-neutral-500 mt-1">{tr('subBudgetsSubtitle')} • {monthLabel}</p>
+        <p className={`text-sm ${themeTextMutedClass}`}>
+          {tr('subBudgetsSubtitle')} • {monthLabel}
+        </p>
       </div>
 
       {budget <= 0 ? (
@@ -2544,80 +2546,86 @@ function SubBudgetTracker({
       ) : (
         <>
           {/* Main budget chart: used vs remaining */}
-          <div className={`p-3 sm:p-5 ${subCardClass}`}>
-            <div className={budgetTrackerRowGridClass}>
-              <div className={budgetTrackerChartCoreClass}>
-                <p className={`${budgetTrackerChartTitleClass} ${typographyTitleClass}`}>
-                  {tr('budgetStatus')}
-                </p>
-                <div className={budgetChartContainerClass}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={overviewChartData.length > 0 ? overviewChartData : [{ id: 'remaining', value: 1, fill: '#86efac' }]}
-                        dataKey="value"
-                        nameKey="id"
-                        cx="50%"
-                        cy="50%"
-                        innerRadius="64%"
-                        outerRadius="100%"
-                        paddingAngle={1}
-                        stroke="#0a0a0a"
-                        strokeWidth={2}
-                        isAnimationActive={false}
-                      >
-                        {(overviewChartData.length > 0 ? overviewChartData : [{ id: 'remaining', value: 1, fill: '#86efac' }]).map((slice) => (
-                          <Cell key={slice.id} fill={slice.fill} />
-                        ))}
-                      </Pie>
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                    <DisplayCurrencyAmount amount={usedOverviewAmount} className={`text-xl font-bold ${typographyTitleClass}`} />
-                    <span className="mt-1 text-[11px] text-neutral-500">
-                      <LtrNumeric>{tr('outOf')} {projection.format(budgetDisplay)}</LtrNumeric>
-                    </span>
+          <SubBudgetCollapsibleSection
+            title={tr('subBudgetsTitle')}
+            expanded={subBudgetOverviewExpanded}
+            onExpandedChange={onSubBudgetOverviewExpandedChange}
+          >
+            <div className={`p-3 sm:p-5 ${subCardClass}`}>
+              <div className={budgetTrackerRowGridClass}>
+                <div className={budgetTrackerChartCoreClass}>
+                  <p className={`${budgetTrackerChartTitleClass} ${typographyTitleClass}`}>
+                    {tr('budgetStatus')}
+                  </p>
+                  <div className={budgetChartContainerClass}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={overviewChartData.length > 0 ? overviewChartData : [{ id: 'remaining', value: 1, fill: '#86efac' }]}
+                          dataKey="value"
+                          nameKey="id"
+                          cx="50%"
+                          cy="50%"
+                          innerRadius="64%"
+                          outerRadius="100%"
+                          paddingAngle={1}
+                          stroke="#0a0a0a"
+                          strokeWidth={2}
+                          isAnimationActive={false}
+                        >
+                          {(overviewChartData.length > 0 ? overviewChartData : [{ id: 'remaining', value: 1, fill: '#86efac' }]).map((slice) => (
+                            <Cell key={slice.id} fill={slice.fill} />
+                          ))}
+                        </Pie>
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                      <DisplayCurrencyAmount amount={usedOverviewAmount} className={`text-xl font-bold ${typographyTitleClass}`} />
+                      <span className="mt-1 text-[11px] text-neutral-500">
+                        <LtrNumeric>{tr('outOf')} {projection.format(budgetDisplay)}</LtrNumeric>
+                      </span>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className={budgetTrackerLegendSideClass(dir === 'rtl')}>
-                <BudgetStatsLegendPanel
-                  isOver={isBudgetStatusOver}
-                  overBanner={
-                    isBudgetStatusOver ? <BudgetOverLimitBanner label={budgetStatusOverLabel} /> : undefined
-                  }
-                >
-                  <div className="space-y-1">
-                    <p className="text-xs text-neutral-400">
-                      {tr('spentLabel')}: <DisplayCurrencyAmount amount={totalSpent} className="inline-block" />
-                    </p>
-                    <p className="text-xs text-neutral-400">
-                      {tr('remainingLabel')}: <DisplayCurrencyAmount amount={remainingOverviewAmount} className="inline-block" />
-                    </p>
-                    <p className="text-xs text-neutral-500">
-                      {tr('totalBudgetLabel')}: <DisplayCurrencyAmount amount={budgetDisplay} className="inline-block" />
-                    </p>
-                    <p className={`text-xs ${isBudgetStatusOver ? 'text-rose-300' : 'text-emerald-300'}`}>
-                      {tr('spentLabel')}{' '}
-                      {budgetDisplay > 0 ? `${((totalSpent / budgetDisplay) * 100).toFixed(0)}%` : '0%'}
-                    </p>
-                    <p className="text-xs text-emerald-200">
-                      {tr('remainingLabel')}{' '}
-                      {budgetDisplay > 0 ? `${((remainingOverviewAmount / budgetDisplay) * 100).toFixed(0)}%` : '0%'}
-                    </p>
-                  </div>
-                  <BudgetChartLegend
-                    title={tr('subBudgetLegendTitle')}
-                    items={[
-                      { color: '#15803d', label: tr('subBudgetLegendUsed') },
-                      { color: '#86efac', label: tr('subBudgetLegendRemaining') },
-                    ]}
-                  />
-                </BudgetStatsLegendPanel>
+                <div className={budgetTrackerLegendSideClass(dir === 'rtl')}>
+                  <BudgetStatsLegendPanel
+                    isOver={isBudgetStatusOver}
+                    overBanner={
+                      isBudgetStatusOver ? <BudgetOverLimitBanner label={budgetStatusOverLabel} /> : undefined
+                    }
+                  >
+                    <div className="space-y-1">
+                      <p className="text-xs text-neutral-400">
+                        {tr('spentLabel')}: <DisplayCurrencyAmount amount={totalSpent} className="inline-block" />
+                      </p>
+                      <p className="text-xs text-neutral-400">
+                        {tr('remainingLabel')}: <DisplayCurrencyAmount amount={remainingOverviewAmount} className="inline-block" />
+                      </p>
+                      <p className="text-xs text-neutral-500">
+                        {tr('totalBudgetLabel')}: <DisplayCurrencyAmount amount={budgetDisplay} className="inline-block" />
+                      </p>
+                      <p className={`text-xs ${isBudgetStatusOver ? 'text-rose-300' : 'text-emerald-300'}`}>
+                        {tr('spentLabel')}{' '}
+                        {budgetDisplay > 0 ? `${((totalSpent / budgetDisplay) * 100).toFixed(0)}%` : '0%'}
+                      </p>
+                      <p className="text-xs text-emerald-200">
+                        {tr('remainingLabel')}{' '}
+                        {budgetDisplay > 0 ? `${((remainingOverviewAmount / budgetDisplay) * 100).toFixed(0)}%` : '0%'}
+                      </p>
+                    </div>
+                    <BudgetChartLegend
+                      title={tr('subBudgetLegendTitle')}
+                      items={[
+                        { color: '#15803d', label: tr('subBudgetLegendUsed') },
+                        { color: '#86efac', label: tr('subBudgetLegendRemaining') },
+                      ]}
+                    />
+                  </BudgetStatsLegendPanel>
+                </div>
               </div>
             </div>
-          </div>
+          </SubBudgetCollapsibleSection>
 
           {/* Sub-category preview — collapsible card with chart, metrics, and category nav at bottom */}
           <div className="mt-6">
@@ -6625,6 +6633,7 @@ function App() {
               linkedBudgetsExpanded={uiPreferences.linkedBudgetsExpanded}
               regularBudgetsExpanded={uiPreferences.regularBudgetsExpanded}
               subBudgetPreviewExpanded={uiPreferences.subBudgetPreviewExpanded}
+              subBudgetOverviewExpanded={uiPreferences.subBudgetOverviewExpanded}
               onLinkedBudgetsExpandedChange={(expanded) =>
                 persistUiPreferences({ linkedBudgetsExpanded: expanded })
               }
@@ -6633,6 +6642,9 @@ function App() {
               }
               onSubBudgetPreviewExpandedChange={(expanded) =>
                 persistUiPreferences({ subBudgetPreviewExpanded: expanded })
+              }
+              onSubBudgetOverviewExpandedChange={(expanded) =>
+                persistUiPreferences({ subBudgetOverviewExpanded: expanded })
               }
             />
           </>
