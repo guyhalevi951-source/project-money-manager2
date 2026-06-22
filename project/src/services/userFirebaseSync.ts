@@ -65,11 +65,13 @@ export interface UserSettings {
 export interface UiPreferences {
   linkedBudgetsExpanded: boolean;
   regularBudgetsExpanded: boolean;
+  subBudgetPreviewExpanded: boolean;
 }
 
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
-  linkedBudgetsExpanded: true,
+  linkedBudgetsExpanded: false,
   regularBudgetsExpanded: true,
+  subBudgetPreviewExpanded: false,
 };
 
 export interface UserCategoriesData {
@@ -182,6 +184,10 @@ function parseSettings(raw: Record<string, unknown> | undefined): UserSettings {
       typeof uiPreferencesRaw?.regularBudgetsExpanded === 'boolean'
         ? uiPreferencesRaw.regularBudgetsExpanded
         : DEFAULT_UI_PREFERENCES.regularBudgetsExpanded,
+    subBudgetPreviewExpanded:
+      typeof uiPreferencesRaw?.subBudgetPreviewExpanded === 'boolean'
+        ? uiPreferencesRaw.subBudgetPreviewExpanded
+        : DEFAULT_UI_PREFERENCES.subBudgetPreviewExpanded,
   };
 
   return {

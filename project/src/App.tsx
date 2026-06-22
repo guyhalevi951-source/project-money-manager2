@@ -2071,8 +2071,10 @@ interface SubBudgetTrackerProps {
   isMainBudget: boolean;
   linkedBudgetsExpanded: boolean;
   regularBudgetsExpanded: boolean;
+  subBudgetPreviewExpanded: boolean;
   onLinkedBudgetsExpandedChange: (expanded: boolean) => void;
   onRegularBudgetsExpandedChange: (expanded: boolean) => void;
+  onSubBudgetPreviewExpandedChange: (expanded: boolean) => void;
 }
 
 function SubBudgetCollapsibleSection({
@@ -2269,8 +2271,10 @@ function SubBudgetTracker({
   isMainBudget,
   linkedBudgetsExpanded,
   regularBudgetsExpanded,
+  subBudgetPreviewExpanded,
   onLinkedBudgetsExpandedChange,
   onRegularBudgetsExpandedChange,
+  onSubBudgetPreviewExpandedChange,
 }: SubBudgetTrackerProps) {
   const { tr, ensureUserContents, dir, lang, displayCurrency } = useLanguage();
   // Visualization projection layer: every chart/stat below is computed from each
@@ -2615,143 +2619,159 @@ function SubBudgetTracker({
             </div>
           </div>
 
-          {/* Sub-category action buttons + animated per-category chart carousel */}
-          <div className="mt-6 space-y-4">
-            {subCategoryCharts.length === 0 ? (
-              <p className="text-center text-sm text-neutral-500">{tr('startByAddingSubBudget')}</p>
-            ) : (
-              <>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {subCategoryCharts.map((env, index) => {
-                    const Icon = env.icon;
-                    const isActive = index === subChartSlide;
-                    return (
-                      <button
-                        key={`sub-btn-${env.key}`}
-                        type="button"
-                        onClick={() => goToSubChartSlide(index)}
-                        className={`flex min-h-[3rem] w-full items-center justify-center gap-2 overflow-hidden rounded-xl border p-2 text-center transition-all ${
-                          isActive ? 'ring-2 ring-white/40' : 'hover:scale-[1.01]'
-                        }`}
-                        style={{ borderColor: `${env.hex}66`, backgroundColor: `${env.hex}22` }}
-                      >
-                        <Icon className="h-4 w-4 shrink-0 text-white" />
-                        <span className="truncate text-xs font-semibold text-white sm:text-sm">
-                          <LocalizedUserText text={env.key} />
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className={`relative w-full overflow-hidden p-3 sm:p-4 ${subCardClass}`}>
-                  <AnimatePresence mode="popLayout" initial={false}>
-                    {activeSubChart && (
-                      <motion.div
-                        key={`sub-chart-${activeSubChart.key}-${subChartSlide}`}
-                        custom={subChartDirection}
-                        variants={subChartVariants}
-                        initial="enter"
-                        animate="center"
-                        exit="exit"
-                        transition={{
-                          x: { type: 'spring', stiffness: 300, damping: 30 },
-                          opacity: { duration: 0.2 },
-                        }}
-                        drag="x"
-                        dragConstraints={{ left: 0, right: 0 }}
-                        dragElastic={0.12}
-                        dragMomentum={false}
-                        onDragEnd={(_, info: PanInfo) => {
-                          if (Math.abs(info.offset.x) < 50) return;
-                          // left swipe (-x) = forward to next; right swipe (+x) = back to previous
-                          if (info.offset.x < 0) {
-                            goToSubChartSlide(subChartSlide + 1);
-                            return;
-                          }
-                          goToSubChartSlide(subChartSlide - 1);
-                        }}
-                        className={`relative ${budgetTrackerRowGridClass}`}
-                      >
-                        <div className={budgetTrackerChartCoreClass}>
-                          <p className={`${budgetTrackerChartTitleClass} ${typographyTitleClass}`}>
-                            <LocalizedUserText text={activeSubChart.key} />
-                          </p>
-                          <div className={budgetChartContainerClass}>
-                            <ResponsiveContainer width="100%" height="100%">
-                              <PieChart>
-                                <Pie
-                                  data={activeSubChartPieData}
-                                  dataKey="value"
-                                  nameKey="id"
-                                  cx="50%"
-                                  cy="50%"
-                                  innerRadius="62%"
-                                  outerRadius="100%"
-                                  paddingAngle={1}
-                                  stroke="#0a0a0a"
-                                  strokeWidth={2}
-                                  isAnimationActive={false}
-                                >
-                                  {activeSubChartPieData.map((slice) => (
-                                    <Cell key={slice.id} fill={slice.fill} />
-                                  ))}
-                                </Pie>
-                              </PieChart>
-                            </ResponsiveContainer>
-                          </div>
-                        </div>
-
-                        <div className={budgetTrackerLegendSideClass(dir === 'rtl')}>
-                          <BudgetStatsLegendPanel
-                            isOver={activeSubChart.isOverBudget}
-                            overBanner={
-                              activeSubChart.isOverBudget ? (
-                                <BudgetOverLimitBanner label={activeSubOverLabel} />
-                              ) : undefined
+          {/* Sub-category preview — collapsible card with chart, metrics, and category nav at bottom */}
+          <div className="mt-6">
+            <SubBudgetCollapsibleSection
+              title={tr('regularSubBudgetsSectionTitle')}
+              expanded={subBudgetPreviewExpanded}
+              onExpandedChange={onSubBudgetPreviewExpandedChange}
+            >
+              {subCategoryCharts.length === 0 ? (
+                <p className="text-center text-sm text-neutral-500">{tr('startByAddingSubBudget')}</p>
+              ) : (
+                <div className="flex flex-col gap-4">
+                  <div className={`relative w-full overflow-hidden p-3 sm:p-4 ${subCardClass}`}>
+                    <AnimatePresence mode="popLayout" initial={false}>
+                      {activeSubChart && (
+                        <motion.div
+                          key={`sub-chart-${activeSubChart.key}-${subChartSlide}`}
+                          custom={subChartDirection}
+                          variants={subChartVariants}
+                          initial="enter"
+                          animate="center"
+                          exit="exit"
+                          transition={{
+                            x: { type: 'spring', stiffness: 300, damping: 30 },
+                            opacity: { duration: 0.2 },
+                          }}
+                          drag="x"
+                          dragConstraints={{ left: 0, right: 0 }}
+                          dragElastic={0.12}
+                          dragMomentum={false}
+                          onDragEnd={(_, info: PanInfo) => {
+                            if (Math.abs(info.offset.x) < 50) return;
+                            if (info.offset.x < 0) {
+                              goToSubChartSlide(subChartSlide + 1);
+                              return;
                             }
-                          >
-                            <div className="space-y-1">
-                              <p className="text-xs text-neutral-400">
-                                {tr('spentLabel')}: <DisplayCurrencyAmount amount={activeSubChart.spent} className="inline-block" />
-                              </p>
-                              <p className="text-xs text-neutral-400">
-                                {tr('remainingLabel')}: <DisplayCurrencyAmount amount={activeSubChart.remainingAmount} className="inline-block" />
-                              </p>
-                              <p className="text-xs text-neutral-500">
-                                {tr('totalBudgetLabel')}: <DisplayCurrencyAmount amount={activeSubChart.allocated} className="inline-block" />
-                              </p>
-                              <p className={`text-xs ${activeSubChart.isOverBudget ? 'text-rose-300' : 'text-emerald-300'}`}>
-                                {tr('spentLabel')}{' '}
-                                {activeSubChart.allocated > 0
-                                  ? `${((activeSubChart.spent / activeSubChart.allocated) * 100).toFixed(0)}%`
-                                  : '0%'}
-                              </p>
-                              <p className="text-xs text-emerald-200">
-                                {tr('remainingLabel')}{' '}
-                                {activeSubChart.allocated > 0
-                                  ? `${((activeSubChart.remainingAmount / activeSubChart.allocated) * 100).toFixed(0)}%`
-                                  : '0%'}
-                              </p>
+                            goToSubChartSlide(subChartSlide - 1);
+                          }}
+                          className={`relative ${budgetTrackerRowGridClass}`}
+                        >
+                          <div className={budgetTrackerChartCoreClass}>
+                            <p className={`${budgetTrackerChartTitleClass} ${typographyTitleClass}`}>
+                              <LocalizedUserText text={activeSubChart.key} />
+                            </p>
+                            <div className={budgetChartContainerClass}>
+                              <ResponsiveContainer width="100%" height="100%">
+                                <PieChart>
+                                  <Pie
+                                    data={activeSubChartPieData}
+                                    dataKey="value"
+                                    nameKey="id"
+                                    cx="50%"
+                                    cy="50%"
+                                    innerRadius="62%"
+                                    outerRadius="100%"
+                                    paddingAngle={1}
+                                    stroke="#0a0a0a"
+                                    strokeWidth={2}
+                                    isAnimationActive={false}
+                                  >
+                                    {activeSubChartPieData.map((slice) => (
+                                      <Cell key={slice.id} fill={slice.fill} />
+                                    ))}
+                                  </Pie>
+                                </PieChart>
+                              </ResponsiveContainer>
                             </div>
-                            <BudgetChartLegend
-                              title={tr('subBudgetLegendTitle')}
-                              items={[
-                                { color: activeSubChart.hex, label: tr('subBudgetLegendUsed') },
-                                {
-                                  color: remainingFill(activeSubChart.hex),
-                                  label: tr('subBudgetLegendRemaining'),
-                                },
-                              ]}
-                            />
-                          </BudgetStatsLegendPanel>
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+                          </div>
+
+                          <div className={budgetTrackerLegendSideClass(dir === 'rtl')}>
+                            <BudgetStatsLegendPanel
+                              isOver={activeSubChart.isOverBudget}
+                              overBanner={
+                                activeSubChart.isOverBudget ? (
+                                  <BudgetOverLimitBanner label={activeSubOverLabel} />
+                                ) : undefined
+                              }
+                            >
+                              <div className="space-y-1">
+                                <p className="text-xs text-neutral-400">
+                                  {tr('spentLabel')}:{' '}
+                                  <DisplayCurrencyAmount amount={activeSubChart.spent} className="inline-block" />
+                                </p>
+                                <p className="text-xs text-neutral-400">
+                                  {tr('remainingLabel')}:{' '}
+                                  <DisplayCurrencyAmount
+                                    amount={activeSubChart.remainingAmount}
+                                    className="inline-block"
+                                  />
+                                </p>
+                                <p className="text-xs text-neutral-500">
+                                  {tr('totalBudgetLabel')}:{' '}
+                                  <DisplayCurrencyAmount
+                                    amount={activeSubChart.allocated}
+                                    className="inline-block"
+                                  />
+                                </p>
+                                <p
+                                  className={`text-xs ${activeSubChart.isOverBudget ? 'text-rose-300' : 'text-emerald-300'}`}
+                                >
+                                  {tr('spentLabel')}{' '}
+                                  {activeSubChart.allocated > 0
+                                    ? `${((activeSubChart.spent / activeSubChart.allocated) * 100).toFixed(0)}%`
+                                    : '0%'}
+                                </p>
+                                <p className="text-xs text-emerald-200">
+                                  {tr('remainingLabel')}{' '}
+                                  {activeSubChart.allocated > 0
+                                    ? `${((activeSubChart.remainingAmount / activeSubChart.allocated) * 100).toFixed(0)}%`
+                                    : '0%'}
+                                </p>
+                              </div>
+                              <BudgetChartLegend
+                                title={tr('subBudgetLegendTitle')}
+                                items={[
+                                  { color: activeSubChart.hex, label: tr('subBudgetLegendUsed') },
+                                  {
+                                    color: remainingFill(activeSubChart.hex),
+                                    label: tr('subBudgetLegendRemaining'),
+                                  },
+                                ]}
+                              />
+                            </BudgetStatsLegendPanel>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+
+                  <div className="flex flex-row flex-wrap items-stretch justify-start gap-2 border-t border-[var(--color-sub-cards-border)] pt-4">
+                    {subCategoryCharts.map((env, index) => {
+                      const Icon = env.icon;
+                      const isActive = index === subChartSlide;
+                      return (
+                        <button
+                          key={`sub-btn-${env.key}`}
+                          type="button"
+                          onClick={() => goToSubChartSlide(index)}
+                          className={`flex min-h-[2.75rem] min-w-[5.5rem] flex-1 items-center justify-center gap-2 overflow-hidden rounded-xl border px-2 py-2 text-center transition-all sm:min-w-[6.5rem] sm:flex-none ${
+                            isActive ? 'ring-2 ring-white/40' : 'hover:scale-[1.01]'
+                          }`}
+                          style={{ borderColor: `${env.hex}66`, backgroundColor: `${env.hex}22` }}
+                        >
+                          <Icon className="h-4 w-4 shrink-0 text-white" />
+                          <span className="truncate text-xs font-semibold text-white sm:text-sm">
+                            <LocalizedUserText text={env.key} />
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </>
-            )}
+              )}
+            </SubBudgetCollapsibleSection>
           </div>
 
           {/* Per-category budget limits (1:1 with categories list) */}
@@ -2784,7 +2804,7 @@ function SubBudgetTracker({
                 </SubBudgetCollapsibleSection>
 
                 <SubBudgetCollapsibleSection
-                  title={tr('regularSubBudgetsSectionTitle')}
+                  title={tr('addOrUpdateSubBudget')}
                   expanded={regularBudgetsExpanded}
                   onExpandedChange={onRegularBudgetsExpandedChange}
                 >
@@ -2809,7 +2829,11 @@ function SubBudgetTracker({
                 </SubBudgetCollapsibleSection>
               </div>
             ) : (
-              <>
+              <SubBudgetCollapsibleSection
+                title={tr('addOrUpdateSubBudget')}
+                expanded={regularBudgetsExpanded}
+                onExpandedChange={onRegularBudgetsExpandedChange}
+              >
                 <p className={`mb-2 text-xs font-medium ${typographyMutedClass}`}>
                   {sectionActionLabel}
                 </p>
@@ -2820,7 +2844,7 @@ function SubBudgetTracker({
                   displayCurrency={displayCurrency}
                   onCommitField={commitSubBudgetField}
                 />
-              </>
+              </SubBudgetCollapsibleSection>
             )}
             <div className="flex items-center justify-between pt-4 text-xs">
                 <LtrNumeric className="text-neutral-500">
@@ -6600,11 +6624,15 @@ function App() {
               isMainBudget={activeBudgetId === DEFAULT_MONTHLY_BUDGET_ID}
               linkedBudgetsExpanded={uiPreferences.linkedBudgetsExpanded}
               regularBudgetsExpanded={uiPreferences.regularBudgetsExpanded}
+              subBudgetPreviewExpanded={uiPreferences.subBudgetPreviewExpanded}
               onLinkedBudgetsExpandedChange={(expanded) =>
                 persistUiPreferences({ linkedBudgetsExpanded: expanded })
               }
               onRegularBudgetsExpandedChange={(expanded) =>
                 persistUiPreferences({ regularBudgetsExpanded: expanded })
+              }
+              onSubBudgetPreviewExpandedChange={(expanded) =>
+                persistUiPreferences({ subBudgetPreviewExpanded: expanded })
               }
             />
           </>
