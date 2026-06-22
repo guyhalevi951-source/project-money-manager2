@@ -2124,19 +2124,20 @@ function SubBudgetCategoryRows({
   draftSubBudgets,
   draftSubBudgetsOriginal,
   displayCurrency,
-  onCommit,
-  onCommitOriginal,
+  onCommitField,
 }: {
   categories: Category[];
   draftSubBudgets: Record<string, number>;
   draftSubBudgetsOriginal: Record<string, { amount: number; currency: ExpenseCurrency }>;
   displayCurrency: ExpenseCurrency;
-  onCommit: (categoryValue: string, amount: number | null) => void;
-  onCommitOriginal: (
+  onCommitField: (
     categoryValue: string,
+    amount: number | null,
     original: { amount: number; currency: ExpenseCurrency } | null,
   ) => void;
 }) {
+  const pendingCommitRef = useRef<{ categoryValue: string; amount: number | null } | null>(null);
+
   return (
     <div className="space-y-2">
       {categories.map((cat) => {
@@ -2159,8 +2160,16 @@ function SubBudgetCategoryRows({
               value={allocated}
               baseline={baseline}
               displayCurrency={displayCurrency}
-              onCommit={(amount) => onCommit(cat.value, amount)}
-              onCommitOriginal={(original) => onCommitOriginal(cat.value, original)}
+              onCommit={(amount) => {
+                pendingCommitRef.current = { categoryValue: cat.value, amount };
+              }}
+              onCommitOriginal={(original) => {
+                const pending = pendingCommitRef.current;
+                if (pending?.categoryValue === cat.value) {
+                  onCommitField(cat.value, pending.amount, original);
+                  pendingCommitRef.current = null;
+                }
+              }}
               className={`w-24 text-left ${surfaceInputSmClass}`}
             />
           </div>
@@ -2272,7 +2281,7 @@ function SubBudgetTracker({
   const [draftSubBudgetsOriginal, setDraftSubBudgetsOriginal] = useState<
     Record<string, { amount: number; currency: ExpenseCurrency }>
   >(() => ({ ...subBudgetsOriginal }));
-  const [isSaving, setIsSaving] = useState(false);
+  const isSavingRef = useRef(false);
 
   useEffect(() => {
     setDraftSubBudgets({ ...subBudgets });
@@ -2298,51 +2307,44 @@ function SubBudgetTracker({
     void ensureUserContents(categoryValues);
   }, [categoryValues, ensureUserContents]);
 
-  const hasChanges = useMemo(
-    () =>
-      categoryValues.some(
-        (value) =>
-          roundMoneyAmount(draftSubBudgets[value] ?? 0) !== roundMoneyAmount(subBudgets[value] ?? 0),
-      ),
-    [categoryValues, draftSubBudgets, subBudgets],
-  );
-
-  const updateDraftSubBudget = useCallback((categoryValue: string, amount: number | null) => {
-    setDraftSubBudgets((prev) => {
-      const next = { ...prev };
+  const commitSubBudgetField = useCallback(
+    async (
+      categoryValue: string,
+      amount: number | null,
+      original: { amount: number; currency: ExpenseCurrency } | null,
+    ) => {
+      const nextDraft = { ...draftSubBudgets };
       if (amount === null || amount <= 0) {
-        delete next[categoryValue];
+        delete nextDraft[categoryValue];
       } else {
-        next[categoryValue] = roundMoneyAmount(amount);
+        nextDraft[categoryValue] = roundMoneyAmount(amount);
       }
-      return next;
-    });
-  }, []);
 
-  const updateDraftSubBudgetOriginal = useCallback(
-    (categoryValue: string, original: { amount: number; currency: ExpenseCurrency } | null) => {
-      setDraftSubBudgetsOriginal((prev) => {
-        const next = { ...prev };
-        if (original === null || !(original.amount > 0)) {
-          delete next[categoryValue];
-        } else {
-          next[categoryValue] = original;
-        }
-        return next;
-      });
+      const nextOriginal = { ...draftSubBudgetsOriginal };
+      if (original === null || !(original.amount > 0)) {
+        delete nextOriginal[categoryValue];
+      } else {
+        nextOriginal[categoryValue] = original;
+      }
+
+      const changed = categoryValues.some(
+        (value) =>
+          roundMoneyAmount(nextDraft[value] ?? 0) !== roundMoneyAmount(subBudgets[value] ?? 0),
+      );
+
+      setDraftSubBudgets(nextDraft);
+      setDraftSubBudgetsOriginal(nextOriginal);
+
+      if (!changed || isSavingRef.current) return;
+      isSavingRef.current = true;
+      try {
+        await onSaveSubBudgets(nextDraft, nextOriginal);
+      } finally {
+        isSavingRef.current = false;
+      }
     },
-    [],
+    [categoryValues, draftSubBudgets, draftSubBudgetsOriginal, onSaveSubBudgets, subBudgets],
   );
-
-  const handleSaveChanges = useCallback(async () => {
-    if (!hasChanges || isSaving) return;
-    setIsSaving(true);
-    try {
-      await onSaveSubBudgets(draftSubBudgets, draftSubBudgetsOriginal);
-    } finally {
-      setIsSaving(false);
-    }
-  }, [draftSubBudgets, draftSubBudgetsOriginal, hasChanges, isSaving, onSaveSubBudgets]);
 
   // Budget limit projected from its immutable baseline (zero-math when the view
   // currency matches what the user typed); legacy budgets fall back to the ILS ledger.
@@ -2772,8 +2774,7 @@ function SubBudgetTracker({
                         draftSubBudgets={draftSubBudgets}
                         draftSubBudgetsOriginal={draftSubBudgetsOriginal}
                         displayCurrency={displayCurrency}
-                        onCommit={updateDraftSubBudget}
-                        onCommitOriginal={updateDraftSubBudgetOriginal}
+                        onCommitField={commitSubBudgetField}
                       />
                     </>
                   )}
@@ -2798,8 +2799,7 @@ function SubBudgetTracker({
                         draftSubBudgets={draftSubBudgets}
                         draftSubBudgetsOriginal={draftSubBudgetsOriginal}
                         displayCurrency={displayCurrency}
-                        onCommit={updateDraftSubBudget}
-                        onCommitOriginal={updateDraftSubBudgetOriginal}
+                        onCommitField={commitSubBudgetField}
                       />
                     </>
                   )}
@@ -2815,8 +2815,7 @@ function SubBudgetTracker({
                   draftSubBudgets={draftSubBudgets}
                   draftSubBudgetsOriginal={draftSubBudgetsOriginal}
                   displayCurrency={displayCurrency}
-                  onCommit={updateDraftSubBudget}
-                  onCommitOriginal={updateDraftSubBudgetOriginal}
+                  onCommitField={commitSubBudgetField}
                 />
               </>
             )}
@@ -2846,16 +2845,6 @@ function SubBudgetTracker({
                     </>
                   )}
                 </LtrNumeric>
-              </div>
-              <div className={`flex pt-3 ${dir === 'rtl' ? 'justify-end' : 'justify-start'}`}>
-                <button
-                  type="button"
-                  onClick={() => void handleSaveChanges()}
-                  disabled={!hasChanges || isSaving}
-                  className={`rounded-lg px-4 py-2 text-sm transition-all hover:brightness-110 active:scale-95 ${primaryActionButtonClass} ${primaryActionDisabled}`}
-                >
-                  {isSaving ? tr('subBudgetSaving') : tr('subBudgetSaveChanges')}
-                </button>
               </div>
           </div>
         </>
