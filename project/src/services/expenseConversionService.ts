@@ -15,14 +15,17 @@
 
 import { listActiveCurrencyCommissions } from './currencyCommissionService';
 import {
-  computeDirectUnitRateFromIlsPivot,
   convertIlsToForeign,
   fetchExchangeRates,
-  fetchHistoricalDirectRate,
   getLocalTodayIso,
+  resolveIlsLegDirectUnitRate,
   type ExchangeRates,
   type ExpenseCurrency,
 } from './exchangeRateService';
+import {
+  ensureDirectPairUnitRate,
+  resolveDirectPairUnitRateSync,
+} from './currencyPairResolver';
 import {
   getManualExchangeOverride,
   listActiveManualExchangeOverrides,
@@ -128,18 +131,24 @@ async function resolveDateScopedApiRate(
   const cachedApi = getApiRateForDate(dateIso, fromCurrency, toCurrency);
   if (cachedApi != null && cachedApi > 0) return cachedApi;
 
-  const today = getLocalTodayIso();
-  if (dateIso < today) {
-    const historical = await fetchHistoricalDirectRate(dateIso, fromCurrency, toCurrency).catch(
-      () => null,
-    );
-    if (historical != null && historical > 0) return historical;
-  }
+  const ensured = await ensureDirectPairUnitRate({
+    fromCurrency,
+    toCurrency,
+    dateIso,
+    rates,
+  });
+  if (ensured.rate != null && ensured.rate > 0) return ensured.rate;
 
   const liveRates = rates ?? (await fetchExchangeRates().catch(() => null));
   if (!liveRates) return null;
 
-  return computeDirectUnitRateFromIlsPivot(fromCurrency, toCurrency, liveRates.ilsToForeign);
+  const sync = resolveDirectPairUnitRateSync({
+    fromCurrency,
+    toCurrency,
+    dateIso,
+    rates: liveRates,
+  });
+  return sync.rate;
 }
 
 function resolveDateScopedApiRateSync(
@@ -151,7 +160,16 @@ function resolveDateScopedApiRateSync(
   if (from === to) return 1;
   const cached = getApiRateForDate(dateIso, from, to);
   if (cached != null && cached > 0) return cached;
-  return computeDirectUnitRateFromIlsPivot(from, to, rates.ilsToForeign);
+
+  const sync = resolveDirectPairUnitRateSync({
+    fromCurrency: from,
+    toCurrency: to,
+    dateIso,
+    rates,
+  });
+  if (sync.rate != null && sync.rate > 0) return sync.rate;
+
+  return resolveIlsLegDirectUnitRate(from, to, rates.ilsToForeign);
 }
 
 /**
@@ -160,7 +178,6 @@ function resolveDateScopedApiRateSync(
 function computeExpenseIlsConversion(
   amount: number,
   from: ExpenseCurrency,
-  rates: ExchangeRates,
   options: {
     transactionDate: string;
     manualRateDisabled: boolean;
@@ -321,7 +338,7 @@ export async function recordExpenseConversionToIlsAsync(
   );
   if (!unit) return null;
 
-  return computeExpenseIlsConversion(amount, from, liveRates, {
+  return computeExpenseIlsConversion(amount, from, {
     transactionDate,
     manualRateDisabled,
     feeDisabled,
@@ -354,7 +371,7 @@ export function recordExpenseConversionToIls(
   );
   if (!unit) return null;
 
-  return computeExpenseIlsConversion(amount, from, rates, {
+  return computeExpenseIlsConversion(amount, from, {
     transactionDate,
     manualRateDisabled,
     feeDisabled,

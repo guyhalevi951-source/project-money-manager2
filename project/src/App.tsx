@@ -79,6 +79,7 @@ import { formatTranslation, localizeCategoryLabel } from './translations';
 import {
   formatAmountParts,
   formatAmountWithSymbol,
+  convertDisplayAmountToLedgerCurrency,
   symbolToCurrency,
   type AmountDisplayParts,
 } from './services/displayCurrencyUtils';
@@ -177,13 +178,13 @@ import {
   type NewExpenseHistoricalApplied,
 } from './services/historicalOverrideService';
 import {
-  convertForeignToIls,
   currencySymbol,
   fetchExchangeRates,
   getCachedExchangeRates,
   getLocalTodayIso,
   type ExpenseCurrency,
 } from './services/exchangeRateService';
+import { layoutToPinnedCodes } from './services/currencyLayoutService';
 import {
   EMPTY_USER_APP_DATA,
   loadFromLocalStorage,
@@ -3252,6 +3253,10 @@ function App() {
     setSettingsPersistence,
     applySettingsFromCloud,
   } = useLanguage();
+  const rateCacheWarmupCurrencies = useMemo(
+    () => layoutToPinnedCodes(currencyLayout),
+    [currencyLayout],
+  );
   const [user, setUser] = useState<User | null>(null);
   const [avatarUrl, setAvatarUrl] = useState('');
   const [authReady, setAuthReady] = useState(false);
@@ -3259,7 +3264,12 @@ function App() {
 
   // Offline-first exchange-rate cache: localStorage for guests, Firebase for
   // members; background-refreshes stale live rates even under manual overrides.
-  useRateCacheSync({ user, authReady });
+  useRateCacheSync({
+    user,
+    authReady,
+    displayCurrency: displayCurrency as ExpenseCurrency,
+    warmupCurrencies: rateCacheWarmupCurrencies,
+  });
   const [settingsCloudReady, setSettingsCloudReady] = useState(false);
   const suppressCloudSaveRef = useRef(true);
   const financialLocalVersionRef = useRef<Record<string, number>>({});
@@ -5391,7 +5401,7 @@ function App() {
       if (displayCurrency === 'ILS') return roundMoneyAmount(inputAmount);
       const rates = getCachedExchangeRates() ?? (await fetchExchangeRates().catch(() => null));
       if (!rates) return null;
-      const converted = convertForeignToIls(inputAmount, displayCurrency, rates);
+      const converted = convertDisplayAmountToLedgerCurrency(inputAmount, displayCurrency, rates);
       if (converted == null) return null;
       return roundMoneyAmount(converted);
     };
@@ -5496,6 +5506,7 @@ function App() {
   // Add new expense
   const handleAddExpense = (e: React.FormEvent) => {
     e.preventDefault();
+    if (newExpenseHistoricalBanner) return;
     const enteredAmount = parseFloat(newExpense.amount);
     const inputCurrency = newExpense.currency;
 
@@ -5632,7 +5643,8 @@ function App() {
   };
 
   const expenseSubmitBlocked =
-    displayCurrency !== 'ILS' && !expenseRatesReady;
+    !!newExpenseHistoricalBanner ||
+    (displayCurrency !== 'ILS' && !expenseRatesReady);
   const editExpenseSubmitBlocked =
     !!editExpenseDraft &&
     (editExpenseDraft.currency !== 'ILS' && !editExpenseRatesReady);

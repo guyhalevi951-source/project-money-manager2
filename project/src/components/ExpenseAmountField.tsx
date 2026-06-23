@@ -6,27 +6,20 @@ import { getCurrencyMeta, type CurrencyCode } from '../constants/currencies';
 import { usePinnedCurrencies } from '../hooks/usePinnedCurrencies';
 import { formatAmountWithSymbol } from '../services/displayCurrencyUtils';
 import {
-  listActiveCurrencyCommissions,
   subscribeCurrencyCommissionsUpdated,
 } from '../services/currencyCommissionService';
 import {
   fetchExchangeRates,
   getCachedExchangeRates,
   hasExchangeRate,
+  getLocalTodayIso,
   type ExchangeRates,
 } from '../services/exchangeRateService';
 import {
   hasActiveManualOverrideForPair,
-  listActiveManualExchangeOverrides,
   subscribeManualOverridesUpdated,
 } from '../services/manualExchangeOverrideService';
-import {
-  processTransactionWithUserRules,
-  toActiveExchangeRatesFromSnapshot,
-  toActiveFeesFromCommissionEntries,
-} from '../services/transactionProcessingService';
 import { previewExpenseDisplayAmount } from '../services/expenseConversionService';
-import { getLocalTodayIso } from '../services/exchangeRateService';
 import CurrencyLibraryModal from './CurrencyLibraryModal';
 import CurrencyFlag from './CurrencyFlag';
 import {
@@ -256,56 +249,31 @@ export default function ExpenseAmountField({
     [isMaxLengthReached, parsedAmount, lockToDisplayCurrency, inputCurrency, displayCurrency],
   );
 
-  const activeFees = useMemo(
-    () => toActiveFeesFromCommissionEntries(listActiveCurrencyCommissions()),
-    [commissionVersion],
-  );
+  const [displayPreview, setDisplayPreview] = useState<{
+    displayAmount: number;
+    appliedFeePercent: number;
+    manualRateUsed: boolean;
+  } | null>(null);
+  const [displayPreviewLoading, setDisplayPreviewLoading] = useState(false);
 
-  const processedPreview = useMemo(() => {
-    if (!showDisplayPreview || !rates) return null;
+  useEffect(() => {
+    if (!showDisplayPreview || !rates || !(parsedAmount > 0)) {
+      setDisplayPreview(null);
+      setDisplayPreviewLoading(false);
+      return;
+    }
 
     if (
       !hasExchangeRate(inputCurrency, rates) ||
       !hasExchangeRate(displayCurrency, rates)
     ) {
-      return null;
-    }
-
-    const activeExchangeRates = toActiveExchangeRatesFromSnapshot(
-      rates,
-      listActiveManualExchangeOverrides(),
-    );
-
-    return processTransactionWithUserRules(
-      parsedAmount,
-      inputCurrency,
-      displayCurrency,
-      activeFees,
-      activeExchangeRates,
-      { displayCurrency },
-    );
-  }, [showDisplayPreview, rates, parsedAmount, inputCurrency, displayCurrency, activeFees]);
-
-  const usesHistoricalPipeline =
-    (historicalManualRate != null && historicalManualRate > 0) ||
-    (historicalFeePercent != null && historicalFeePercent > 0);
-
-  const [historicalPreview, setHistoricalPreview] = useState<{
-    displayAmount: number;
-    appliedFeePercent: number;
-    manualRateUsed: boolean;
-  } | null>(null);
-  const [historicalPreviewLoading, setHistoricalPreviewLoading] = useState(false);
-
-  useEffect(() => {
-    if (!showDisplayPreview || !usesHistoricalPipeline || !rates || !(parsedAmount > 0)) {
-      setHistoricalPreview(null);
-      setHistoricalPreviewLoading(false);
+      setDisplayPreview(null);
+      setDisplayPreviewLoading(false);
       return;
     }
 
     let cancelled = false;
-    setHistoricalPreviewLoading(true);
+    setDisplayPreviewLoading(true);
 
     void previewExpenseDisplayAmount(parsedAmount, inputCurrency, rates, {
       displayCurrency,
@@ -321,7 +289,7 @@ export default function ExpenseAmountField({
     })
       .then((preview) => {
         if (cancelled) return;
-        setHistoricalPreview(
+        setDisplayPreview(
           preview
             ? {
                 displayAmount: preview.displayAmount,
@@ -332,7 +300,7 @@ export default function ExpenseAmountField({
         );
       })
       .finally(() => {
-        if (!cancelled) setHistoricalPreviewLoading(false);
+        if (!cancelled) setDisplayPreviewLoading(false);
       });
 
     return () => {
@@ -340,7 +308,6 @@ export default function ExpenseAmountField({
     };
   }, [
     showDisplayPreview,
-    usesHistoricalPipeline,
     rates,
     parsedAmount,
     inputCurrency,
@@ -348,14 +315,12 @@ export default function ExpenseAmountField({
     transactionDate,
     historicalManualRate,
     historicalFeePercent,
+    commissionVersion,
+    manualOverrideVersion,
   ]);
 
-  const convertedDisplayAmount = usesHistoricalPipeline
-    ? historicalPreview?.displayAmount ?? null
-    : processedPreview?.finalConvertedAmount ?? null;
-  const activeCommissionPercent = usesHistoricalPipeline
-    ? historicalPreview?.appliedFeePercent ?? 0
-    : processedPreview?.appliedFeePercentage ?? 0;
+  const convertedDisplayAmount = displayPreview?.displayAmount ?? null;
+  const activeCommissionPercent = displayPreview?.appliedFeePercent ?? 0;
 
   const convertedAmountFormatted = useMemo(() => {
     if (convertedDisplayAmount == null) return null;
@@ -366,9 +331,12 @@ export default function ExpenseAmountField({
    * True only when a manual rate is genuinely active for the CURRENT pair
    * (inputCurrency → displayCurrency), respecting the pairSpecific scope of each entry.
    */
+  const hasHistoricalManualRate =
+    historicalManualRate != null && historicalManualRate > 0;
+
   const hasActivePairManualOverride = useMemo(() => {
     if (!showDisplayPreview) return false;
-    if (usesHistoricalPipeline && historicalPreview?.manualRateUsed) return true;
+    if (hasHistoricalManualRate && displayPreview?.manualRateUsed) return true;
     return hasActiveManualOverrideForPair(inputCurrency, displayCurrency);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -376,13 +344,13 @@ export default function ExpenseAmountField({
     showDisplayPreview,
     inputCurrency,
     displayCurrency,
-    usesHistoricalPipeline,
-    historicalPreview?.manualRateUsed,
+    hasHistoricalManualRate,
+    displayPreview?.manualRateUsed,
   ]);
 
   const historicalRateLabel = useMemo(() => {
     if (
-      !usesHistoricalPipeline ||
+      !hasHistoricalManualRate ||
       historicalManualRate == null ||
       !(historicalManualRate > 0) ||
       inputCurrency === 'ILS'
@@ -393,7 +361,7 @@ export default function ExpenseAmountField({
       minimumFractionDigits: 2,
       maximumFractionDigits: 6,
     })} ILS`;
-  }, [usesHistoricalPipeline, historicalManualRate, inputCurrency]);
+  }, [hasHistoricalManualRate, historicalManualRate, inputCurrency]);
 
   const amountInputSize = useMemo(() => getAmountInputWidth(amount), [amount]);
 
@@ -551,7 +519,7 @@ export default function ExpenseAmountField({
               className={previewMotionClassName}
               aria-live="polite"
             >
-              {loading || (usesHistoricalPipeline && historicalPreviewLoading) ? (
+              {loading || displayPreviewLoading ? (
                 <span className="inline-flex items-center gap-1.5 text-neutral-500">
                   <Loader2 className="w-3 h-3 animate-spin shrink-0" aria-hidden />
                   {tr('loadingExchangeRates')}

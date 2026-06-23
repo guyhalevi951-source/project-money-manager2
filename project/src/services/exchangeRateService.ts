@@ -42,7 +42,7 @@ interface CurrencyCacheEntry {
 }
 
 type CurrencyCacheStore = Record<string, CurrencyCacheEntry>;
-type CurrencyCacheSource = 'historical_api' | 'today_live_fallback' | 'legacy';
+type CurrencyCacheSource = 'historical_api' | 'today_live_fallback' | 'usd_pivot_fallback' | 'legacy';
 
 interface LegacyHistoricalRateCache {
   [key: string]: {
@@ -239,10 +239,89 @@ export function convertIlsToForeign(
   return roundMoney(ilsAmount * ilsToForeign);
 }
 
+export function isForeignToForeign(fromCurrency: string, toCurrency: string): boolean {
+  const from = fromCurrency.trim().toUpperCase();
+  const to = toCurrency.trim().toUpperCase();
+  return from !== 'ILS' && to !== 'ILS' && from !== to;
+}
+
+/** Direct unit rate for an ILS-leg pair from the open.er-api ILS table. */
+export function resolveIlsLegDirectUnitRate(
+  fromCurrency: string,
+  toCurrency: string,
+  ilsToForeign: Record<string, number>,
+): number | null {
+  const from = fromCurrency.trim().toUpperCase();
+  const to = toCurrency.trim().toUpperCase();
+  if (from === to) return 1;
+
+  if (from === 'ILS' && to !== 'ILS') {
+    const rate = ilsToForeign[to];
+    return typeof rate === 'number' && rate > 0 ? rate : null;
+  }
+
+  if (to === 'ILS' && from !== 'ILS') {
+    const rate = ilsToForeign[from];
+    return typeof rate === 'number' && rate > 0 ? 1 / rate : null;
+  }
+
+  return null;
+}
+
 /**
- * Cross-convert any two currencies using ILS as the base (`ilsToForeign` rates).
- * When `toCurrency` is ILS the result gets smart-rounded (ledger write);
- * otherwise standard 2dp rounding is applied (display write).
+ * Cross-rate via explicit USD pivot: (From→USD) × (USD→To).
+ * Uses open.er-api ILS-base table for USD legs — never ILS as F2F intermediary.
+ */
+export function computeCrossRateViaUsdPivot(
+  fromCurrency: string,
+  toCurrency: string,
+  ilsToForeign: Record<string, number>,
+): number | null {
+  const from = fromCurrency.trim().toUpperCase();
+  const to = toCurrency.trim().toUpperCase();
+  if (from === to) return 1;
+
+  const usdPerIls = ilsToForeign.USD;
+  if (typeof usdPerIls !== 'number' || !(usdPerIls > 0)) return null;
+
+  const fromToUsd =
+    from === 'USD'
+      ? 1
+      : (() => {
+          const fromPerIls = ilsToForeign[from];
+          return typeof fromPerIls === 'number' && fromPerIls > 0 ? usdPerIls / fromPerIls : null;
+        })();
+
+  const usdToTo =
+    to === 'USD'
+      ? 1
+      : (() => {
+          const toPerIls = ilsToForeign[to];
+          return typeof toPerIls === 'number' && toPerIls > 0 ? toPerIls / usdPerIls : null;
+        })();
+
+  if (fromToUsd == null || usdToTo == null || !(fromToUsd > 0) || !(usdToTo > 0)) return null;
+  return fromToUsd * usdToTo;
+}
+
+function resolveSpotUnitRateSync(
+  fromCurrency: string,
+  toCurrency: string,
+  ilsToForeign: Record<string, number>,
+): number | null {
+  const from = fromCurrency.trim().toUpperCase();
+  const to = toCurrency.trim().toUpperCase();
+  if (from === to) return 1;
+
+  if (isForeignToForeign(from, to)) {
+    return computeCrossRateViaUsdPivot(from, to, ilsToForeign);
+  }
+  return resolveIlsLegDirectUnitRate(from, to, ilsToForeign);
+}
+
+/**
+ * Cross-convert any two currencies via the direct-pair resolver rules.
+ * F2F pairs use USD pivot from the cached table; ILS-leg pairs use direct ILS quotes.
  */
 export function convertAmountViaIls(
   amount: number,
@@ -259,47 +338,11 @@ export function convertAmountViaIls(
     return toCurrency === 'ILS' ? smartRoundMoney(raw) : roundMoney(raw);
   }
 
-  const fromIlsToForeign =
-    fromCurrency === 'ILS' ? 1 : rates.ilsToForeign[fromCurrency];
-  const toIlsToForeign = toCurrency === 'ILS' ? 1 : rates.ilsToForeign[toCurrency];
+  const unitRate = resolveSpotUnitRateSync(fromCurrency, toCurrency, rates.ilsToForeign);
+  if (unitRate == null || !(unitRate > 0)) return null;
 
-  if (
-    typeof fromIlsToForeign !== 'number' ||
-    fromIlsToForeign <= 0 ||
-    typeof toIlsToForeign !== 'number' ||
-    toIlsToForeign <= 0
-  ) {
-    return null;
-  }
-
-  const raw = (amount / fromIlsToForeign) * toIlsToForeign;
+  const raw = amount * unitRate;
   return toCurrency === 'ILS' ? smartRoundMoney(raw) : roundMoney(raw);
-}
-
-/**
- * Direct unit rate: 1 `fromCurrency` = result units of `toCurrency`.
- * Uses the same ILS pivot as live rates: `ilsToForeign[to] / ilsToForeign[from]`.
- */
-export function computeDirectUnitRateFromIlsPivot(
-  fromCurrency: string,
-  toCurrency: string,
-  ilsToForeign: Record<string, number>,
-): number | null {
-  if (fromCurrency === toCurrency) return 1;
-
-  const fromIlsToForeign = fromCurrency === 'ILS' ? 1 : ilsToForeign[fromCurrency];
-  const toIlsToForeign = toCurrency === 'ILS' ? 1 : ilsToForeign[toCurrency];
-
-  if (
-    typeof fromIlsToForeign !== 'number' ||
-    fromIlsToForeign <= 0 ||
-    typeof toIlsToForeign !== 'number' ||
-    toIlsToForeign <= 0
-  ) {
-    return null;
-  }
-
-  return toIlsToForeign / fromIlsToForeign;
 }
 
 export function hasExchangeRate(currency: string, rates: ExchangeRates): boolean {
@@ -605,7 +648,7 @@ function sanitizeDirectUnitRate(
   if (!(rate > 0)) return rate;
 
   if (liveRates) {
-    const expected = computeDirectUnitRateFromIlsPivot(
+    const expected = resolveSpotUnitRateSync(
       fromCurrency,
       toCurrency,
       liveRates.ilsToForeign,
@@ -673,99 +716,77 @@ async function fetchRateFromFrankfurterWithInverse(
   return null;
 }
 
-async function fetchIlsToForeignMapForDate(dateIso: string): Promise<Record<string, number> | null> {
-  const endpoints = [
-    `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${dateIso}/v1/currencies/ils.min.json`,
-    `https://${dateIso}.currency-api.pages.dev/v1/currencies/ils.min.json`,
-    `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${dateIso}/v1/currencies/ils.json`,
-    `https://${dateIso}.currency-api.pages.dev/v1/currencies/ils.json`,
-  ];
+async function fetchCrossRateViaUsdPivot(
+  dateIso: string,
+  fromCurrency: string,
+  toCurrency: string,
+  liveRates: ExchangeRates | null,
+): Promise<number | null> {
+  const from = fromCurrency.trim().toUpperCase();
+  const to = toCurrency.trim().toUpperCase();
+  if (from === to) return 1;
 
-  for (const url of endpoints) {
-    const context = { dateIso, fromCurrency: 'ILS', toCurrency: '*', url };
-    try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        logHistoricalFetchHttpError('CurrencyAPI-ILS-map', context, response.status);
-        continue;
-      }
+  async function resolveLeg(fromLeg: string, toLeg: string): Promise<number | null> {
+    if (fromLeg === toLeg) return 1;
 
-      const payload = (await response.json()) as Record<string, unknown>;
-      const ilsPayload = payload.ils as Record<string, unknown> | undefined;
-      if (!ilsPayload || typeof ilsPayload !== 'object') {
-        console.error('Trend/Historical fetch empty payload (CurrencyAPI-ILS-map):', {
-          dateIso,
-          url,
-        });
-        continue;
-      }
+    const frankfurterLeg = await fetchRateFromFrankfurterWithInverse(dateIso, fromLeg, toLeg);
+    if (frankfurterLeg != null && frankfurterLeg > 0) return frankfurterLeg;
 
-      const ilsToForeign: Record<string, number> = { ILS: 1 };
-      for (const [code, value] of Object.entries(ilsPayload)) {
-        if (typeof value === 'number' && value > 0) {
-          ilsToForeign[code.toUpperCase()] = value;
-        }
-      }
+    const rates =
+      liveRates ??
+      getCachedExchangeRates() ??
+      (await fetchExchangeRates().catch(() => null));
+    if (!rates) return null;
 
-      if (Object.keys(ilsToForeign).length > 1) {
-        return ilsToForeign;
-      }
-    } catch (error) {
-      logHistoricalFetchError('CurrencyAPI-ILS-map', context, error);
+    if (isForeignToForeign(fromLeg, toLeg)) {
+      return computeCrossRateViaUsdPivot(fromLeg, toLeg, rates.ilsToForeign);
     }
+    return resolveIlsLegDirectUnitRate(fromLeg, toLeg, rates.ilsToForeign);
   }
 
+  if (from === 'USD') return resolveLeg('USD', to);
+  if (to === 'USD') return resolveLeg(from, 'USD');
+
+  const fromToUsd = await resolveLeg(from, 'USD');
+  const usdToTo = await resolveLeg('USD', to);
+  if (fromToUsd != null && usdToTo != null && fromToUsd > 0 && usdToTo > 0) {
+    return fromToUsd * usdToTo;
+  }
   return null;
 }
 
-async function fetchHistoricalRateViaIlsPivot(
+/**
+ * Fetch a market direct-pair rate: Frankfurter direct, then USD pivot fallback.
+ * Never uses ILS as an intermediary for foreign-to-foreign pairs.
+ */
+export async function fetchDirectPairMarketRate(
   dateIso: string,
   fromCurrency: string,
   toCurrency: string,
 ): Promise<number | null> {
-  const ilsToForeign = await fetchIlsToForeignMapForDate(dateIso);
-  if (!ilsToForeign) return null;
-  return computeDirectUnitRateFromIlsPivot(fromCurrency, toCurrency, ilsToForeign);
-}
+  const from = fromCurrency.trim().toUpperCase();
+  const to = toCurrency.trim().toUpperCase();
+  if (from === to) return 1;
 
-async function fetchRateFromCurrencyApi(
-  dateIso: string,
-  fromCurrency: string,
-  toCurrency: string,
-): Promise<number | null> {
-  const base = fromCurrency.toLowerCase();
-  const quote = toCurrency.toLowerCase();
-  const endpoints = [
-    `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${dateIso}/v1/currencies/${base}.min.json`,
-    `https://${dateIso}.currency-api.pages.dev/v1/currencies/${base}.min.json`,
-    `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${dateIso}/v1/currencies/${base}.json`,
-    `https://${dateIso}.currency-api.pages.dev/v1/currencies/${base}.json`,
-  ];
+  const frankfurterRate = await fetchRateFromFrankfurterWithInverse(dateIso, from, to);
+  if (frankfurterRate != null && frankfurterRate > 0) return frankfurterRate;
 
-  for (const url of endpoints) {
-    const context = { dateIso, fromCurrency, toCurrency, url };
-    try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        logHistoricalFetchHttpError('CurrencyAPI-direct', context, response.status);
-        continue;
-      }
+  const liveRates =
+    getCachedExchangeRates() ?? (await fetchExchangeRates().catch(() => null));
 
-      const payload = (await response.json()) as Record<string, unknown>;
-      const basePayload = payload[base] as Record<string, unknown> | undefined;
-      const quoteRate = basePayload?.[quote];
-      if (typeof quoteRate === 'number' && quoteRate > 0) {
-        return quoteRate;
-      }
-
-      console.error('Trend/Historical fetch empty payload (CurrencyAPI-direct):', {
-        pair: `${fromCurrency}/${toCurrency}`,
-        dateIso,
-        url,
-      });
-    } catch (error) {
-      logHistoricalFetchError('CurrencyAPI-direct', context, error);
+  if (!isForeignToForeign(from, to)) {
+    if (liveRates) {
+      const ilsLeg = resolveIlsLegDirectUnitRate(from, to, liveRates.ilsToForeign);
+      if (ilsLeg != null && ilsLeg > 0) return ilsLeg;
     }
+    return null;
+  }
+
+  const usdPivot = await fetchCrossRateViaUsdPivot(dateIso, from, to, liveRates);
+  if (usdPivot != null && usdPivot > 0) return usdPivot;
+
+  if (liveRates) {
+    return computeCrossRateViaUsdPivot(from, to, liveRates.ilsToForeign);
   }
 
   return null;
@@ -773,7 +794,6 @@ async function fetchRateFromCurrencyApi(
 
 /**
  * Fetches a historical direct conversion rate (`fromCurrency` -> `toCurrency`) for a specific date.
- * Falls back to current cached rates if the historical provider is unavailable.
  */
 export async function fetchHistoricalDirectRate(
   dateIso: string,
@@ -860,18 +880,17 @@ export async function fetchHistoricalDirectRateSnapshot(
       return { rate: sanitized, fetchedAt: stored?.timestamp ?? Date.now() };
     }
 
-    const ilsPivotRate = await fetchHistoricalRateViaIlsPivot(safeDate, fromCurrency, toCurrency);
-    if (ilsPivotRate != null) {
-      const sanitized = sanitizeDirectUnitRate(fromCurrency, toCurrency, ilsPivotRate, liveRates);
-      setCachedCurrencyRate(safeDate, fromCurrency, toCurrency, sanitized, 'historical_api');
-      const stored = getCachedCurrencyRate(safeDate, fromCurrency, toCurrency);
-      return { rate: sanitized, fetchedAt: stored?.timestamp ?? Date.now() };
-    }
-
-    const currencyApiRate = await fetchRateFromCurrencyApi(safeDate, fromCurrency, toCurrency);
-    if (currencyApiRate != null) {
-      const sanitized = sanitizeDirectUnitRate(fromCurrency, toCurrency, currencyApiRate, liveRates);
-      setCachedCurrencyRate(safeDate, fromCurrency, toCurrency, sanitized, 'historical_api');
+    const usdPivotRate = await fetchCrossRateViaUsdPivot(
+      safeDate,
+      fromCurrency,
+      toCurrency,
+      liveRates,
+    );
+    if (usdPivotRate != null) {
+      const sanitized = sanitizeDirectUnitRate(fromCurrency, toCurrency, usdPivotRate, liveRates);
+      const source: CurrencyCacheSource =
+        safeDate === getLocalTodayIso() ? 'usd_pivot_fallback' : 'historical_api';
+      setCachedCurrencyRate(safeDate, fromCurrency, toCurrency, sanitized, source);
       const stored = getCachedCurrencyRate(safeDate, fromCurrency, toCurrency);
       return { rate: sanitized, fetchedAt: stored?.timestamp ?? Date.now() };
     }
@@ -883,17 +902,6 @@ export async function fetchHistoricalDirectRateSnapshot(
         reason: 'no_live_rates_and_all_providers_failed',
       });
       return { rate: null, fetchedAt: null };
-    }
-
-    const fallbackRate = convertAmountViaIls(1, fromCurrency, toCurrency, liveRates);
-    if (fallbackRate != null && fallbackRate > 0) {
-      const sanitized = sanitizeDirectUnitRate(fromCurrency, toCurrency, fallbackRate, liveRates);
-      const todayIso = getLocalTodayIso();
-      if (safeDate === todayIso) {
-        setCachedCurrencyRate(safeDate, fromCurrency, toCurrency, sanitized, 'today_live_fallback');
-        const stored = getCachedCurrencyRate(safeDate, fromCurrency, toCurrency);
-        return { rate: sanitized, fetchedAt: stored?.timestamp ?? Date.now() };
-      }
     }
 
     console.error('Trend/Historical fetch unavailable:', {

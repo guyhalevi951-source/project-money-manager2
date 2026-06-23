@@ -630,6 +630,20 @@ function resolveAutoAppliedFromCombinedEntry(
   };
 }
 
+function shouldApplyRateFromAutomationMode(entry: HistoricalOverrideEntry): boolean {
+  if (!entry.applyAutomatically) return false;
+  const mode = entry.automationApplyMode ?? 'both';
+  if (mode === 'none') return false;
+  return mode === 'both' || mode === 'rateOnly';
+}
+
+function shouldApplyFeeFromAutomationMode(entry: HistoricalOverrideEntry): boolean {
+  if (!entry.applyAutomatically) return false;
+  const mode = entry.automationApplyMode ?? 'both';
+  if (mode === 'none') return false;
+  return mode === 'both' || mode === 'feeOnly';
+}
+
 function resolveAutoAppliedFromSeparate(
   rateEntry: HistoricalOverrideEntry | null,
   feeEntry: HistoricalOverrideEntry | null,
@@ -637,10 +651,10 @@ function resolveAutoAppliedFromSeparate(
   let rateApplied: HistoricalOverrideEntry | null = null;
   let feeApplied: HistoricalOverrideEntry | null = null;
 
-  if (rateEntry?.applyAutomatically && entryHasRate(rateEntry)) {
+  if (rateEntry && shouldApplyRateFromAutomationMode(rateEntry) && entryHasRate(rateEntry)) {
     rateApplied = rateEntry;
   }
-  if (feeEntry?.applyAutomatically && entryHasFee(feeEntry)) {
+  if (feeEntry && shouldApplyFeeFromAutomationMode(feeEntry) && entryHasFee(feeEntry)) {
     feeApplied = feeEntry;
   }
 
@@ -746,9 +760,9 @@ export function applyBannerAutomationFromChoice(
 
   // Checkbox 1 — persist future auto-apply per granularity (independent of banner suppression).
   const applyAutoForRate =
-    options.applyAutomatically && (choice === 'both' || choice === 'rateOnly');
+    choice !== 'none' && options.applyAutomatically && (choice === 'both' || choice === 'rateOnly');
   const applyAutoForFee =
-    options.applyAutomatically && (choice === 'both' || choice === 'feeOnly');
+    choice !== 'none' && options.applyAutomatically && (choice === 'both' || choice === 'feeOnly');
 
   // Checkbox 2 — only controls hideBannerPermanently (UI visibility on next selection).
   const hideBannerPermanently = options.hideBannerPermanently;
@@ -760,7 +774,11 @@ export function applyBannerAutomationFromChoice(
       applyAutomatically: applyAutoForRate,
       hideBannerPermanently,
       automationApplyMode:
-        choice === 'both' || choice === 'rateOnly' ? choice : rateEntry.automationApplyMode,
+        choice === 'none'
+          ? 'none'
+          : choice === 'both' || choice === 'rateOnly'
+            ? choice
+            : rateEntry.automationApplyMode,
     });
     if (patched) updated.push(patched);
   }
@@ -772,7 +790,11 @@ export function applyBannerAutomationFromChoice(
         applyAutomatically: applyAutoForFee,
         hideBannerPermanently,
         automationApplyMode:
-          choice === 'both' || choice === 'feeOnly' ? choice : feeEntry.automationApplyMode,
+          choice === 'none'
+            ? 'none'
+            : choice === 'both' || choice === 'feeOnly'
+              ? choice
+              : feeEntry.automationApplyMode,
       });
       if (patched) updated.push(patched);
     }
@@ -867,7 +889,7 @@ export function resolveHistoricalRateToIls(
     return manualRate;
   }
   if (toCurrency === expenseCurrency && fromCurrency === 'ILS') {
-    return 1 / manualRate;
+    return manualRate != null && manualRate > 0 ? 1 / manualRate : null;
   }
   return null;
 }

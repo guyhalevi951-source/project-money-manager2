@@ -41,12 +41,9 @@
 
 import { isSupportedCurrency, type ExpenseCurrency } from '../constants/currencies';
 import {
-  computeDirectUnitRateFromIlsPivot,
-  fetchExchangeRates,
+  fetchDirectPairMarketRate,
   fetchHistoricalDirectRate,
-  getCachedExchangeRates,
   getLocalTodayIso,
-  type ExchangeRates,
 } from './exchangeRateService';
 import { getManualExchangeOverride } from './manualExchangeOverrideService';
 
@@ -348,15 +345,9 @@ async function fetchApiRate(
   fromCurrency: ExpenseCurrency,
   toCurrency: ExpenseCurrency,
 ): Promise<number | null> {
-  // Live date: derive the direct rate from the cached/live ILS pivot snapshot —
-  // this reuses the single daily ILS fetch instead of one call per pair.
   if (isLiveDate(dateIso)) {
-    const live: ExchangeRates | null =
-      getCachedExchangeRates() ?? (await fetchExchangeRates().catch(() => null));
-    if (!live) return null;
-    return computeDirectUnitRateFromIlsPivot(fromCurrency, toCurrency, live.ilsToForeign);
+    return fetchDirectPairMarketRate(dateIso, fromCurrency, toCurrency).catch(() => null);
   }
-  // Historical date: dedicated per-date provider (already cached downstream).
   return fetchHistoricalDirectRate(dateIso, fromCurrency, toCurrency).catch(() => null);
 }
 

@@ -42,12 +42,11 @@ import {
 } from '../services/currencyCommissionService';
 import {
   clearHistoricalDirectRateCache,
-  computeDirectUnitRateFromIlsPivot,
-  fetchExchangeRates,
   fetchHistoricalDirectRateSnapshot,
   getLocalTodayIso,
   peekHistoricalDirectRateSnapshot,
 } from '../services/exchangeRateService';
+import { ensureDirectPairUnitRate } from '../services/currencyPairResolver';
 import {
   getActiveManualExchangeOverrideSnapshot,
   listActiveManualExchangeOverrides,
@@ -515,15 +514,17 @@ export default function ExchangeRateSimulator({
 
     void (async () => {
       try {
-        const liveRates = await fetchExchangeRates();
+        const today = getLocalTodayIso();
+        const resolved = await ensureDirectPairUnitRate({
+          fromCurrency: mainCurrency,
+          toCurrency: secondaryCurrency,
+          dateIso: today,
+        });
         if (cancelled || fetchId !== todayMarketFetchIdRef.current) return;
 
-        const marketRate = computeDirectUnitRateFromIlsPivot(
-          mainCurrency,
-          secondaryCurrency,
-          liveRates.ilsToForeign,
+        setTodayMarketRate(
+          resolved.rate != null && resolved.rate > 0 ? resolved.rate : null,
         );
-        setTodayMarketRate(marketRate != null && marketRate > 0 ? marketRate : null);
       } catch (error) {
         console.error('Trend fetch error (today market rate):', error, {
           pair: `${mainCurrency}/${secondaryCurrency}`,

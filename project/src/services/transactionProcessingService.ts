@@ -10,6 +10,7 @@ import {
 } from './currencyCommissionService';
 import type { ExchangeRates } from './exchangeRateService';
 import type { ManualExchangeOverrideEntry } from './manualExchangeOverrideService';
+import { convertAmountWithDirectPairResolver } from './currencyPairResolver';
 import { roundMoney } from './money';
 
 /** Saved commission rule passed into pure processing (no storage reads). */
@@ -151,42 +152,6 @@ export function getAppliedCommissionPercentForPair(
   return raw;
 }
 
-function resolveManualPairRate(
-  activeExchangeRates: ActiveExchangeRates,
-  fromCurrency: string,
-  toCurrency: string,
-): number | null {
-  const from = normalizeCurrencyCode(fromCurrency);
-  const to = normalizeCurrencyCode(toCurrency);
-  if (from === to) return 1;
-
-  const pairs = activeExchangeRates.manualPairs ?? [];
-
-  // 1. Pair-specific match (exact currency pair only)
-  const directSpecific = pairs.find(
-    (p) => p.pairSpecific && p.fromCurrency === from && p.toCurrency === to,
-  );
-  if (directSpecific && directSpecific.rate > 0) return directSpecific.rate;
-
-  const inverseSpecific = pairs.find(
-    (p) => p.pairSpecific && p.fromCurrency === to && p.toCurrency === from,
-  );
-  if (inverseSpecific && inverseSpecific.rate > 0) return 1 / inverseSpecific.rate;
-
-  // 2. Global override (pairSpecific === false): applies to any pair via its stored direction
-  const directGlobal = pairs.find(
-    (p) => !p.pairSpecific && p.fromCurrency === from && p.toCurrency === to,
-  );
-  if (directGlobal && directGlobal.rate > 0) return directGlobal.rate;
-
-  const inverseGlobal = pairs.find(
-    (p) => !p.pairSpecific && p.fromCurrency === to && p.toCurrency === from,
-  );
-  if (inverseGlobal && inverseGlobal.rate > 0) return 1 / inverseGlobal.rate;
-
-  return null;
-}
-
 /**
  * Converts an amount using injected spot/manual rates only (no localStorage or UI).
  */
@@ -196,29 +161,12 @@ export function convertAmountWithActiveRates(
   toCurrency: string,
   activeExchangeRates: ActiveExchangeRates,
 ): number | null {
-  const from = normalizeCurrencyCode(fromCurrency);
-  const to = normalizeCurrencyCode(toCurrency);
-
-  if (from === to) return amount;
-  if (!(amount > 0)) return 0;
-
-  const manualRate = resolveManualPairRate(activeExchangeRates, from, to);
-  if (manualRate != null) return amount * manualRate;
-
-  const fromIlsToForeign = from === 'ILS' ? 1 : activeExchangeRates.ilsToForeign[from];
-  const toIlsToForeign = to === 'ILS' ? 1 : activeExchangeRates.ilsToForeign[to];
-
-  if (
-    typeof fromIlsToForeign !== 'number' ||
-    fromIlsToForeign <= 0 ||
-    typeof toIlsToForeign !== 'number' ||
-    toIlsToForeign <= 0
-  ) {
-    return null;
-  }
-
-  const baseAmount = amount / fromIlsToForeign;
-  return baseAmount * toIlsToForeign;
+  return convertAmountWithDirectPairResolver(
+    amount,
+    fromCurrency,
+    toCurrency,
+    activeExchangeRates,
+  );
 }
 
 /**

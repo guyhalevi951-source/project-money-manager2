@@ -1,11 +1,13 @@
 import { useEffect, useRef } from 'react';
 import type { User } from 'firebase/auth';
+import type { ExpenseCurrency } from '../constants/currencies';
 import {
   saveRateCacheToCloud,
   shouldSyncToFirestore,
   subscribeRateCache,
 } from '../services/userFirebaseSync';
 import {
+  ensureRate,
   getRateCacheSnapshot,
   mergeRemoteRateCache,
   refreshStaleLiveRates,
@@ -24,6 +26,27 @@ const CLOUD_SAVE_DEBOUNCE_MS = 1500;
 export interface UseRateCacheSyncOptions {
   user: User | null;
   authReady: boolean;
+  /** App display currency — used to pre-warm direct-pair cache entries. */
+  displayCurrency?: ExpenseCurrency;
+  /** Pinned / favorite currencies for pair warm-up. */
+  warmupCurrencies?: ReadonlyArray<ExpenseCurrency>;
+}
+
+function warmDirectPairCache(
+  displayCurrency: ExpenseCurrency | undefined,
+  warmupCurrencies: ReadonlyArray<ExpenseCurrency> | undefined,
+): void {
+  if (!displayCurrency) return;
+
+  const today = getLocalTodayIso();
+  const codes = new Set<ExpenseCurrency>([displayCurrency, ...(warmupCurrencies ?? [])]);
+
+  for (const from of codes) {
+    for (const to of codes) {
+      if (from === to) continue;
+      void ensureRate(today, from, to);
+    }
+  }
 }
 
 /**
@@ -37,7 +60,12 @@ export interface UseRateCacheSyncOptions {
  * stale live-date API rate — even when a manual override is currently winning —
  * on mount, on reconnect, and on window focus.
  */
-export function useRateCacheSync({ user, authReady }: UseRateCacheSyncOptions): void {
+export function useRateCacheSync({
+  user,
+  authReady,
+  displayCurrency,
+  warmupCurrencies,
+}: UseRateCacheSyncOptions): void {
   const cloudSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Mirror manual overrides into the ledger + background-refresh sweep ──
@@ -53,6 +81,7 @@ export function useRateCacheSync({ user, authReady }: UseRateCacheSyncOptions): 
 
     const runRefresh = () => {
       mirrorManualRates();
+      warmDirectPairCache(displayCurrency, warmupCurrencies);
       void refreshStaleLiveRates();
     };
 
@@ -69,7 +98,7 @@ export function useRateCacheSync({ user, authReady }: UseRateCacheSyncOptions): 
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('online', onOnline);
     };
-  }, [authReady, user?.uid]);
+  }, [authReady, user?.uid, displayCurrency, warmupCurrencies]);
 
   // ── Firebase: subscribe (merge down) + debounced save (push up) ─────────
   useEffect(() => {
