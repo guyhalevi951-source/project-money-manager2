@@ -20,6 +20,12 @@ import {
   subscribeManualOverridesUpdated,
 } from '../services/manualExchangeOverrideService';
 import { previewExpenseDisplayAmount } from '../services/expenseConversionService';
+import {
+  entryHasRate,
+  resolveHistoricalRateToIls,
+  resolveHistoricalUnitRate,
+  type HistoricalOverrideEntry,
+} from '../services/historicalOverrideService';
 import CurrencyLibraryModal from './CurrencyLibraryModal';
 import CurrencyFlag from './CurrencyFlag';
 import {
@@ -58,7 +64,9 @@ interface ExpenseAmountFieldProps {
   onOpenExchangeRatesSettings?: () => void;
   /** Transaction date for date-scoped / historical conversion preview. */
   transactionDate?: string;
-  /** Accepted historical manual rate (1 input currency = rate × ILS). */
+  /** Accepted historical rate archive row (resolved async in the conversion pipeline). */
+  historicalRateEntry?: HistoricalOverrideEntry;
+  /** Legacy explicit override: 1 input currency = rate × ILS. */
   historicalManualRate?: number;
   /** Accepted historical commission percent for the expense currency. */
   historicalFeePercent?: number;
@@ -78,6 +86,7 @@ export default function ExpenseAmountField({
   lockToDisplayCurrency = false,
   onOpenExchangeRatesSettings,
   transactionDate,
+  historicalRateEntry,
   historicalManualRate,
   historicalFeePercent,
   snapInputGroupToColumnEnd = false,
@@ -278,6 +287,7 @@ export default function ExpenseAmountField({
     void previewExpenseDisplayAmount(parsedAmount, inputCurrency, rates, {
       displayCurrency,
       transactionDate: transactionDate ?? getLocalTodayIso(),
+      historicalRateEntry,
       historicalManualRate:
         historicalManualRate != null && historicalManualRate > 0
           ? historicalManualRate
@@ -313,6 +323,7 @@ export default function ExpenseAmountField({
     inputCurrency,
     displayCurrency,
     transactionDate,
+    historicalRateEntry,
     historicalManualRate,
     historicalFeePercent,
     commissionVersion,
@@ -331,12 +342,13 @@ export default function ExpenseAmountField({
    * True only when a manual rate is genuinely active for the CURRENT pair
    * (inputCurrency → displayCurrency), respecting the pairSpecific scope of each entry.
    */
-  const hasHistoricalManualRate =
-    historicalManualRate != null && historicalManualRate > 0;
+  const hasHistoricalRateApplied =
+    (historicalRateEntry != null && entryHasRate(historicalRateEntry)) ||
+    (historicalManualRate != null && historicalManualRate > 0);
 
   const hasActivePairManualOverride = useMemo(() => {
     if (!showDisplayPreview) return false;
-    if (hasHistoricalManualRate && displayPreview?.manualRateUsed) return true;
+    if (hasHistoricalRateApplied && displayPreview?.manualRateUsed) return true;
     return hasActiveManualOverrideForPair(inputCurrency, displayCurrency);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -344,24 +356,45 @@ export default function ExpenseAmountField({
     showDisplayPreview,
     inputCurrency,
     displayCurrency,
-    hasHistoricalManualRate,
+    hasHistoricalRateApplied,
     displayPreview?.manualRateUsed,
   ]);
 
   const historicalRateLabel = useMemo(() => {
-    if (
-      !hasHistoricalManualRate ||
-      historicalManualRate == null ||
-      !(historicalManualRate > 0) ||
-      inputCurrency === 'ILS'
-    ) {
-      return null;
+    if (!hasHistoricalRateApplied || inputCurrency === 'ILS') return null;
+
+    const f2fRate =
+      historicalRateEntry && entryHasRate(historicalRateEntry)
+        ? resolveHistoricalUnitRate(historicalRateEntry, inputCurrency, displayCurrency)
+        : null;
+
+    if (f2fRate != null && f2fRate > 0 && inputCurrency !== displayCurrency) {
+      return `1 ${inputCurrency} = ${f2fRate.toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 6,
+      })} ${displayCurrency}`;
     }
-    return `1 ${inputCurrency} = ${historicalManualRate.toLocaleString(undefined, {
+
+    const ilsRate =
+      historicalManualRate != null && historicalManualRate > 0
+        ? historicalManualRate
+        : historicalRateEntry
+          ? resolveHistoricalRateToIls(historicalRateEntry, inputCurrency)
+          : null;
+
+    if (ilsRate == null || !(ilsRate > 0)) return null;
+
+    return `1 ${inputCurrency} = ${ilsRate.toLocaleString(undefined, {
       minimumFractionDigits: 2,
       maximumFractionDigits: 6,
     })} ILS`;
-  }, [hasHistoricalManualRate, historicalManualRate, inputCurrency]);
+  }, [
+    hasHistoricalRateApplied,
+    historicalRateEntry,
+    historicalManualRate,
+    inputCurrency,
+    displayCurrency,
+  ]);
 
   const amountInputSize = useMemo(() => getAmountInputWidth(amount), [amount]);
 

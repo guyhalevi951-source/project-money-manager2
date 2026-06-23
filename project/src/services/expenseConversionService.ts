@@ -30,6 +30,13 @@ import {
   getManualExchangeOverride,
   listActiveManualExchangeOverrides,
 } from './manualExchangeOverrideService';
+import {
+  entryHasRate,
+  resolveHistoricalRateToIls,
+  resolveHistoricalRateToIlsAsync,
+  resolveHistoricalUnitRate,
+  type HistoricalOverrideEntry,
+} from './historicalOverrideService';
 import { getApiRateForDate } from './rateCacheService';
 import { roundMoney, smartRoundMoney } from './money';
 import {
@@ -54,6 +61,11 @@ export type ConvertExpenseToIlsOptions = {
    * Sourced from `historicalOverrideService.resolveHistoricalRateToIls`.
    */
   historicalManualRate?: number;
+  /**
+   * Accepted historical rate archive row — resolved async to USD→ILS (or F2F triangulation).
+   * Takes precedence over live manual rates when `historicalManualRate` is not set.
+   */
+  historicalRateEntry?: HistoricalOverrideEntry;
   /**
    * When set, override the live commission lookup with this exact percent.
    * Sourced from a `HistoricalOverrideEntry.feePercent` the user accepted.
@@ -202,18 +214,47 @@ function computeExpenseIlsConversion(
   };
 }
 
+async function resolveHistoricalManualRateFromEntry(
+  entry: HistoricalOverrideEntry,
+  from: ExpenseCurrency,
+  transactionDate: string,
+  rates: ExchangeRates,
+): Promise<number | null> {
+  return resolveHistoricalRateToIlsAsync(entry, from, (bridge) =>
+    resolveDateScopedApiRate(transactionDate, bridge, 'ILS', rates),
+  );
+}
+
 async function resolveUnitRateToIls(
   from: ExpenseCurrency,
   transactionDate: string,
   rates: ExchangeRates,
   manualRateDisabled: boolean,
   historicalManualRate?: number,
+  historicalRateEntry?: HistoricalOverrideEntry,
 ): Promise<{ rate: number; manualRateUsed: boolean } | null> {
   if (from === 'ILS') return { rate: 1, manualRateUsed: false };
 
-  // Historical rate takes highest priority when the user accepted a past override.
+  // Explicit numeric override (highest priority).
   if (historicalManualRate != null && historicalManualRate > 0) {
     return { rate: historicalManualRate, manualRateUsed: true };
+  }
+
+  // Archived historical rate — direct ILS leg or F2F triangulation.
+  if (
+    !manualRateDisabled &&
+    historicalRateEntry &&
+    entryHasRate(historicalRateEntry)
+  ) {
+    const resolved = await resolveHistoricalManualRateFromEntry(
+      historicalRateEntry,
+      from,
+      transactionDate,
+      rates,
+    );
+    if (resolved != null && resolved > 0) {
+      return { rate: resolved, manualRateUsed: true };
+    }
   }
 
   if (manualRateDisabled) {
@@ -231,11 +272,23 @@ function resolveUnitRateToIlsSync(
   rates: ExchangeRates,
   manualRateDisabled: boolean,
   historicalManualRate?: number,
+  historicalRateEntry?: HistoricalOverrideEntry,
 ): { rate: number; manualRateUsed: boolean } | null {
   if (from === 'ILS') return { rate: 1, manualRateUsed: false };
 
   if (historicalManualRate != null && historicalManualRate > 0) {
     return { rate: historicalManualRate, manualRateUsed: true };
+  }
+
+  if (
+    !manualRateDisabled &&
+    historicalRateEntry &&
+    entryHasRate(historicalRateEntry)
+  ) {
+    const direct = resolveHistoricalRateToIls(historicalRateEntry, from);
+    if (direct != null && direct > 0) {
+      return { rate: direct, manualRateUsed: true };
+    }
   }
 
   if (manualRateDisabled) {
@@ -327,6 +380,7 @@ export async function recordExpenseConversionToIlsAsync(
   const transactionDate = options?.transactionDate ?? getLocalTodayIso();
   const { manualRateDisabled, feeDisabled } = readOverrideFlags(options);
   const historicalManualRate = options?.historicalManualRate;
+  const historicalRateEntry = options?.historicalRateEntry;
   const historicalFeePercent = options?.historicalFeePercent;
 
   const unit = await resolveUnitRateToIls(
@@ -335,6 +389,7 @@ export async function recordExpenseConversionToIlsAsync(
     liveRates,
     manualRateDisabled,
     historicalManualRate,
+    historicalRateEntry,
   );
   if (!unit) return null;
 
@@ -360,6 +415,7 @@ export function recordExpenseConversionToIls(
   const transactionDate = options?.transactionDate ?? getLocalTodayIso();
   const { manualRateDisabled, feeDisabled } = readOverrideFlags(options);
   const historicalManualRate = options?.historicalManualRate;
+  const historicalRateEntry = options?.historicalRateEntry;
   const historicalFeePercent = options?.historicalFeePercent;
 
   const unit = resolveUnitRateToIlsSync(
@@ -368,6 +424,7 @@ export function recordExpenseConversionToIls(
     rates,
     manualRateDisabled,
     historicalManualRate,
+    historicalRateEntry,
   );
   if (!unit) return null;
 
@@ -393,13 +450,35 @@ export async function previewExpenseDisplayAmount(
   const liveRates = rates ?? (await fetchExchangeRates().catch(() => null));
   if (!liveRates) return null;
 
-  const displayAmount = projectExpensePrimaryDisplayAmount(
-    amount,
-    currency,
-    recorded.ilsAmount,
-    options.displayCurrency,
-    liveRates,
-  );
+  const displayCurrency = options.displayCurrency;
+  const historicalEntry = options.historicalRateEntry;
+  const directHistoricalDisplayRate =
+    historicalEntry &&
+    entryHasRate(historicalEntry) &&
+    currency !== displayCurrency &&
+    displayCurrency !== 'ILS'
+      ? resolveHistoricalUnitRate(historicalEntry, currency, displayCurrency)
+      : null;
+
+  let displayAmount: number;
+  if (directHistoricalDisplayRate != null && directHistoricalDisplayRate > 0) {
+    const { feeDisabled } = readOverrideFlags(options);
+    const spotConverted = roundMoney(amount * directHistoricalDisplayRate);
+    const feePercent = resolveExpenseLedgerFeePercent(
+      currency,
+      feeDisabled,
+      options.historicalFeePercent,
+    );
+    displayAmount = applyFeeMultiplier(spotConverted, feePercent);
+  } else {
+    displayAmount = projectExpensePrimaryDisplayAmount(
+      amount,
+      currency,
+      recorded.ilsAmount,
+      displayCurrency,
+      liveRates,
+    );
+  }
 
   return { ...recorded, displayAmount };
 }

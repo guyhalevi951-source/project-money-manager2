@@ -170,7 +170,6 @@ import {
   mergeHistoricalOverridesFromCloud,
   resolveHistoricalAppliedForSubmit,
   resolveNewExpenseHistoricalState,
-  resolveHistoricalRateToIls,
   subscribeHistoricalOverridesUpdated,
   type HistoricalOverridesUpdatedDetail,
   type HistoricalOverrideBannerOptions,
@@ -3623,28 +3622,11 @@ function App() {
   }, [refreshEditExpenseHistoricalState, refreshEditExpenseHistoricalFromAutomation]);
 
   const newExpenseIsoDate = normalizeDate(newExpense.date);
-  const newExpenseHistoricalManualRate = useMemo(() => {
-    if (!newExpenseHistoricalApplied.rateEntry) return undefined;
-    const rate = resolveHistoricalRateToIls(
-      newExpenseHistoricalApplied.rateEntry,
-      newExpense.currency as ExpenseCurrency,
-    );
-    return rate != null && rate > 0 ? rate : undefined;
-  }, [newExpenseHistoricalApplied.rateEntry, newExpense.currency]);
 
   const newExpenseHistoricalFeePercent = useMemo(() => {
     const fee = newExpenseHistoricalApplied.feeEntry?.feePercent;
     return fee != null && fee > 0 && fee <= 100 ? fee : undefined;
   }, [newExpenseHistoricalApplied.feeEntry]);
-
-  const editHistoricalManualRate = useMemo(() => {
-    if (!editHistoricalApplied.rateEntry || !editExpenseDraft) return undefined;
-    const rate = resolveHistoricalRateToIls(
-      editHistoricalApplied.rateEntry,
-      editExpenseDraft.currency as ExpenseCurrency,
-    );
-    return rate != null && rate > 0 ? rate : undefined;
-  }, [editHistoricalApplied.rateEntry, editExpenseDraft?.currency]);
 
   const editHistoricalFeePercent = useMemo(() => {
     const fee = editHistoricalApplied.feeEntry?.feePercent;
@@ -5545,18 +5527,13 @@ function App() {
       const rates = getCachedExchangeRates();
       const isoDate = normalizeDate(newExpense.date);
 
-      const historicalManualRate = submitApplied.rateEntry
-        ? (resolveHistoricalRateToIls(
-            submitApplied.rateEntry,
-            inputCurrency as ExpenseCurrency,
-          ) ?? undefined)
-        : undefined;
+      const historicalRateEntry = submitApplied.rateEntry ?? undefined;
       const historicalFeePercent = submitApplied.feeEntry?.feePercent ?? undefined;
 
       const recorded = await recordExpenseConversionToIlsAsync(enteredAmount, inputCurrency, rates, {
         displayCurrency,
         transactionDate: isoDate,
-        historicalManualRate,
+        historicalRateEntry,
         historicalFeePercent,
       });
       if (recorded == null) return null;
@@ -5729,7 +5706,7 @@ function App() {
       transactionDate: date,
       manualRateDisabled: editDraftManualRateDisabled,
       feeDisabled: editDraftFeeDisabled,
-      historicalManualRate: editHistoricalManualRate,
+      historicalRateEntry: editHistoricalApplied.rateEntry ?? undefined,
       historicalFeePercent: editHistoricalFeePercent,
     }).then((preview) => {
       if (!cancelled) {
@@ -5746,7 +5723,7 @@ function App() {
     editDraftDate,
     editDraftManualRateDisabled,
     editDraftFeeDisabled,
-    editHistoricalManualRate,
+    editHistoricalApplied.rateEntry,
     editHistoricalFeePercent,
     editModifierVisibility,
     displayCurrency,
@@ -5773,12 +5750,7 @@ function App() {
       const rates = getCachedExchangeRates();
 
       // If user accepted a historical override for this date + currency, inject it.
-      const editHistManualRate = editHistoricalApplied.rateEntry
-        ? (resolveHistoricalRateToIls(
-            editHistoricalApplied.rateEntry,
-            editExpenseDraft.currency as ExpenseCurrency,
-          ) ?? undefined)
-        : undefined;
+      const editHistRateEntry = editHistoricalApplied.rateEntry ?? undefined;
       const editHistFeePercent = editHistoricalApplied.feeEntry?.feePercent ?? undefined;
 
       const recorded = await recordExpenseConversionToIlsAsync(
@@ -5790,7 +5762,7 @@ function App() {
           transactionDate: normalizedDate,
           manualRateDisabled,
           feeDisabled,
-          historicalManualRate: editHistManualRate,
+          historicalRateEntry: editHistRateEntry,
           historicalFeePercent: editHistFeePercent,
         },
       );
@@ -6542,7 +6514,7 @@ function App() {
                 onRatesReadyChange={setExpenseRatesReady}
                 onOpenExchangeRatesSettings={openSettingsExchangeRates}
                 transactionDate={newExpenseIsoDate}
-                historicalManualRate={newExpenseHistoricalManualRate}
+                historicalRateEntry={newExpenseHistoricalApplied.rateEntry ?? undefined}
                 historicalFeePercent={newExpenseHistoricalFeePercent}
                 snapInputGroupToColumnEnd
               />
@@ -7002,7 +6974,7 @@ function App() {
                   }
                   onRatesReadyChange={setEditExpenseRatesReady}
                   transactionDate={normalizeDate(editExpenseDraft.date)}
-                  historicalManualRate={editHistoricalManualRate}
+                  historicalRateEntry={editHistoricalApplied.rateEntry ?? undefined}
                   historicalFeePercent={editHistoricalFeePercent}
                 />
                 </div>

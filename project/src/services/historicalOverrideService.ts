@@ -874,24 +874,70 @@ export function resolveHistoricalAppliedForSubmit(
   return hasApplied ? applied : EMPTY_HISTORICAL_APPLIED;
 }
 
+export function resolveHistoricalUnitRate(
+  entry: HistoricalOverrideEntry,
+  fromCurrency: ExpenseCurrency,
+  toCurrency: ExpenseCurrency,
+): number | null {
+  if (!entryHasRate(entry) || entry.manualRate == null || !(entry.manualRate > 0)) return null;
+  if (fromCurrency === toCurrency) return 1;
+
+  const { fromCurrency: base, toCurrency: quote, manualRate } = normalizeHistoricalRateEntry(entry);
+  if (manualRate == null || !(manualRate > 0)) return null;
+  if (fromCurrency === base && toCurrency === quote) return manualRate;
+  if (fromCurrency === quote && toCurrency === base) return 1 / manualRate;
+  return null;
+}
+
+/** The non-ILS leg of an F2F archived pair when `expenseCurrency` is the other leg. */
+export function resolveHistoricalBridgeCurrency(
+  entry: HistoricalOverrideEntry,
+  expenseCurrency: ExpenseCurrency,
+): ExpenseCurrency | null {
+  if (!entryHasRate(entry)) return null;
+  const { fromCurrency, toCurrency } = normalizeHistoricalRateEntry(entry);
+  if (fromCurrency === 'ILS' || toCurrency === 'ILS') return null;
+  if (expenseCurrency === fromCurrency) return toCurrency;
+  if (expenseCurrency === toCurrency) return fromCurrency;
+  return null;
+}
+
+/**
+ * Sync resolver: 1 `expenseCurrency` = result × ILS.
+ * Direct ILS-leg archives only — use {@link resolveHistoricalRateToIlsAsync} for F2F pairs.
+ */
 export function resolveHistoricalRateToIls(
   entry: HistoricalOverrideEntry,
   expenseCurrency: ExpenseCurrency,
 ): number | null {
-  if (!entry.manualRate || !(entry.manualRate > 0)) return null;
+  if (expenseCurrency === 'ILS') return 1;
+  return resolveHistoricalUnitRate(entry, expenseCurrency, 'ILS');
+}
+
+/**
+ * Async resolver: 1 `expenseCurrency` = result × ILS.
+ * Direct ILS-leg archives, or F2F triangulation via the archived bridge currency.
+ */
+export async function resolveHistoricalRateToIlsAsync(
+  entry: HistoricalOverrideEntry,
+  expenseCurrency: ExpenseCurrency,
+  resolveBridgeToIls: (bridgeCurrency: ExpenseCurrency) => Promise<number | null>,
+): Promise<number | null> {
   if (expenseCurrency === 'ILS') return 1;
 
-  const normalized = normalizeHistoricalRateEntry(entry);
-  const { fromCurrency, toCurrency, manualRate } = normalized;
+  const directToIls = resolveHistoricalRateToIls(entry, expenseCurrency);
+  if (directToIls != null && directToIls > 0) return directToIls;
 
-  // Stored rate: 1 fromCurrency = manualRate × toCurrency (canonical alphabetical direction).
-  if (fromCurrency === expenseCurrency && toCurrency === 'ILS') {
-    return manualRate;
-  }
-  if (toCurrency === expenseCurrency && fromCurrency === 'ILS') {
-    return manualRate != null && manualRate > 0 ? 1 / manualRate : null;
-  }
-  return null;
+  const bridge = resolveHistoricalBridgeCurrency(entry, expenseCurrency);
+  if (!bridge) return null;
+
+  const expenseToBridge = resolveHistoricalUnitRate(entry, expenseCurrency, bridge);
+  if (expenseToBridge == null || !(expenseToBridge > 0)) return null;
+
+  const bridgeToIls = await resolveBridgeToIls(bridge);
+  if (bridgeToIls == null || !(bridgeToIls > 0)) return null;
+
+  return expenseToBridge * bridgeToIls;
 }
 
 export function listHistoricalOverrides(): HistoricalOverrideEntry[] {
