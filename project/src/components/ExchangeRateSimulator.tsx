@@ -41,7 +41,6 @@ import {
   type CurrencyCommissionEntry,
 } from '../services/currencyCommissionService';
 import {
-  clearHistoricalDirectRateCache,
   computeCrossRateViaUsdPivot,
   fetchExchangeRates,
   fetchHistoricalDirectRateSnapshot,
@@ -258,7 +257,6 @@ export default function ExchangeRateSimulator({
   const rateContextKeyRef = useRef('');
   const historicalFetchIdRef = useRef(0);
   const todayMarketFetchIdRef = useRef(0);
-  const historicalContextKeyRef = useRef<string | null>(null);
   const pairLoadGuardRef = useRef(false);
 
   const loadManualRatePairIntoForm = useCallback(
@@ -457,7 +455,6 @@ export default function ExchangeRateSimulator({
   useEffect(() => {
     const fetchId = ++historicalFetchIdRef.current;
     let cancelled = false;
-    const historicalContextKey = `${dateIso}|${mainCurrency}|${secondaryCurrency}`;
 
     const applyResolvedRate = (rate: number | null, fetchedAt: number | null) => {
       if (cancelled || fetchId !== historicalFetchIdRef.current) return;
@@ -495,12 +492,6 @@ export default function ExchangeRateSimulator({
       };
     }
 
-    const prevContextKey = historicalContextKeyRef.current;
-    if (prevContextKey != null && prevContextKey !== historicalContextKey) {
-      clearHistoricalDirectRateCache(dateIso, mainCurrency, secondaryCurrency);
-    }
-    historicalContextKeyRef.current = historicalContextKey;
-
     const cachedSnapshot = peekHistoricalDirectRateSnapshot(dateIso, mainCurrency, secondaryCurrency);
     if (cachedSnapshot.rate != null) {
       applyResolvedRate(cachedSnapshot.rate, cachedSnapshot.fetchedAt);
@@ -515,7 +506,6 @@ export default function ExchangeRateSimulator({
           dateIso,
           mainCurrency,
           secondaryCurrency,
-          { bypassCache: true },
         );
         applyResolvedRate(snapshot.rate, snapshot.fetchedAt);
       } catch (error) {
@@ -575,7 +565,6 @@ export default function ExchangeRateSimulator({
           today,
           mainCurrency,
           secondaryCurrency,
-          { bypassCache: true },
         );
         if (cancelled || fetchId !== todayMarketFetchIdRef.current) return;
         setTodayMarketRate(
@@ -1363,13 +1352,16 @@ export default function ExchangeRateSimulator({
     if (dateIso === todayIso) return false;
     if (loadingRate) return false;
     if (mainCurrency === secondaryCurrency) return false;
-    return !(effectiveUnitRate != null && effectiveUnitRate > 0);
+    if (!(effectiveUnitRate != null && effectiveUnitRate > 0)) return true;
+    if (!(todayMarketRate != null && todayMarketRate > 0)) return true;
+    return false;
   }, [
     dateIso,
     effectiveUnitRate,
     loadingRate,
     mainCurrency,
     secondaryCurrency,
+    todayMarketRate,
     todayIso,
   ]);
 

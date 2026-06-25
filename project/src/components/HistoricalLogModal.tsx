@@ -12,7 +12,7 @@ import { Globe, History, Pencil, RotateCcw, Search, Trash2, X } from 'lucide-rea
 import { auth } from '../firebase';
 import { LtrNumeric, useLanguage } from '../LanguageContext';
 import {
-  CORE_CURRENCY_CODES,
+  CURRENCY_DICTIONARY,
   getCurrencyMeta,
   type ExpenseCurrency,
 } from '../constants/currencies';
@@ -86,11 +86,12 @@ interface HistoricalEditDraft {
   hideBannerPermanently: boolean;
 }
 
-const RATE_CURRENCY_OPTIONS = CORE_CURRENCY_CODES as readonly ExpenseCurrency[];
+const RATE_CURRENCY_OPTIONS = Object.keys(CURRENCY_DICTIONARY)
+  .sort((a, b) => a.localeCompare(b)) as ExpenseCurrency[];
 
 const FEE_CURRENCY_OPTIONS: readonly CommissionCurrency[] = [
   GLOBAL_COMMISSION_CURRENCY,
-  ...CORE_CURRENCY_CODES.filter((c) => c !== 'ILS'),
+  ...(RATE_CURRENCY_OPTIONS.filter((c) => c !== 'ILS') as ExpenseCurrency[]),
 ];
 
 function entryMatchesScope(entry: HistoricalOverrideEntry, scope: HistoricalLogScope): boolean {

@@ -1,4 +1,3 @@
-import { currencySymbol } from '../constants/currencies';
 import { EMPTY_USER_APP_DATA, type UserAppData } from '../userDataStorage';
 import type { PersonalBudgetMeta } from './budgetArchitecture';
 import {
@@ -439,36 +438,12 @@ export function convertBudgetFinancialToDisplayCurrency(
     };
   });
 
-  const nextExpenses = financial.expenses.map((expense) => {
-    if (!(expense.amount > 0)) return expense;
-    if (!(expense.originalAmount != null && expense.originalAmount > 0)) {
-      return expense;
-    }
-    const originalCode = expense.originalCurrency
-      ? symbolToCurrency(expense.originalCurrency) ?? fromCurrency
-      : fromCurrency;
-    if (originalCode !== fromCurrency) return expense;
-
-    const convertedOriginal = convertLedgerAmountToDisplayCurrency(
-      expense.amount,
-      toCurrency,
-      rates,
-    );
-    if (convertedOriginal == null) return expense;
-
-    return {
-      ...expense,
-      originalAmount: convertedOriginal,
-      originalCurrency: toCurrency,
-    };
-  });
-
   return {
     ...financial,
     budgetsByMonth: nextBudgetsByMonth,
     budgetOriginalByMonth: nextBudgetOriginalByMonth,
     customCategories: nextCustomCategories,
-    expenses: nextExpenses,
+    expenses: financial.expenses,
   };
 }
 

@@ -14,6 +14,14 @@ export interface StoredExpense {
   appliedFeePercent?: number;
   /** True when a manual exchange-rate override was used to convert this record. */
   manualRateUsed?: boolean;
+  /** Immutable submit-time conversion unit: 1 input currency = X ILS. */
+  appliedUnitRateToIls?: number;
+  /** Immutable submit-time source of `appliedUnitRateToIls`. */
+  appliedRateSource?: 'historical' | 'manual_live' | 'api_spot';
+  /** Optional historical archive context key used for submit-time conversion. */
+  appliedRateContextKey?: string;
+  /** Conversion date used to resolve historical/date-scoped rates. */
+  appliedConversionDate?: string;
   /** Persistent override: ignore manual rates, resolve from the date-scoped API rate. */
   manualRateDisabled?: boolean;
   /** Persistent override: drop any conversion fee multiplier for this record. */
@@ -38,6 +46,20 @@ export function normalizeStoredExpense(expense: StoredExpense): StoredExpense {
     manualRateDisabled: Boolean(legacy.manualRateDisabled ?? legacy.disableManualRate),
     feeDisabled: Boolean(legacy.feeDisabled ?? legacy.disableFee),
     manualRateUsed: Boolean(expense.manualRateUsed),
+    appliedUnitRateToIls:
+      expense.appliedUnitRateToIls != null && Number.isFinite(expense.appliedUnitRateToIls)
+        ? Number(expense.appliedUnitRateToIls)
+        : undefined,
+    appliedRateSource:
+      expense.appliedRateSource === 'historical' ||
+      expense.appliedRateSource === 'manual_live' ||
+      expense.appliedRateSource === 'api_spot'
+        ? expense.appliedRateSource
+        : undefined,
+    appliedRateContextKey:
+      typeof expense.appliedRateContextKey === 'string' ? expense.appliedRateContextKey : undefined,
+    appliedConversionDate:
+      typeof expense.appliedConversionDate === 'string' ? expense.appliedConversionDate : undefined,
   };
 }
 

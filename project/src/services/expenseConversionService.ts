@@ -77,6 +77,8 @@ export interface RecordedExpenseConversion {
   ilsAmount: number;
   appliedFeePercent: number;
   manualRateUsed: boolean;
+  appliedUnitRateToIls: number;
+  appliedRateSource: 'historical' | 'manual_live' | 'api_spot';
 }
 
 export interface ExpenseDisplayPreview extends RecordedExpenseConversion {
@@ -108,12 +110,12 @@ function applyFeeMultiplier(rawIls: number, feePercent: number): number {
 function resolveLiveManualOrSpotRate(
   from: ExpenseCurrency,
   rates: ExchangeRates,
-): { rate: number; manualRateUsed: boolean } | null {
-  if (from === 'ILS') return { rate: 1, manualRateUsed: false };
+): { rate: number; manualRateUsed: boolean; rateSource: 'manual_live' | 'api_spot' } | null {
+  if (from === 'ILS') return { rate: 1, manualRateUsed: false, rateSource: 'api_spot' };
 
   const manualDirect = getManualExchangeOverride(from, 'ILS');
   if (manualDirect != null && manualDirect > 0) {
-    return { rate: manualDirect, manualRateUsed: true };
+    return { rate: manualDirect, manualRateUsed: true, rateSource: 'manual_live' };
   }
 
   const withManual = toActiveExchangeRatesFromSnapshot(rates, listActiveManualExchangeOverrides());
@@ -128,7 +130,11 @@ function resolveLiveManualOrSpotRate(
     rateSpotOnly == null ||
     Math.abs(rateWithManual - rateSpotOnly) / Math.max(rateSpotOnly, 1e-9) > 1e-6;
 
-  return { rate: rateWithManual, manualRateUsed: manualUsed };
+  return {
+    rate: rateWithManual,
+    manualRateUsed: manualUsed,
+    rateSource: manualUsed ? 'manual_live' : 'api_spot',
+  };
 }
 
 /** Date-scoped API rate only — never manual overrides. */
@@ -196,6 +202,7 @@ function computeExpenseIlsConversion(
     feeDisabled: boolean;
     unitRate: number;
     manualRateUsed: boolean;
+    rateSource: 'historical' | 'manual_live' | 'api_spot';
     historicalFeePercent?: number;
   },
 ): RecordedExpenseConversion {
@@ -211,6 +218,8 @@ function computeExpenseIlsConversion(
     ilsAmount,
     appliedFeePercent,
     manualRateUsed: options.manualRateUsed,
+    appliedUnitRateToIls: options.unitRate,
+    appliedRateSource: options.rateSource,
   };
 }
 
@@ -232,12 +241,12 @@ async function resolveUnitRateToIls(
   manualRateDisabled: boolean,
   historicalManualRate?: number,
   historicalRateEntry?: HistoricalOverrideEntry,
-): Promise<{ rate: number; manualRateUsed: boolean } | null> {
-  if (from === 'ILS') return { rate: 1, manualRateUsed: false };
+): Promise<{ rate: number; manualRateUsed: boolean; rateSource: 'historical' | 'manual_live' | 'api_spot' } | null> {
+  if (from === 'ILS') return { rate: 1, manualRateUsed: false, rateSource: 'api_spot' };
 
   // Explicit numeric override (highest priority).
   if (historicalManualRate != null && historicalManualRate > 0) {
-    return { rate: historicalManualRate, manualRateUsed: true };
+    return { rate: historicalManualRate, manualRateUsed: true, rateSource: 'historical' };
   }
 
   // Archived historical rate — direct ILS leg or F2F triangulation.
@@ -253,14 +262,14 @@ async function resolveUnitRateToIls(
       rates,
     );
     if (resolved != null && resolved > 0) {
-      return { rate: resolved, manualRateUsed: true };
+      return { rate: resolved, manualRateUsed: true, rateSource: 'historical' };
     }
   }
 
   if (manualRateDisabled) {
     const apiRate = await resolveDateScopedApiRate(transactionDate, from, 'ILS', rates);
     if (apiRate == null || !(apiRate > 0)) return null;
-    return { rate: apiRate, manualRateUsed: false };
+    return { rate: apiRate, manualRateUsed: false, rateSource: 'api_spot' };
   }
 
   return resolveLiveManualOrSpotRate(from, rates);
@@ -273,11 +282,11 @@ function resolveUnitRateToIlsSync(
   manualRateDisabled: boolean,
   historicalManualRate?: number,
   historicalRateEntry?: HistoricalOverrideEntry,
-): { rate: number; manualRateUsed: boolean } | null {
-  if (from === 'ILS') return { rate: 1, manualRateUsed: false };
+): { rate: number; manualRateUsed: boolean; rateSource: 'historical' | 'manual_live' | 'api_spot' } | null {
+  if (from === 'ILS') return { rate: 1, manualRateUsed: false, rateSource: 'api_spot' };
 
   if (historicalManualRate != null && historicalManualRate > 0) {
-    return { rate: historicalManualRate, manualRateUsed: true };
+    return { rate: historicalManualRate, manualRateUsed: true, rateSource: 'historical' };
   }
 
   if (
@@ -287,14 +296,14 @@ function resolveUnitRateToIlsSync(
   ) {
     const direct = resolveHistoricalRateToIls(historicalRateEntry, from);
     if (direct != null && direct > 0) {
-      return { rate: direct, manualRateUsed: true };
+      return { rate: direct, manualRateUsed: true, rateSource: 'historical' };
     }
   }
 
   if (manualRateDisabled) {
     const apiRate = resolveDateScopedApiRateSync(transactionDate, from, 'ILS', rates);
     if (apiRate == null || !(apiRate > 0)) return null;
-    return { rate: apiRate, manualRateUsed: false };
+    return { rate: apiRate, manualRateUsed: false, rateSource: 'api_spot' };
   }
 
   return resolveLiveManualOrSpotRate(from, rates);
@@ -399,6 +408,7 @@ export async function recordExpenseConversionToIlsAsync(
     feeDisabled,
     unitRate: unit.rate,
     manualRateUsed: unit.manualRateUsed,
+    rateSource: unit.rateSource,
     historicalFeePercent,
   });
 }
@@ -434,6 +444,7 @@ export function recordExpenseConversionToIls(
     feeDisabled,
     unitRate: unit.rate,
     manualRateUsed: unit.manualRateUsed,
+    rateSource: unit.rateSource,
     historicalFeePercent,
   });
 }

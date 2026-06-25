@@ -166,6 +166,7 @@ import {
   appliedFromHistoricalChoice,
   applyBannerAutomationFromChoice,
   inferHistoricalChoiceFromApplied,
+  historicalEntryKey,
   historicalAppliedContextFromEntries,
   mergeHistoricalOverridesFromCloud,
   resolveHistoricalAppliedForSubmit,
@@ -311,6 +312,14 @@ interface Expense {
   appliedFeePercent?: number;
   /** True when a manual exchange-rate override was used to convert this record. */
   manualRateUsed?: boolean;
+  /** Immutable submit-time conversion unit: 1 input currency = X ILS. */
+  appliedUnitRateToIls?: number;
+  /** Immutable submit-time source of `appliedUnitRateToIls`. */
+  appliedRateSource?: 'historical' | 'manual_live' | 'api_spot';
+  /** Optional historical archive context key used for submit-time conversion. */
+  appliedRateContextKey?: string;
+  /** Conversion date used to resolve historical/date-scoped rates. */
+  appliedConversionDate?: string;
   /** Persistent override: ignore manual rates, resolve from the date-scoped API rate. */
   manualRateDisabled?: boolean;
   /** Persistent override: drop any conversion fee multiplier for this record. */
@@ -5528,6 +5537,10 @@ function App() {
       ilsAmount: number;
       appliedFeePercent: number;
       manualRateUsed: boolean;
+      appliedUnitRateToIls: number;
+      appliedRateSource: 'historical' | 'manual_live' | 'api_spot';
+      appliedRateContextKey?: string;
+      appliedConversionDate: string;
     } | null> => {
       const rates = getCachedExchangeRates();
       const isoDate = normalizeDate(newExpense.date);
@@ -5543,6 +5556,9 @@ function App() {
           ilsAmount: roundMoneyAmount(enteredAmount),
           appliedFeePercent: 0,
           manualRateUsed: false,
+          appliedUnitRateToIls: 1,
+          appliedRateSource: 'api_spot',
+          appliedConversionDate: isoDate,
         };
       }
 
@@ -5554,7 +5570,12 @@ function App() {
       });
       if (recorded == null) return null;
 
-      return { ...recorded, ilsAmount: roundMoneyAmount(recorded.ilsAmount) };
+      return {
+        ...recorded,
+        ilsAmount: roundMoneyAmount(recorded.ilsAmount),
+        appliedRateContextKey: historicalRateEntry ? historicalEntryKey(historicalRateEntry) : undefined,
+        appliedConversionDate: isoDate,
+      };
     };
 
     void persistAutomationOnSubmit().then(() => {
@@ -5572,6 +5593,10 @@ function App() {
           originalCurrency: inputCurrency,
           appliedFeePercent: conversion.appliedFeePercent,
           manualRateUsed: conversion.manualRateUsed,
+          appliedUnitRateToIls: conversion.appliedUnitRateToIls,
+          appliedRateSource: conversion.appliedRateSource,
+          appliedRateContextKey: conversion.appliedRateContextKey,
+          appliedConversionDate: conversion.appliedConversionDate,
           manualRateDisabled: false,
           feeDisabled: false,
         };
@@ -5756,6 +5781,10 @@ function App() {
       ilsAmount: number;
       appliedFeePercent: number;
       manualRateUsed: boolean;
+      appliedUnitRateToIls: number;
+      appliedRateSource: 'historical' | 'manual_live' | 'api_spot';
+      appliedRateContextKey?: string;
+      appliedConversionDate: string;
     } | null> => {
       const normalizedDate = normalizeDate(editExpenseDraft.date);
       const rates = getCachedExchangeRates();
@@ -5779,6 +5808,9 @@ function App() {
           ilsAmount: roundMoneyAmount(typedAmount),
           appliedFeePercent: 0,
           manualRateUsed: false,
+          appliedUnitRateToIls: 1,
+          appliedRateSource: 'api_spot',
+          appliedConversionDate: normalizedDate,
         };
       }
 
@@ -5796,7 +5828,12 @@ function App() {
         },
       );
       if (recorded == null) return null;
-      return { ...recorded, ilsAmount: roundMoneyAmount(recorded.ilsAmount) };
+      return {
+        ...recorded,
+        ilsAmount: roundMoneyAmount(recorded.ilsAmount),
+        appliedRateContextKey: editHistRateEntry ? historicalEntryKey(editHistRateEntry) : undefined,
+        appliedConversionDate: normalizedDate,
+      };
     };
 
     void resolveConversion().then((conversion) => {
@@ -5822,6 +5859,10 @@ function App() {
               originalCurrency: editExpenseDraft.currency,
               appliedFeePercent: persistedMeta.appliedFeePercent,
               manualRateUsed: persistedMeta.manualRateUsed,
+              appliedUnitRateToIls: conversion.appliedUnitRateToIls,
+              appliedRateSource: conversion.appliedRateSource,
+              appliedRateContextKey: conversion.appliedRateContextKey,
+              appliedConversionDate: conversion.appliedConversionDate,
               manualRateDisabled,
               feeDisabled,
             }
