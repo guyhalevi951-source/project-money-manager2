@@ -159,7 +159,6 @@ import {
 import {
   clearAllManualExchangeOverridesLocal,
   clearCloudManualExchangeOverrides,
-  getManualExchangeOverride,
   listActiveManualExchangeOverrides,
   replaceCloudManualExchangeOverrides,
 } from './services/manualExchangeOverrideService';
@@ -3366,11 +3365,6 @@ function App() {
   const [newExpenseHistoricalBannerOptions, setNewExpenseHistoricalBannerOptions] =
     useState<HistoricalOverrideBannerOptions | null>(null);
 
-  // Historical override prompt — edit expense modal
-  const [editHistoricalBanner, setEditHistoricalBanner] =
-    useState<HistoricalOverrideBannerContext | null>(null);
-  const [editHistoricalApplied, setEditHistoricalApplied] =
-    useState<NewExpenseHistoricalApplied>(EMPTY_NEW_EXPENSE_HISTORICAL_APPLIED);
   const [showBudgetSaved, setShowBudgetSaved] = useState(false);
   const [autoTransferByMonth, setAutoTransferByMonth] = useState<Record<string, boolean>>({});
 
@@ -3570,107 +3564,12 @@ function App() {
     });
   }, [refreshNewExpenseHistoricalState, refreshNewExpenseHistoricalFromAutomation]);
 
-  // Reactive watcher: detect historical overrides when the user changes date / currency
-  // in the Edit Expense modal.
-  const refreshEditExpenseHistoricalState = useCallback(() => {
-    if (!editExpenseDraft) {
-      setEditHistoricalBanner(null);
-      setEditHistoricalApplied(EMPTY_NEW_EXPENSE_HISTORICAL_APPLIED);
-      return;
-    }
-
-    const isoDate = normalizeDate(editExpenseDraft.date);
-
-    if (isoDate >= getLocalTodayIso()) {
-      setEditHistoricalBanner(null);
-      setEditHistoricalApplied(EMPTY_NEW_EXPENSE_HISTORICAL_APPLIED);
-      return;
-    }
-
-    // If the expense snapshot already has this date+currency (i.e. the expense is being
-    // edited without changing the key fields), it was already converted — no re-prompt.
-    const snapshotDate = editExpenseSnapshot ? normalizeDate(editExpenseSnapshot.date) : null;
-    const snapshotMatchesDraft =
-      snapshotDate === isoDate &&
-      editExpenseSnapshot?.currency === editExpenseDraft.currency;
-
-    if (snapshotMatchesDraft) {
-      setEditHistoricalBanner(null);
-      return;
-    }
-
-    const resolved = resolveNewExpenseHistoricalState(
-      isoDate,
-      editExpenseDraft.currency as ExpenseCurrency,
-    );
-
-    setEditHistoricalApplied(resolved.autoApplied);
-
-    const suppressBanner = editExpenseDraft.currency === displayCurrency;
-    if (!suppressBanner && resolved.showBanner && resolved.bannerContext) {
-      setEditHistoricalBanner(resolved.bannerContext);
-    } else {
-      setEditHistoricalBanner(null);
-    }
-  }, [displayCurrency, editExpenseDraft, editExpenseSnapshot]);
-
-  const refreshEditExpenseHistoricalFromAutomation = useCallback(() => {
-    if (!editExpenseDraft) return;
-
-    const isoDate = normalizeDate(editExpenseDraft.date);
-    if (isoDate >= getLocalTodayIso()) return;
-
-    // Same guard as refreshEditExpenseHistoricalState: no banner when snapshot matches draft.
-    const snapshotDate = editExpenseSnapshot ? normalizeDate(editExpenseSnapshot.date) : null;
-    const snapshotMatchesDraft =
-      snapshotDate === isoDate &&
-      editExpenseSnapshot?.currency === editExpenseDraft.currency;
-    if (snapshotMatchesDraft) return;
-
-    const resolved = resolveNewExpenseHistoricalState(
-      isoDate,
-      editExpenseDraft.currency as ExpenseCurrency,
-    );
-
-    if (resolved.autoApplied.rateEntry || resolved.autoApplied.feeEntry) {
-      setEditHistoricalApplied(resolved.autoApplied);
-    }
-
-    const suppressBanner = editExpenseDraft.currency === displayCurrency;
-    if (!suppressBanner && resolved.showBanner && resolved.bannerContext) {
-      setEditHistoricalBanner(resolved.bannerContext);
-    } else if (!suppressBanner && !resolved.showBanner) {
-      setEditHistoricalBanner(null);
-    } else if (suppressBanner) {
-      setEditHistoricalBanner(null);
-    }
-  }, [displayCurrency, editExpenseDraft, editExpenseSnapshot]);
-
-  useEffect(() => {
-    refreshEditExpenseHistoricalState();
-  }, [refreshEditExpenseHistoricalState]);
-
-  useEffect(() => {
-    return subscribeHistoricalOverridesUpdated((event) => {
-      if (isAutomationOnlyHistoricalUpdate(event)) {
-        refreshEditExpenseHistoricalFromAutomation();
-      } else {
-        refreshEditExpenseHistoricalState();
-      }
-    });
-  }, [refreshEditExpenseHistoricalState, refreshEditExpenseHistoricalFromAutomation]);
-
   const newExpenseIsoDate = normalizeDate(newExpense.date);
 
   const newExpenseHistoricalFeePercent = useMemo(() => {
     const fee = newExpenseHistoricalApplied.feeEntry?.feePercent;
     return fee != null && fee > 0 && fee <= 100 ? fee : undefined;
   }, [newExpenseHistoricalApplied.feeEntry]);
-
-  const editHistoricalFeePercent = useMemo(() => {
-    const fee = editHistoricalApplied.feeEntry?.feePercent;
-    return fee != null && fee > 0 && fee <= 100 ? fee : undefined;
-  }, [editHistoricalApplied.feeEntry]);
 
   const persistHistoricalAutomationUpdates = useCallback(
     async (updatedEntries: HistoricalOverrideEntry[]) => {
@@ -3698,21 +3597,6 @@ function App() {
       void persistHistoricalAutomationUpdates(updatedEntries);
     },
     [newExpenseHistoricalBanner, persistHistoricalAutomationUpdates],
-  );
-
-  const handleEditExpenseHistoricalChoice = useCallback(
-    (choice: HistoricalOverrideApplyChoice, options: HistoricalOverrideBannerOptions) => {
-      if (!editHistoricalBanner) return;
-
-      const context = editHistoricalBanner;
-
-      setEditHistoricalApplied(appliedFromHistoricalChoice(choice, context));
-      setEditHistoricalBanner(null);
-
-      const updatedEntries = applyBannerAutomationFromChoice(choice, context, options);
-      void persistHistoricalAutomationUpdates(updatedEntries);
-    },
-    [editHistoricalBanner, persistHistoricalAutomationUpdates],
   );
 
   // Sync newly archived historical overrides to Firestore whenever a new entry is written.
@@ -5567,23 +5451,6 @@ function App() {
 
       const historicalRateEntry = submitApplied.rateEntry ?? undefined;
       const historicalFeePercent = submitApplied.feeEntry?.feePercent ?? undefined;
-      const hasHistoricalContext =
-        historicalRateEntry != null ||
-        (historicalFeePercent != null && historicalFeePercent > 0);
-
-      if (inputCurrency === 'ILS' && !hasHistoricalContext) {
-        // ILS→ILS rate is always 1, but the display may use a manual override for displayCurrency↔ILS
-        const ilsDisplayManualRate = getManualExchangeOverride(displayCurrency, 'ILS');
-        const manualRateUsed = ilsDisplayManualRate != null && ilsDisplayManualRate > 0;
-        return {
-          ilsAmount: roundMoneyAmount(enteredAmount),
-          appliedFeePercent: 0,
-          manualRateUsed,
-          appliedUnitRateToIls: 1,
-          appliedRateSource: manualRateUsed ? 'manual_live' : 'api_spot',
-          appliedConversionDate: isoDate,
-        };
-      }
 
       const recorded = await recordExpenseConversionToIlsAsync(enteredAmount, inputCurrency, rates, {
         displayCurrency,
@@ -5768,8 +5635,6 @@ function App() {
       transactionDate: date,
       manualRateDisabled: editDraftManualRateDisabled,
       feeDisabled: editDraftFeeDisabled,
-      historicalRateEntry: editHistoricalApplied.rateEntry ?? undefined,
-      historicalFeePercent: editHistoricalFeePercent,
     }).then((preview) => {
       if (!cancelled) {
         setEditPreviewAmount(preview?.displayAmount ?? null);
@@ -5785,8 +5650,6 @@ function App() {
     editDraftDate,
     editDraftManualRateDisabled,
     editDraftFeeDisabled,
-    editHistoricalApplied.rateEntry,
-    editHistoricalFeePercent,
     editModifierVisibility,
     displayCurrency,
   ]);
@@ -5812,33 +5675,6 @@ function App() {
       const normalizedDate = normalizeDate(editExpenseDraft.date);
       const rates = getCachedExchangeRates();
 
-      const editHistRateEntry = editHistoricalApplied.rateEntry ?? undefined;
-      const editHistFeePercent = editHistoricalApplied.feeEntry?.feePercent ?? undefined;
-      const hasHistoricalContext =
-        editHistRateEntry != null ||
-        (editHistFeePercent != null && editHistFeePercent > 0);
-      const hadPersistedModifiers = Boolean(
-        prevExpense?.manualRateUsed ||
-          prevExpense?.manualRateDisabled ||
-          (prevExpense?.appliedFeePercent ?? 0) > 0 ||
-          prevExpense?.feeDisabled ||
-          manualRateDisabled ||
-          feeDisabled,
-      );
-
-      if (editExpenseDraft.currency === 'ILS' && !hasHistoricalContext && !hadPersistedModifiers) {
-        const ilsDisplayManualRate = getManualExchangeOverride(displayCurrency, 'ILS');
-        const manualRateUsed = ilsDisplayManualRate != null && ilsDisplayManualRate > 0;
-        return {
-          ilsAmount: roundMoneyAmount(typedAmount),
-          appliedFeePercent: 0,
-          manualRateUsed,
-          appliedUnitRateToIls: 1,
-          appliedRateSource: manualRateUsed ? 'manual_live' : 'api_spot',
-          appliedConversionDate: normalizedDate,
-        };
-      }
-
       const recorded = await recordExpenseConversionToIlsAsync(
         typedAmount,
         editExpenseDraft.currency,
@@ -5848,15 +5684,13 @@ function App() {
           transactionDate: normalizedDate,
           manualRateDisabled,
           feeDisabled,
-          historicalRateEntry: editHistRateEntry,
-          historicalFeePercent: editHistFeePercent,
         },
       );
       if (recorded == null) return null;
       return {
         ...recorded,
         ilsAmount: roundMoneyAmount(recorded.ilsAmount),
-        appliedRateContextKey: editHistRateEntry ? historicalEntryKey(editHistRateEntry) : undefined,
+        appliedRateContextKey: prevExpense?.appliedRateContextKey,
         appliedConversionDate: normalizedDate,
       };
     };
@@ -7069,8 +6903,6 @@ function App() {
                   }
                   onRatesReadyChange={setEditExpenseRatesReady}
                   transactionDate={normalizeDate(editExpenseDraft.date)}
-                  historicalRateEntry={editHistoricalApplied.rateEntry ?? undefined}
-                  historicalFeePercent={editHistoricalFeePercent}
                 />
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col gap-4 sm:flex-row sm:items-end">
@@ -7198,16 +7030,6 @@ function App() {
                   {tr('saveChanges')}
                 </button>
               </div>
-
-              {/* Historical override prompt inside edit modal */}
-              <AnimatePresence>
-                {editHistoricalBanner && (
-                  <HistoricalOverridePrompt
-                    context={editHistoricalBanner}
-                    onChoice={handleEditExpenseHistoricalChoice}
-                  />
-                )}
-              </AnimatePresence>
             </div>
           </div>
         </div>

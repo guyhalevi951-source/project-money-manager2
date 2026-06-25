@@ -407,13 +407,8 @@ function isCacheEntryValid(dateIso: string, entry: CurrencyCacheEntry): boolean 
 
   const todayIso = getLocalTodayIso();
   if (dateIso < todayIso) {
-    // Historical dates are immutable — accept any persisted market snapshot source.
-    return (
-      entry.source === 'historical_api' ||
-      entry.source === 'usd_pivot_fallback' ||
-      entry.source === 'legacy' ||
-      entry.source === 'today_live_fallback'
-    );
+    // Past dates must only trust true historical snapshots — never live-spot fallbacks.
+    return entry.source === 'historical_api' || entry.source === 'legacy';
   }
   if (dateIso > todayIso) return false;
 
@@ -458,6 +453,46 @@ function migrateLegacyHistoricalCache(store: CurrencyCacheStore): CurrencyCacheS
   }
 }
 
+/** Drop past-date cache rows polluted with live-spot values (source of flat 0.00% trends). */
+function purgeCorruptedHistoricalCache(store: CurrencyCacheStore): CurrencyCacheStore {
+  const todayIso = getLocalTodayIso();
+  const liveRates = getCachedExchangeRates();
+  let changed = false;
+  const next: CurrencyCacheStore = { ...store };
+
+  for (const [key, entry] of Object.entries(next)) {
+    const dateIso = key.slice(0, 10);
+    if (dateIso >= todayIso) continue;
+
+    if (
+      entry.source === 'today_live_fallback' ||
+      entry.source === 'usd_pivot_fallback'
+    ) {
+      delete next[key];
+      changed = true;
+      continue;
+    }
+
+    if (!liveRates || !(entry.rate > 0)) continue;
+
+    const rest = key.slice(11);
+    const sep = rest.indexOf('_');
+    if (sep <= 0) continue;
+    const fromCurrency = rest.slice(0, sep);
+    const toCurrency = rest.slice(sep + 1);
+    const liveSpot = resolveSpotUnitRateSync(fromCurrency, toCurrency, liveRates.ilsToForeign);
+    if (liveSpot == null || !(liveSpot > 0)) continue;
+
+    const relativeDiff = Math.abs(entry.rate - liveSpot) / liveSpot;
+    if (relativeDiff < 1e-4) {
+      delete next[key];
+      changed = true;
+    }
+  }
+
+  return changed ? next : store;
+}
+
 function readCurrencyCache(): CurrencyCacheStore {
   try {
     const raw = window.localStorage.getItem(APP_CURRENCY_CACHE_KEY);
@@ -473,6 +508,7 @@ function readCurrencyCache(): CurrencyCacheStore {
     if (!currencyCacheHydrated) {
       currencyCacheHydrated = true;
       store = migrateLegacyHistoricalCache(store);
+      store = purgeCorruptedHistoricalCache(store);
       if (Object.keys(store).length > 0) {
         writeCurrencyCache(store);
       }
@@ -721,6 +757,64 @@ async function fetchRateFromFrankfurterWithInverse(
   return null;
 }
 
+async function fetchRateFromCurrencyApi(
+  dateIso: string,
+  fromCurrency: string,
+  toCurrency: string,
+): Promise<number | null> {
+  const base = fromCurrency.toLowerCase();
+  const quote = toCurrency.toLowerCase();
+  const endpoints = [
+    `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${dateIso}/v1/currencies/${base}.min.json`,
+    `https://${dateIso}.currency-api.pages.dev/v1/currencies/${base}.min.json`,
+    `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${dateIso}/v1/currencies/${base}.json`,
+    `https://${dateIso}.currency-api.pages.dev/v1/currencies/${base}.json`,
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) continue;
+
+      const payload = (await response.json()) as Record<string, unknown>;
+      const basePayload = payload[base] as Record<string, unknown> | undefined;
+      const quoteRate = basePayload?.[quote];
+      if (typeof quoteRate === 'number' && quoteRate > 0) return quoteRate;
+    } catch {
+      // Try next endpoint.
+    }
+  }
+
+  return null;
+}
+
+/** Date-scoped open.er-api.com ILS table — supports historical ILS-leg pairs Frankfurter misses. */
+async function fetchHistoricalErApiIlsRates(dateIso: string): Promise<ExchangeRates | null> {
+  const url = `https://open.er-api.com/v6/${dateIso}/ILS`;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    return parseErApiResponse(await response.json(), Date.now());
+  } catch {
+    return null;
+  }
+}
+
+async function fetchHistoricalIlsLegRate(
+  dateIso: string,
+  fromCurrency: string,
+  toCurrency: string,
+): Promise<number | null> {
+  const from = fromCurrency.trim().toUpperCase();
+  const to = toCurrency.trim().toUpperCase();
+  if (from !== 'ILS' && to !== 'ILS') return null;
+
+  const historicalRates = await fetchHistoricalErApiIlsRates(dateIso);
+  if (!historicalRates) return null;
+
+  return resolveIlsLegDirectUnitRate(from, to, historicalRates.ilsToForeign);
+}
+
 async function fetchCrossRateViaUsdPivot(
   dateIso: string,
   fromCurrency: string,
@@ -889,6 +983,32 @@ export async function fetchHistoricalDirectRateSnapshot(
       return { rate: sanitized, fetchedAt: stored?.timestamp ?? Date.now() };
     }
 
+    const currencyApiRate = await fetchRateFromCurrencyApi(
+      safeDate,
+      fromCurrency,
+      toCurrency,
+    );
+    if (currencyApiRate != null) {
+      const sanitized = sanitizeDirectUnitRate(fromCurrency, toCurrency, currencyApiRate, liveRates);
+      setCachedCurrencyRate(safeDate, fromCurrency, toCurrency, sanitized, 'historical_api');
+      const stored = getCachedCurrencyRate(safeDate, fromCurrency, toCurrency);
+      return { rate: sanitized, fetchedAt: stored?.timestamp ?? Date.now() };
+    }
+
+    if (fromCurrency === 'ILS' || toCurrency === 'ILS') {
+      const ilsLegRate = await fetchHistoricalIlsLegRate(
+        safeDate,
+        fromCurrency,
+        toCurrency,
+      );
+      if (ilsLegRate != null && ilsLegRate > 0) {
+        const sanitized = sanitizeDirectUnitRate(fromCurrency, toCurrency, ilsLegRate, liveRates);
+        setCachedCurrencyRate(safeDate, fromCurrency, toCurrency, sanitized, 'historical_api');
+        const stored = getCachedCurrencyRate(safeDate, fromCurrency, toCurrency);
+        return { rate: sanitized, fetchedAt: stored?.timestamp ?? Date.now() };
+      }
+    }
+
     const usdPivotRate = await fetchCrossRateViaUsdPivot(
       safeDate,
       fromCurrency,
@@ -902,6 +1022,19 @@ export async function fetchHistoricalDirectRateSnapshot(
       setCachedCurrencyRate(safeDate, fromCurrency, toCurrency, sanitized, source);
       const stored = getCachedCurrencyRate(safeDate, fromCurrency, toCurrency);
       return { rate: sanitized, fetchedAt: stored?.timestamp ?? Date.now() };
+    }
+
+    // Live-spot fallback is allowed only for today's date — never for past dates.
+    if (safeDate === getLocalTodayIso() && liveRates) {
+      const todayFallback = isForeignToForeign(fromCurrency, toCurrency)
+        ? computeCrossRateViaUsdPivot(fromCurrency, toCurrency, liveRates.ilsToForeign)
+        : resolveIlsLegDirectUnitRate(fromCurrency, toCurrency, liveRates.ilsToForeign);
+      if (todayFallback != null && todayFallback > 0) {
+        const sanitized = sanitizeDirectUnitRate(fromCurrency, toCurrency, todayFallback, liveRates);
+        setCachedCurrencyRate(safeDate, fromCurrency, toCurrency, sanitized, 'today_live_fallback');
+        const stored = getCachedCurrencyRate(safeDate, fromCurrency, toCurrency);
+        return { rate: sanitized, fetchedAt: stored?.timestamp ?? Date.now() };
+      }
     }
 
     if (!liveRates) {

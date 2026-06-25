@@ -880,20 +880,20 @@ export default function HistoricalLogModal({
             </div>
 
             {/* Currency filter */}
-            <div className="relative flex min-w-[7rem] flex-1 items-center">
-              <Search
-                className="pointer-events-none absolute start-2.5 h-3.5 w-3.5 text-neutral-500"
-                aria-hidden
-              />
-              <input
-                type="text"
+            <div className="flex min-w-[7rem] flex-1 items-center">
+              <select
                 value={filterCurrency}
                 onChange={(e) => setFilterCurrency(e.target.value)}
-                maxLength={5}
                 aria-label={tr('historicalLogFilterCurrency')}
-                placeholder={tr('historicalLogFilterCurrency')}
-                className={`w-full ps-8 uppercase ${surfaceInputSmClass}`}
-              />
+                className={`w-full ${surfaceInputSmClass}`}
+              >
+                <option value="">{tr('historicalLogFeeAllCurrencies')}</option>
+                {pinnedCurrencies.map((code) => (
+                  <option key={code} value={code}>
+                    {code}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Clear filters */}

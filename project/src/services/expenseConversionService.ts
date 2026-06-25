@@ -111,8 +111,6 @@ function resolveLiveManualOrSpotRate(
   from: ExpenseCurrency,
   rates: ExchangeRates,
 ): { rate: number; manualRateUsed: boolean; rateSource: 'manual_live' | 'api_spot' } | null {
-  if (from === 'ILS') return { rate: 1, manualRateUsed: false, rateSource: 'api_spot' };
-
   const manualDirect = getManualExchangeOverride(from, 'ILS');
   if (manualDirect != null && manualDirect > 0) {
     return { rate: manualDirect, manualRateUsed: true, rateSource: 'manual_live' };
@@ -157,6 +155,8 @@ async function resolveDateScopedApiRate(
   });
   if (ensured.rate != null && ensured.rate > 0) return ensured.rate;
 
+  if (dateIso < getLocalTodayIso()) return null;
+
   const liveRates = rates ?? (await fetchExchangeRates().catch(() => null));
   if (!liveRates) return null;
 
@@ -186,6 +186,8 @@ function resolveDateScopedApiRateSync(
     rates,
   });
   if (sync.rate != null && sync.rate > 0) return sync.rate;
+
+  if (dateIso < getLocalTodayIso()) return null;
 
   return resolveIlsLegDirectUnitRate(from, to, rates.ilsToForeign);
 }
@@ -242,8 +244,6 @@ async function resolveUnitRateToIls(
   historicalManualRate?: number,
   historicalRateEntry?: HistoricalOverrideEntry,
 ): Promise<{ rate: number; manualRateUsed: boolean; rateSource: 'historical' | 'manual_live' | 'api_spot' } | null> {
-  if (from === 'ILS') return { rate: 1, manualRateUsed: false, rateSource: 'api_spot' };
-
   // Explicit numeric override (highest priority).
   if (historicalManualRate != null && historicalManualRate > 0) {
     return { rate: historicalManualRate, manualRateUsed: true, rateSource: 'historical' };
@@ -269,7 +269,11 @@ async function resolveUnitRateToIls(
   if (manualRateDisabled) {
     const apiRate = await resolveDateScopedApiRate(transactionDate, from, 'ILS', rates);
     if (apiRate == null || !(apiRate > 0)) return null;
-    return { rate: apiRate, manualRateUsed: false, rateSource: 'api_spot' };
+    return { rate: from === 'ILS' ? 1 : apiRate, manualRateUsed: false, rateSource: 'api_spot' };
+  }
+
+  if (from === 'ILS') {
+    return { rate: 1, manualRateUsed: false, rateSource: 'api_spot' };
   }
 
   return resolveLiveManualOrSpotRate(from, rates);
@@ -283,8 +287,6 @@ function resolveUnitRateToIlsSync(
   historicalManualRate?: number,
   historicalRateEntry?: HistoricalOverrideEntry,
 ): { rate: number; manualRateUsed: boolean; rateSource: 'historical' | 'manual_live' | 'api_spot' } | null {
-  if (from === 'ILS') return { rate: 1, manualRateUsed: false, rateSource: 'api_spot' };
-
   if (historicalManualRate != null && historicalManualRate > 0) {
     return { rate: historicalManualRate, manualRateUsed: true, rateSource: 'historical' };
   }
@@ -303,7 +305,11 @@ function resolveUnitRateToIlsSync(
   if (manualRateDisabled) {
     const apiRate = resolveDateScopedApiRateSync(transactionDate, from, 'ILS', rates);
     if (apiRate == null || !(apiRate > 0)) return null;
-    return { rate: apiRate, manualRateUsed: false, rateSource: 'api_spot' };
+    return { rate: from === 'ILS' ? 1 : apiRate, manualRateUsed: false, rateSource: 'api_spot' };
+  }
+
+  if (from === 'ILS') {
+    return { rate: 1, manualRateUsed: false, rateSource: 'api_spot' };
   }
 
   return resolveLiveManualOrSpotRate(from, rates);
@@ -336,6 +342,55 @@ function readOverrideFlags(options?: ConvertExpenseToIlsOptions): {
   return {
     manualRateDisabled: Boolean(legacy?.manualRateDisabled ?? legacy?.disableManualRate),
     feeDisabled: Boolean(legacy?.feeDisabled ?? legacy?.disableFee),
+  };
+}
+
+/** ILS ledger rate is always 1; manual flag reflects the display-currency pair override. */
+function resolveIlsExpenseManualRateUsed(
+  manualRateDisabled: boolean,
+  displayCurrency: ExpenseCurrency | undefined,
+  rates: ExchangeRates,
+): boolean {
+  if (manualRateDisabled || !displayCurrency || displayCurrency === 'ILS') return false;
+
+  const manualDirect = getManualExchangeOverride(displayCurrency, 'ILS');
+  if (manualDirect != null && manualDirect > 0) return true;
+
+  const withManual = toActiveExchangeRatesFromSnapshot(rates, listActiveManualExchangeOverrides());
+  const spotOnly = toActiveExchangeRatesFromSnapshot(rates, []);
+  const rateWithManual = convertAmountWithActiveRates(1, 'ILS', displayCurrency, withManual);
+  const rateSpotOnly = convertAmountWithActiveRates(1, 'ILS', displayCurrency, spotOnly);
+  if (rateWithManual == null || !(rateWithManual > 0)) return false;
+
+  return (
+    rateSpotOnly == null ||
+    Math.abs(rateWithManual - rateSpotOnly) / Math.max(rateSpotOnly, 1e-9) > 1e-6
+  );
+}
+
+function applyIlsSourceManualRateFlags(
+  from: ExpenseCurrency,
+  unit: { manualRateUsed: boolean; rateSource: 'historical' | 'manual_live' | 'api_spot' },
+  options: ConvertExpenseToIlsOptions | undefined,
+  manualRateDisabled: boolean,
+  rates: ExchangeRates,
+): { manualRateUsed: boolean; rateSource: 'historical' | 'manual_live' | 'api_spot' } {
+  if (from !== 'ILS') {
+    return { manualRateUsed: unit.manualRateUsed, rateSource: unit.rateSource };
+  }
+
+  if (unit.rateSource === 'historical') {
+    return { manualRateUsed: unit.manualRateUsed, rateSource: unit.rateSource };
+  }
+
+  const ilsManual = resolveIlsExpenseManualRateUsed(
+    manualRateDisabled,
+    options?.displayCurrency,
+    rates,
+  );
+  return {
+    manualRateUsed: ilsManual,
+    rateSource: ilsManual ? 'manual_live' : 'api_spot',
   };
 }
 
@@ -402,13 +457,21 @@ export async function recordExpenseConversionToIlsAsync(
   );
   if (!unit) return null;
 
+  const rateFlags = applyIlsSourceManualRateFlags(
+    from,
+    unit,
+    options,
+    manualRateDisabled,
+    liveRates,
+  );
+
   return computeExpenseIlsConversion(amount, from, {
     transactionDate,
     manualRateDisabled,
     feeDisabled,
     unitRate: unit.rate,
-    manualRateUsed: unit.manualRateUsed,
-    rateSource: unit.rateSource,
+    manualRateUsed: rateFlags.manualRateUsed,
+    rateSource: rateFlags.rateSource,
     historicalFeePercent,
   });
 }
@@ -438,13 +501,21 @@ export function recordExpenseConversionToIls(
   );
   if (!unit) return null;
 
+  const rateFlags = applyIlsSourceManualRateFlags(
+    from,
+    unit,
+    options,
+    manualRateDisabled,
+    rates,
+  );
+
   return computeExpenseIlsConversion(amount, from, {
     transactionDate,
     manualRateDisabled,
     feeDisabled,
     unitRate: unit.rate,
-    manualRateUsed: unit.manualRateUsed,
-    rateSource: unit.rateSource,
+    manualRateUsed: rateFlags.manualRateUsed,
+    rateSource: rateFlags.rateSource,
     historicalFeePercent,
   });
 }

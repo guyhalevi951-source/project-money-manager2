@@ -138,7 +138,7 @@ export function resolveDirectPairUnitRateSync(
 
   const ilsToForeign =
     liveRates?.ilsToForeign ?? options.activeExchangeRates?.ilsToForeign ?? null;
-  if (ilsToForeign) {
+  if (ilsToForeign && dateIso >= getLocalTodayIso()) {
     const fallback = resolveSyncSpotFallback(from, to, ilsToForeign);
     if (fallback) {
       return { rate: fallback.rate, source: fallback.source, manualRateUsed: false };

@@ -361,7 +361,7 @@ export default function ExpenseAmountField({
   ]);
 
   const historicalRateLabel = useMemo(() => {
-    if (!hasHistoricalRateApplied || inputCurrency === 'ILS') return null;
+    if (!hasHistoricalRateApplied) return null;
 
     const f2fRate =
       historicalRateEntry && entryHasRate(historicalRateEntry)

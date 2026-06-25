@@ -1340,15 +1340,8 @@ export default function ExchangeRateSimulator({
     if (!Number.isFinite(rawDeltaPercent)) return null;
 
     const roundedDelta = Number(rawDeltaPercent.toFixed(2));
+    if (roundedDelta === 0) return null;
     if (Math.abs(roundedDelta) > 500) return null;
-
-    if (roundedDelta === 0) {
-      return {
-        trend: 'flat' as const,
-        percentText: '0.00%',
-        contextText: tr('exchangeRateVsToday'),
-      };
-    }
 
     const trend: 'up' | 'down' = roundedDelta > 0 ? 'up' : 'down';
     const sign = roundedDelta > 0 ? '+' : '';
@@ -1365,6 +1358,9 @@ export default function ExchangeRateSimulator({
     if (mainCurrency === secondaryCurrency) return false;
     if (!(effectiveUnitRate != null && effectiveUnitRate > 0)) return true;
     if (!(todayMarketRate != null && todayMarketRate > 0)) return true;
+    const relativeDiff =
+      Math.abs(effectiveUnitRate - todayMarketRate) / Math.max(todayMarketRate, 1e-9);
+    if (relativeDiff < 1e-4) return true;
     return false;
   }, [
     dateIso,
@@ -2163,22 +2159,14 @@ export default function ExchangeRateSimulator({
                     <span
                       aria-hidden
                       className={`text-3xl leading-none md:text-[4rem] ${
-                        rateComparison.trend === 'up'
-                          ? 'text-emerald-500'
-                          : rateComparison.trend === 'down'
-                            ? 'text-rose-600'
-                            : 'text-neutral-400'
+                        rateComparison.trend === 'up' ? 'text-emerald-500' : 'text-rose-600'
                       }`}
                     >
-                      {rateComparison.trend === 'up' ? '⬆' : rateComparison.trend === 'down' ? '⬇' : '➡'}
+                      {rateComparison.trend === 'up' ? '⬆' : '⬇'}
                     </span>
                     <LtrNumeric
                       className={`text-2xl font-black leading-none md:text-4xl ${
-                        rateComparison.trend === 'up'
-                          ? 'text-emerald-400'
-                          : rateComparison.trend === 'down'
-                            ? 'text-rose-500'
-                            : 'text-neutral-400'
+                        rateComparison.trend === 'up' ? 'text-emerald-400' : 'text-rose-500'
                       }`}
                     >
                       {rateComparison.percentText}
