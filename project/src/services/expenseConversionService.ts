@@ -384,6 +384,26 @@ export function resolvePersistedExpenseConversionMeta(
   return { manualRateUsed, appliedFeePercent };
 }
 
+/**
+ * Returns true when an expense was created while a global manual rate was active
+ * for its currency — edit modal checkbox stays visible permanently.
+ */
+export function expenseHadCreationManualRate(expense: {
+  creationHadActiveManualRate?: boolean;
+}): boolean {
+  return expense.creationHadActiveManualRate === true;
+}
+
+/**
+ * Returns true when an expense was created while a global commission fee was active
+ * for its currency — edit modal checkbox stays visible permanently.
+ */
+export function expenseHadCreationFee(expense: {
+  creationHadActiveFee?: boolean;
+}): boolean {
+  return expense.creationHadActiveFee === true;
+}
+
 // ── Snapshot visibility helpers (independent of global settings) ─────────────
 
 /**
@@ -471,7 +491,12 @@ export async function recordDualExpenseConversionFromSnapshot(
   if (feePercent === 0 && !feeDisabled && existingSnapshot?.appliedFeePercent) {
     feePercent = existingSnapshot.appliedFeePercent;
   }
-  const feeAvailable = feePercent > 0;
+  // Preserve fee metadata when toggled off so edit modal can re-enable the checkbox
+  const preservedFeePercent =
+    feeDisabled && (existingSnapshot?.appliedFeePercent ?? 0) > 0
+      ? existingSnapshot!.appliedFeePercent!
+      : feePercent;
+  const feeAvailable = preservedFeePercent > 0;
 
   // Manual path: prefer live global active rate; fall back to saved snapshot rate
   const liveResult = resolveLiveManualOrSpotRate(from, liveRates);
@@ -482,7 +507,7 @@ export async function recordDualExpenseConversionFromSnapshot(
   const manualRateAvailable = manualRate != null;
 
   const amountInManual = manualRate != null
-    ? applyFeeMultiplier(smartRoundMoney(amount * manualRate), feePercent)
+    ? applyFeeMultiplier(smartRoundMoney(amount * manualRate), feeDisabled ? 0 : feePercent)
     : null;
 
   // Spot path: fresh recalculation; fall back to snapshot spot rate when unavailable
@@ -492,14 +517,17 @@ export async function recordDualExpenseConversionFromSnapshot(
   }
   if (spotRate == null || !(spotRate > 0)) return null;
 
-  const amountInSpot = applyFeeMultiplier(smartRoundMoney(amount * spotRate), feePercent);
+  const amountInSpot = applyFeeMultiplier(
+    smartRoundMoney(amount * spotRate),
+    feeDisabled ? 0 : feePercent,
+  );
 
   return {
     savedManualRate: manualRate,
     savedSpotRate: spotRate,
     amountInManual,
     amountInSpot,
-    appliedFeePercent: feePercent,
+    appliedFeePercent: preservedFeePercent,
     manualRateAvailable,
     feeAvailable,
   };

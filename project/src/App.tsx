@@ -98,8 +98,8 @@ import {
   subscribeCurrencyCommissionsUpdated,
 } from './services/currencyCommissionService';
 import {
-  expenseHasSavedFeeSnapshot,
-  expenseHasSavedManualRateSnapshot,
+  expenseHadCreationFee,
+  expenseHadCreationManualRate,
   previewExpenseDisplayAmountFromSnapshot,
   recordDualExpenseConversion,
   recordDualExpenseConversionFromSnapshot,
@@ -308,6 +308,10 @@ interface Expense {
   manualRateDisabled?: boolean;
   /** @deprecated Replaced by !feeApplied */
   feeDisabled?: boolean;
+  /** Immutable: global manual rate was active for this currency at creation time. */
+  creationHadActiveManualRate?: boolean;
+  /** Immutable: global commission fee was active for this currency at creation time. */
+  creationHadActiveFee?: boolean;
 }
 
 // Sentinel value used by the category <select> to trigger the "add custom" flow
@@ -3260,6 +3264,7 @@ function App() {
   useRateCacheSync({ user, authReady });
   const [settingsCloudReady, setSettingsCloudReady] = useState(false);
   const suppressCloudSaveRef = useRef(true);
+  const guestFinancialHydratedRef = useRef(false);
   const financialLocalVersionRef = useRef<Record<string, number>>({});
   const registryPatchedAtRef = useRef<Record<string, number>>({});
   const financialPersistTimerRef = useRef<number | null>(null);
@@ -3331,11 +3336,7 @@ function App() {
   const [recentlyUpdatedExpenseId, setRecentlyUpdatedExpenseId] = useState<string | null>(null);
   const [expenseRatesReady, setExpenseRatesReady] = useState(true);
 
-  // Active manual-rate / fee apply toggles — new expense form
-  const [newExpenseApplyManualRate, setNewExpenseApplyManualRate] = useState(true);
-  const [newExpenseApplyFee, setNewExpenseApplyFee] = useState(true);
-
-  // Active manual-rate / fee apply toggles — edit expense modal
+  // Active manual-rate / fee apply toggles — edit expense modal only
   const [editApplyManualRate, setEditApplyManualRate] = useState(true);
   const [editApplyFee, setEditApplyFee] = useState(true);
   const [showBudgetSaved, setShowBudgetSaved] = useState(false);
@@ -3471,41 +3472,6 @@ function App() {
   }, [navigateToSettingsSection, openProfile]);
 
   const newExpenseIsoDate = normalizeDate(newExpense.date);
-
-  // Live check: does an active global manual rate / fee exist for the selected currency?
-  const [newExpenseHasActiveRate, setNewExpenseHasActiveRate] = useState(false);
-  const [newExpenseHasActiveFee, setNewExpenseHasActiveFee] = useState(false);
-
-  const refreshNewExpenseActiveSettings = useCallback(() => {
-    const currency = newExpense.currency as ExpenseCurrency;
-    if (currency === 'ILS') {
-      setNewExpenseHasActiveRate(false);
-      setNewExpenseHasActiveFee(false);
-      return;
-    }
-    const hasRate = hasActiveManualOverrideForPair(currency, 'ILS') ||
-      hasActiveManualOverrideForPair('ILS', currency);
-    const hasFee = (getActiveCurrencyCommissionPercent(currency) ?? 0) > 0;
-    setNewExpenseHasActiveRate(hasRate);
-    setNewExpenseHasActiveFee(hasFee);
-    if (hasRate) setNewExpenseApplyManualRate(true);
-    if (hasFee) setNewExpenseApplyFee(true);
-    if (!hasRate) setNewExpenseApplyManualRate(false);
-    if (!hasFee) setNewExpenseApplyFee(false);
-  }, [newExpense.currency]);
-
-  useEffect(() => {
-    refreshNewExpenseActiveSettings();
-  }, [refreshNewExpenseActiveSettings]);
-
-  useEffect(() => {
-    const unsubRates = subscribeManualOverridesUpdated(refreshNewExpenseActiveSettings);
-    const unsubFees = subscribeCurrencyCommissionsUpdated(refreshNewExpenseActiveSettings);
-    return () => {
-      unsubRates();
-      unsubFees();
-    };
-  }, [refreshNewExpenseActiveSettings]);
 
   const handleQuickLanguageToggle = () => {
     const nextLang = lang === 'he' ? 'en' : 'he';
@@ -4681,7 +4647,7 @@ function App() {
         void listActiveManualExchangeOverrides();
         skipNextSettingsSaveRef.current = true;
         rehydrateIsolatedGuestSession(applySettingsFromCloudRef.current);
-        setDataReady(true);
+        guestFinancialHydratedRef.current = false;
         return;
       }
 
@@ -4700,6 +4666,8 @@ function App() {
         clearCloudCurrencyCommissions();
         if (shouldBootstrapBudget) {
           budgetBootstrappedRef.current = true;
+          guestFinancialHydratedRef.current = false;
+          suppressCloudSaveRef.current = true;
           const guestLang = readGuestLang();
           if (guestLang) {
             setLangRef.current(guestLang, { persist: false });
@@ -4718,6 +4686,7 @@ function App() {
             applyAppData(financialCache[DEFAULT_MONTHLY_BUDGET_ID] ?? legacy, 'bootstrap:guest');
             applyActiveBudgetSettingsRef.current(DEFAULT_MONTHLY_BUDGET_ID, registry);
           }
+          guestFinancialHydratedRef.current = true;
           setBudgetSystemReady(true);
         }
         setDataReady(true);
@@ -5094,6 +5063,10 @@ function App() {
   useEffect(() => {
     if (!dataReady || !user || appShellView !== 'active-budget') return;
 
+    if (user.isAnonymous && (!guestFinancialHydratedRef.current || suppressCloudSaveRef.current)) {
+      return;
+    }
+
     const payload = snapshotUserAppData({
       expenses,
       customCategories,
@@ -5281,8 +5254,6 @@ function App() {
 
     if (isNaN(enteredAmount) || !(enteredAmount > 0)) return;
 
-    const feeDisabled = !newExpenseApplyFee;
-
     const resolveConversion = async () => {
       const rates = getCachedExchangeRates();
       const isoDate = normalizeDate(newExpense.date);
@@ -5293,16 +5264,17 @@ function App() {
           amount: ils, savedManualRate: null, savedSpotRate: 1,
           amountInManual: null, amountInSpot: ils, appliedFeePercent: 0,
           manualRateUsed: false, feeApplied: false,
+          creationHadActiveManualRate: false, creationHadActiveFee: false,
         };
       }
 
       const snapshot = await recordDualExpenseConversion(enteredAmount, inputCurrency, rates, {
         transactionDate: isoDate,
-        feeDisabled,
+        feeDisabled: false,
       });
       if (snapshot == null) return null;
 
-      const manualRateUsed = newExpenseApplyManualRate && snapshot.manualRateAvailable;
+      const manualRateUsed = snapshot.manualRateAvailable;
       const amount = manualRateUsed && snapshot.amountInManual != null
         ? roundMoneyAmount(snapshot.amountInManual)
         : roundMoneyAmount(snapshot.amountInSpot);
@@ -5315,7 +5287,9 @@ function App() {
         amountInSpot: roundMoneyAmount(snapshot.amountInSpot),
         appliedFeePercent: snapshot.appliedFeePercent,
         manualRateUsed,
-        feeApplied: !feeDisabled && snapshot.feeAvailable,
+        feeApplied: snapshot.feeAvailable,
+        creationHadActiveManualRate: snapshot.manualRateAvailable,
+        creationHadActiveFee: snapshot.feeAvailable,
       };
     };
 
@@ -5339,7 +5313,9 @@ function App() {
           amountInManual: conversion.amountInManual,
           amountInSpot: conversion.amountInSpot,
           manualRateDisabled: !conversion.manualRateUsed,
-          feeDisabled,
+          feeDisabled: !conversion.feeApplied,
+          creationHadActiveManualRate: conversion.creationHadActiveManualRate,
+          creationHadActiveFee: conversion.creationHadActiveFee,
         };
 
         const nextExpenses = [expense, ...expenses];
@@ -5351,8 +5327,6 @@ function App() {
           category: prev.category,
           date: toISODate(new Date()),
         }));
-        setNewExpenseApplyManualRate(true);
-        setNewExpenseApplyFee(true);
         setExpenseRatesReady(true);
 
       // Dual-write (Task 2): mirror expense into main budget when source budget is linked.
@@ -5462,9 +5436,9 @@ function App() {
       category: expense.category,
       date: normalizeDate(expense.date),
     });
-    // Default toggles from saved state (manualRateUsed = they previously chose manual)
+    // Default toggles from saved state
     setEditApplyManualRate(expense.manualRateUsed !== false);
-    setEditApplyFee(expense.feeApplied !== false && (expense.appliedFeePercent ?? 0) > 0);
+    setEditApplyFee(expense.feeApplied === true);
   };
 
   const handleEditExpenseCancel = () => {
@@ -5483,16 +5457,16 @@ function App() {
   const editDraftManualRateDisabled = !editApplyManualRate;
   const editDraftFeeDisabled = !editApplyFee;
   // Whether the expense being edited had a manual rate or fee at creation time —
-  // purely snapshot-driven, independent of whether global settings are still active.
-  const editSnapshotHasManualRate = editExpenseSnapshot != null && expenseHasSavedManualRateSnapshot(editExpenseSnapshot);
-  const editSnapshotHasFee = editExpenseSnapshot != null && expenseHasSavedFeeSnapshot(editExpenseSnapshot);
+  // immutable creation-time flags, independent of current global settings or save state.
+  const editCreationHadManualRate = editExpenseSnapshot != null && expenseHadCreationManualRate(editExpenseSnapshot);
+  const editCreationHadFee = editExpenseSnapshot != null && expenseHadCreationFee(editExpenseSnapshot);
 
   useEffect(() => {
     if (
       editDraftAmount == null ||
       editDraftCurrency == null ||
       editDraftDate == null ||
-      (!editSnapshotHasManualRate && !editSnapshotHasFee)
+      (!editCreationHadManualRate && !editCreationHadFee)
     ) {
       setEditPreviewAmount(null);
       return;
@@ -5566,10 +5540,15 @@ function App() {
       );
       if (snapshot == null) return null;
 
-      const manualRateUsed = editApplyManualRate && snapshot.manualRateAvailable;
+      const manualRateUsed = editCreationHadManualRate ? editApplyManualRate : false;
       const amount = manualRateUsed && snapshot.amountInManual != null
         ? roundMoneyAmount(snapshot.amountInManual)
         : roundMoneyAmount(snapshot.amountInSpot);
+
+      const feeApplied = editCreationHadFee ? editApplyFee : false;
+      const appliedFeePercent = feeApplied
+        ? snapshot.appliedFeePercent
+        : (editExpenseSnapshot?.appliedFeePercent ?? snapshot.appliedFeePercent ?? 0);
 
       return {
         amount,
@@ -5577,9 +5556,9 @@ function App() {
         savedSpotRate: snapshot.savedSpotRate,
         amountInManual: snapshot.amountInManual != null ? roundMoneyAmount(snapshot.amountInManual) : undefined,
         amountInSpot: roundMoneyAmount(snapshot.amountInSpot),
-        appliedFeePercent: snapshot.appliedFeePercent,
+        appliedFeePercent,
         manualRateUsed,
-        feeApplied: !feeDisabled && snapshot.feeAvailable,
+        feeApplied,
       };
     };
 
@@ -5608,7 +5587,7 @@ function App() {
               amountInManual: conversion.amountInManual,
               amountInSpot: conversion.amountInSpot,
               manualRateDisabled: !conversion.manualRateUsed,
-              feeDisabled,
+              feeDisabled: !conversion.feeApplied,
             }
           : expense,
       );
@@ -6331,46 +6310,6 @@ function App() {
               </div>
             </div>
 
-            {/* Apply toggles: shown when an active rate/fee exists for the selected currency */}
-            {(newExpenseHasActiveRate || newExpenseHasActiveFee) && (
-              <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3.5 py-3 shadow-sm shadow-black/20 space-y-3">
-                {newExpenseHasActiveRate && (
-                  <label
-                    htmlFor="new-expense-apply-manual"
-                    className="flex cursor-pointer items-center justify-between gap-3"
-                  >
-                    <span className="text-sm leading-snug text-amber-100/95">
-                      {tr('applyActiveManualRate')}
-                    </span>
-                    <input
-                      id="new-expense-apply-manual"
-                      type="checkbox"
-                      checked={newExpenseApplyManualRate}
-                      onChange={(e) => setNewExpenseApplyManualRate(e.target.checked)}
-                      className="mt-0.5 h-5 w-5 shrink-0 rounded border-amber-500/40 bg-black/20 text-amber-400 focus:ring-amber-500/30"
-                    />
-                  </label>
-                )}
-                {newExpenseHasActiveFee && (
-                  <label
-                    htmlFor="new-expense-apply-fee"
-                    className="flex cursor-pointer items-center justify-between gap-3"
-                  >
-                    <span className="text-sm leading-snug text-amber-100/95">
-                      {tr('applyActiveCommissionFee')}
-                    </span>
-                    <input
-                      id="new-expense-apply-fee"
-                      type="checkbox"
-                      checked={newExpenseApplyFee}
-                      onChange={(e) => setNewExpenseApplyFee(e.target.checked)}
-                      className="mt-0.5 h-5 w-5 shrink-0 rounded border-amber-500/40 bg-black/20 text-amber-400 focus:ring-amber-500/30"
-                    />
-                  </label>
-                )}
-              </div>
-            )}
-
             {/* Row 2: Description + Date + Submit */}
             <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
               <div className="w-full shrink-0 sm:w-44">
@@ -6885,9 +6824,9 @@ function App() {
                 </div>
               </div>
 
-              {(editSnapshotHasManualRate || editSnapshotHasFee) && (
+              {(editCreationHadManualRate || editCreationHadFee) && (
                   <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3.5 py-3 shadow-sm shadow-black/20 space-y-3">
-                    {editSnapshotHasManualRate && (
+                    {editCreationHadManualRate && (
                       <label
                         htmlFor="edit-expense-apply-manual"
                         className="flex cursor-pointer items-center justify-between gap-3"
@@ -6904,7 +6843,7 @@ function App() {
                         />
                       </label>
                     )}
-                    {editSnapshotHasFee && (
+                    {editCreationHadFee && (
                       <label
                         htmlFor="edit-expense-apply-fee"
                         className="flex cursor-pointer items-center justify-between gap-3"

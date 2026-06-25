@@ -1,5 +1,7 @@
 import {
   EMPTY_USER_APP_DATA,
+  normalizeStoredExpense,
+  type StoredExpense,
   type UserAppData,
 } from '../userDataStorage';
 import {
@@ -147,11 +149,70 @@ export function mergeRegistryWithRecentLocalPatches(
   return changed ? { ...remote, personal } : remote;
 }
 
+function hasRecordEntries(record: Record<string, unknown> | undefined): boolean {
+  return record != null && Object.keys(record).length > 0;
+}
+
+/** Prefer the richer financial payload when merging legacy keys with budget-prefixed storage. */
+export function mergeFinancialBootstrapSources(legacy: UserAppData, budget: UserAppData): UserAppData {
+  const pickExpenses = (): StoredExpense[] => {
+    const legacyCount = legacy.expenses?.length ?? 0;
+    const budgetCount = budget.expenses?.length ?? 0;
+    if (budgetCount > legacyCount) return budget.expenses;
+    if (legacyCount > budgetCount) return legacy.expenses;
+    return budgetCount > 0 ? budget.expenses : legacy.expenses;
+  };
+
+  const pickCategories = () => {
+    const legacyCount = legacy.customCategories?.length ?? 0;
+    const budgetCount = budget.customCategories?.length ?? 0;
+    if (budgetCount > legacyCount) return budget.customCategories;
+    if (legacyCount > budgetCount) return legacy.customCategories;
+    return budgetCount > 0 ? budget.customCategories : legacy.customCategories;
+  };
+
+  const pickRecord = <T extends Record<string, unknown>>(
+    legacyRecord: T,
+    budgetRecord: T,
+  ): T => {
+    const legacyHas = hasRecordEntries(legacyRecord);
+    const budgetHas = hasRecordEntries(budgetRecord);
+    if (budgetHas && !legacyHas) return budgetRecord;
+    if (legacyHas && !budgetHas) return legacyRecord;
+    if (budgetHas && legacyHas) {
+      return { ...legacyRecord, ...budgetRecord } as T;
+    }
+    return budgetRecord;
+  };
+
+  return {
+    expenses: pickExpenses(),
+    customCategories: pickCategories(),
+    budgetsByMonth: pickRecord(legacy.budgetsByMonth ?? {}, budget.budgetsByMonth ?? {}),
+    budgetOriginalByMonth: pickRecord(
+      legacy.budgetOriginalByMonth ?? {},
+      budget.budgetOriginalByMonth ?? {},
+    ),
+    subBudgetsByMonth: pickRecord(legacy.subBudgetsByMonth ?? {}, budget.subBudgetsByMonth ?? {}),
+    subBudgetsOriginalByMonth: pickRecord(
+      legacy.subBudgetsOriginalByMonth ?? {},
+      budget.subBudgetsOriginalByMonth ?? {},
+    ),
+    autoTransferByMonth: pickRecord(
+      legacy.autoTransferByMonth ?? {},
+      budget.autoTransferByMonth ?? {},
+    ),
+  };
+}
+
 export function loadBudgetFinancialLocal(budgetId: string): UserAppData {
   try {
     const raw = localStorage.getItem(`${LS_FINANCIAL_PREFIX}${budgetId}`);
     if (!raw) return { ...EMPTY_USER_APP_DATA };
     const parsed = JSON.parse(raw) as Partial<UserAppData>;
+    const expenses = Array.isArray(parsed.expenses)
+      ? (parsed.expenses as StoredExpense[]).map(normalizeStoredExpense)
+      : [];
     // Defaults first; persisted payload second; never let empty shells clobber structure.
     return {
       ...EMPTY_USER_APP_DATA,
@@ -160,7 +221,7 @@ export function loadBudgetFinancialLocal(budgetId: string): UserAppData {
       budgetOriginalByMonth: parsed.budgetOriginalByMonth ?? {},
       subBudgetsByMonth: parsed.subBudgetsByMonth ?? {},
       autoTransferByMonth: parsed.autoTransferByMonth ?? {},
-      expenses: Array.isArray(parsed.expenses) ? parsed.expenses : [],
+      expenses,
       customCategories: Array.isArray(parsed.customCategories) ? parsed.customCategories : [],
     };
   } catch {
@@ -235,7 +296,8 @@ export function ensureDefaultPersonalBudget(
     nextRegistry.personal.unshift(createDefaultMonthlyBudgetMeta());
   }
 
-  const defaultData = legacyData ?? loadBudgetFinancialLocal(DEFAULT_MONTHLY_BUDGET_ID);
+  const budgetData = loadBudgetFinancialLocal(DEFAULT_MONTHLY_BUDGET_ID);
+  const defaultData = mergeFinancialBootstrapSources(legacyData ?? EMPTY_USER_APP_DATA, budgetData);
   financialCache[DEFAULT_MONTHLY_BUDGET_ID] = defaultData;
   saveBudgetFinancialLocal(DEFAULT_MONTHLY_BUDGET_ID, defaultData);
   saveBudgetRegistryLocal(nextRegistry);

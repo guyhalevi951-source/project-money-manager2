@@ -28,6 +28,10 @@ export interface StoredExpense {
   manualRateDisabled?: boolean;
   /** @deprecated Replaced by !feeApplied */
   feeDisabled?: boolean;
+  /** Immutable: global manual rate was active for this currency at creation time. */
+  creationHadActiveManualRate?: boolean;
+  /** Immutable: global commission fee was active for this currency at creation time. */
+  creationHadActiveFee?: boolean;
 }
 
 /** Normalize amounts, currency codes, and legacy field names on load. */
@@ -73,6 +77,14 @@ export function normalizeStoredExpense(expense: StoredExpense): StoredExpense {
     feeApplied: expense.feeApplied != null ? Boolean(expense.feeApplied) : (expense.appliedFeePercent ?? 0) > 0,
     amountInManual,
     amountInSpot,
+    creationHadActiveManualRate:
+      expense.creationHadActiveManualRate ??
+      Boolean(
+        expense.savedManualRate != null && expense.savedManualRate > 0 || expense.amountInManual != null,
+      ),
+    creationHadActiveFee:
+      expense.creationHadActiveFee ??
+      Boolean(expense.feeApplied || (expense.appliedFeePercent ?? 0) > 0),
   };
 }
 
