@@ -2152,25 +2152,27 @@ export default function ExchangeRateSimulator({
                   </div>
                 )}
                 {rateComparison && (
-                  <div className="flex w-full shrink-0 flex-row items-center justify-center gap-2 self-stretch whitespace-nowrap py-2 md:ms-auto md:w-auto md:justify-end md:gap-2.5">
-                    <span className="text-sm font-semibold leading-tight text-neutral-100 md:text-xl">
+                  <div className="flex w-full shrink-0 flex-col items-center gap-1 self-stretch py-2 md:ms-auto md:items-end">
+                    <div className="flex items-center justify-center gap-2 md:justify-end">
+                      <span
+                        aria-hidden
+                        className={`text-3xl leading-none md:text-5xl ${
+                          rateComparison.trend === 'up' ? 'text-emerald-500' : 'text-rose-600'
+                        }`}
+                      >
+                        {rateComparison.trend === 'up' ? '⬆' : '⬇'}
+                      </span>
+                      <LtrNumeric
+                        className={`text-2xl font-black leading-none md:text-4xl ${
+                          rateComparison.trend === 'up' ? 'text-emerald-400' : 'text-rose-500'
+                        }`}
+                      >
+                        {rateComparison.percentText}
+                      </LtrNumeric>
+                    </div>
+                    <span className="text-center text-xs font-semibold leading-snug text-neutral-300 md:text-end md:text-sm">
                       {rateComparison.contextText}
                     </span>
-                    <span
-                      aria-hidden
-                      className={`text-3xl leading-none md:text-[4rem] ${
-                        rateComparison.trend === 'up' ? 'text-emerald-500' : 'text-rose-600'
-                      }`}
-                    >
-                      {rateComparison.trend === 'up' ? '⬆' : '⬇'}
-                    </span>
-                    <LtrNumeric
-                      className={`text-2xl font-black leading-none md:text-4xl ${
-                        rateComparison.trend === 'up' ? 'text-emerald-400' : 'text-rose-500'
-                      }`}
-                    >
-                      {rateComparison.percentText}
-                    </LtrNumeric>
                   </div>
                 )}
                 {showNoTrendData && (

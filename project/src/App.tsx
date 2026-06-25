@@ -6903,6 +6903,8 @@ function App() {
                   }
                   onRatesReadyChange={setEditExpenseRatesReady}
                   transactionDate={normalizeDate(editExpenseDraft.date)}
+                  manualRateDisabled={editExpenseDraft.manualRateDisabled}
+                  feeDisabled={editExpenseDraft.feeDisabled}
                 />
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col gap-4 sm:flex-row sm:items-end">

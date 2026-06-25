@@ -315,6 +315,39 @@ function resolveUnitRateToIlsSync(
   return resolveLiveManualOrSpotRate(from, rates);
 }
 
+/** ILS ledger → display currency, honoring manual-rate toggle on the display leg. */
+function projectIlsToDisplayAmount(
+  ilsAmount: number,
+  displayCurrency: ExpenseCurrency,
+  rates: ExchangeRates,
+  manualRateDisabled: boolean,
+  transactionDate?: string,
+): number | null {
+  if (displayCurrency === 'ILS') return ilsAmount;
+
+  if (!manualRateDisabled) {
+    return convertIlsToForeign(ilsAmount, displayCurrency, rates);
+  }
+
+  const dateIso = transactionDate ?? getLocalTodayIso();
+  const dateScopedRate = resolveDateScopedApiRateSync(dateIso, 'ILS', displayCurrency, rates);
+  if (dateScopedRate != null && dateScopedRate > 0) {
+    return roundMoney(ilsAmount * dateScopedRate);
+  }
+
+  const ilsToForeign = rates.ilsToForeign[displayCurrency];
+  if (typeof ilsToForeign === 'number' && ilsToForeign > 0) {
+    return roundMoney(ilsAmount * ilsToForeign);
+  }
+
+  return null;
+}
+
+export type ProjectExpenseDisplayOptions = {
+  manualRateDisabled?: boolean;
+  transactionDate?: string;
+};
+
 /** Primary display line — mirrors `resolveExpenseDisplayAmount`. */
 export function projectExpensePrimaryDisplayAmount(
   typedAmount: number,
@@ -322,12 +355,22 @@ export function projectExpensePrimaryDisplayAmount(
   ilsAmount: number,
   displayCurrency: ExpenseCurrency,
   rates: ExchangeRates,
+  options?: ProjectExpenseDisplayOptions,
 ): number {
-  if (displayCurrency === 'ILS') return ilsAmount;
-  if (currency === displayCurrency) return typedAmount;
+  const manualRateDisabled = Boolean(options?.manualRateDisabled);
+  const transactionDate = options?.transactionDate;
 
-  const converted = convertIlsToForeign(ilsAmount, displayCurrency, rates);
-  if (converted != null) return roundMoney(converted);
+  if (displayCurrency === 'ILS') return ilsAmount;
+  if (currency === displayCurrency && currency !== 'ILS') return typedAmount;
+
+  const converted = projectIlsToDisplayAmount(
+    ilsAmount,
+    displayCurrency,
+    rates,
+    manualRateDisabled,
+    transactionDate,
+  );
+  if (converted != null) return converted;
   return ilsAmount;
 }
 
@@ -553,12 +596,17 @@ export async function previewExpenseDisplayAmount(
     );
     displayAmount = applyFeeMultiplier(spotConverted, feePercent);
   } else {
+    const { manualRateDisabled } = readOverrideFlags(options);
     displayAmount = projectExpensePrimaryDisplayAmount(
       amount,
       currency,
       recorded.ilsAmount,
       displayCurrency,
       liveRates,
+      {
+        manualRateDisabled,
+        transactionDate: options.transactionDate,
+      },
     );
   }
 

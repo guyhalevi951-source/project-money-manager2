@@ -70,6 +70,10 @@ interface ExpenseAmountFieldProps {
   historicalManualRate?: number;
   /** Accepted historical commission percent for the expense currency. */
   historicalFeePercent?: number;
+  /** When true, preview uses spot/date-scoped rates only (edit-form toggle). */
+  manualRateDisabled?: boolean;
+  /** When true, preview drops conversion fees (edit-form toggle). */
+  feeDisabled?: boolean;
   /**
    * Snap currency + amount + rates button to the column end (right under the amount label).
    * Preview sub-text stacks below, left-aligned with the currency selector.
@@ -89,6 +93,8 @@ export default function ExpenseAmountField({
   historicalRateEntry,
   historicalManualRate,
   historicalFeePercent,
+  manualRateDisabled,
+  feeDisabled,
   snapInputGroupToColumnEnd = false,
 }: ExpenseAmountFieldProps) {
   const { tr, displayCurrency } = useLanguage();
@@ -287,6 +293,8 @@ export default function ExpenseAmountField({
     void previewExpenseDisplayAmount(parsedAmount, inputCurrency, rates, {
       displayCurrency,
       transactionDate: transactionDate ?? getLocalTodayIso(),
+      manualRateDisabled,
+      feeDisabled,
       historicalRateEntry,
       historicalManualRate:
         historicalManualRate != null && historicalManualRate > 0
@@ -326,6 +334,8 @@ export default function ExpenseAmountField({
     historicalRateEntry,
     historicalManualRate,
     historicalFeePercent,
+    manualRateDisabled,
+    feeDisabled,
     commissionVersion,
     manualOverrideVersion,
   ]);
