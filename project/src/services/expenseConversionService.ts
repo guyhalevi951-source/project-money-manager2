@@ -36,6 +36,12 @@ import {
 } from './manualExchangeOverrideService';
 import { getApiRateForDate } from './rateCacheService';
 import { roundMoney, smartRoundMoney } from './money';
+import {
+  formatAmountWithSymbol,
+  resolveExpenseDisplayAmount,
+  symbolToCurrency,
+  type ExpenseDisplayAmount,
+} from './displayCurrencyUtils';
 
 export type ConvertExpenseToIlsOptions = {
   displayCurrency?: ExpenseCurrency;
@@ -719,6 +725,157 @@ export async function previewExpenseDisplayAmountFromSnapshot(
   );
 
   return { ilsAmount, appliedFeePercent: snapshot.appliedFeePercent, manualRateUsed, displayAmount };
+}
+
+// ── Stored expense display (history card ↔ edit modal parity) ─────────────────
+
+/** Fields required to render a saved expense row identically to the edit preview. */
+export interface StoredExpenseDisplayFields {
+  amount: number;
+  originalAmount?: number;
+  originalCurrency?: string;
+  amountInManual?: number | null;
+  amountInSpot?: number;
+  savedManualRate?: number | null;
+  savedSpotRate?: number;
+  manualRateUsed?: boolean;
+  feeApplied?: boolean;
+  creationHadActiveManualRate?: boolean;
+}
+
+export interface StoredExpenseDisplayView {
+  ledgerIlsAmount: number;
+  primaryDisplayAmount: number;
+  showManualBadge: boolean;
+  showFeeBadge: boolean;
+  showDualRateToggle: boolean;
+  showSecondaryLine: boolean;
+  manualRateSelected: boolean;
+}
+
+/** True when both manual and spot ledger paths are stored and switchable on the history card. */
+export function expenseHasDualRateSnapshot(expense: {
+  amountInManual?: number | null;
+  amountInSpot?: number;
+  savedManualRate?: number | null;
+  savedSpotRate?: number;
+}): boolean {
+  return (
+    expense.amountInManual != null &&
+    expense.amountInSpot != null &&
+    (expense.savedManualRate != null ||
+      (expense.savedSpotRate != null && expense.savedSpotRate > 0))
+  );
+}
+
+function storedExpenseShowSecondaryLine(
+  expense: Pick<StoredExpenseDisplayFields, 'originalAmount' | 'originalCurrency'>,
+  displayCurrency: ExpenseCurrency,
+): boolean {
+  const hasOriginal =
+    expense.originalAmount != null &&
+    expense.originalAmount > 0 &&
+    Boolean(expense.originalCurrency?.trim());
+  if (!hasOriginal) {
+    return displayCurrency !== 'ILS';
+  }
+  const expenseCurrency = symbolToCurrency(expense.originalCurrency!, displayCurrency);
+  if (!expenseCurrency) {
+    return true;
+  }
+  return expenseCurrency !== displayCurrency;
+}
+
+/** Authoritative ILS ledger for a saved expense — respects dual snapshot + manual toggle. */
+export function resolveStoredExpenseLedgerIls(expense: StoredExpenseDisplayFields): number {
+  if (expense.amountInManual != null && expense.amountInSpot != null) {
+    return resolveExpenseAmountFromSnapshot(
+      { amountInManual: expense.amountInManual, amountInSpot: expense.amountInSpot },
+      { manualRateUsed: expense.manualRateUsed !== false },
+    );
+  }
+  return expense.amount;
+}
+
+/**
+ * Sync resolver for history cards — mirrors `previewExpenseDisplayAmountFromSnapshot`
+ * using persisted snapshot fields only (no async re-conversion).
+ */
+export function resolveStoredExpenseDisplayView(
+  expense: StoredExpenseDisplayFields,
+  displayCurrency: ExpenseCurrency,
+  rates: ExchangeRates | null,
+): StoredExpenseDisplayView {
+  const manualRateSelected = expense.manualRateUsed !== false;
+  const ledgerIlsAmount = resolveStoredExpenseLedgerIls(expense);
+
+  const hasOriginal =
+    expense.originalAmount != null &&
+    expense.originalAmount > 0 &&
+    Boolean(expense.originalCurrency?.trim());
+  const typedAmount = hasOriginal ? expense.originalAmount! : expense.amount;
+  const expenseCurrency = hasOriginal
+    ? (symbolToCurrency(expense.originalCurrency!, displayCurrency) ?? 'ILS')
+    : 'ILS';
+
+  let primaryDisplayAmount: number;
+  if (displayCurrency === 'ILS') {
+    primaryDisplayAmount = ledgerIlsAmount;
+  } else if (rates) {
+    primaryDisplayAmount = projectExpensePrimaryDisplayAmount(
+      typedAmount,
+      expenseCurrency,
+      ledgerIlsAmount,
+      displayCurrency,
+      rates,
+    );
+  } else if (expenseCurrency === displayCurrency) {
+    primaryDisplayAmount = typedAmount;
+  } else {
+    primaryDisplayAmount = ledgerIlsAmount;
+  }
+
+  const showDualRateToggle = expenseHasDualRateSnapshot(expense);
+  const showSecondaryLine =
+    showDualRateToggle || storedExpenseShowSecondaryLine(expense, displayCurrency);
+
+  return {
+    ledgerIlsAmount,
+    primaryDisplayAmount,
+    showManualBadge:
+      manualRateSelected &&
+      (expenseHadCreationManualRate(expense) || expenseHasSavedManualRateSnapshot(expense)),
+    showFeeBadge: expense.feeApplied === true,
+    showDualRateToggle,
+    showSecondaryLine,
+    manualRateSelected,
+  };
+}
+
+/** Format a resolved view into primary/secondary display strings for UI components. */
+export function formatStoredExpenseDisplayView(
+  view: StoredExpenseDisplayView,
+  expense: Pick<StoredExpenseDisplayFields, 'originalAmount' | 'originalCurrency'>,
+  displayCurrency: ExpenseCurrency,
+  rates: ExchangeRates | null,
+): ExpenseDisplayAmount {
+  const formatted = resolveExpenseDisplayAmount(
+    view.ledgerIlsAmount,
+    displayCurrency,
+    rates,
+    expense.originalAmount,
+    expense.originalCurrency,
+  );
+
+  const primary = formatAmountWithSymbol(view.primaryDisplayAmount, displayCurrency, {
+    forceTwoDecimals: displayCurrency !== 'ILS',
+  });
+
+  if (primary === formatted.primary) {
+    return formatted;
+  }
+
+  return { ...formatted, primary };
 }
 
 /** @deprecated Kept for any remaining callers outside the new dual-snapshot flow. */

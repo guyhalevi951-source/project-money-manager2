@@ -100,9 +100,11 @@ import {
 import {
   expenseEditShowsFeeToggle,
   expenseEditShowsManualRateToggle,
+  expenseHasDualRateSnapshot,
   previewExpenseDisplayAmountFromSnapshot,
   recordDualExpenseConversion,
   recordDualExpenseConversionFromSnapshot,
+  resolveStoredExpenseDisplayView,
 } from './services/expenseConversionService';
 import {
   currencySymbolTriggerClass,
@@ -510,38 +512,6 @@ const HISTORY_TIME_FILTERS: { id: HistoryTimeFilter }[] = [
 /** Identical column template for expense history header + data rows (desktop). */
 const EXPENSE_HISTORY_ROW_GRID =
   'grid w-full grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)_minmax(0,1.25fr)_minmax(0,1fr)_4.5rem] items-center gap-x-3';
-
-function shouldShowExpenseEquivalentLine(
-  expense: { originalAmount?: number; originalCurrency?: string },
-  displayCurrency: ExpenseCurrency,
-): boolean {
-  const hasOriginal =
-    expense.originalAmount != null &&
-    expense.originalAmount > 0 &&
-    Boolean(expense.originalCurrency?.trim());
-  if (!hasOriginal) {
-    return displayCurrency !== 'ILS';
-  }
-  const expenseCurrency = symbolToCurrency(expense.originalCurrency!, displayCurrency);
-  if (!expenseCurrency) {
-    return true;
-  }
-  return expenseCurrency !== displayCurrency;
-}
-
-function expenseHasDualRateSnapshot(expense: {
-  amountInManual?: number;
-  amountInSpot?: number;
-  savedManualRate?: number;
-  savedSpotRate?: number;
-}): boolean {
-  return (
-    expense.amountInManual != null &&
-    expense.amountInSpot != null &&
-    // accept either savedManualRate or a positive savedSpotRate to handle legacy rows
-    (expense.savedManualRate != null || (expense.savedSpotRate != null && expense.savedSpotRate > 0))
-  );
-}
 
 const expenseMatchesHistoryTimeFilter = (
   expenseDate: string,
@@ -5866,21 +5836,20 @@ function App() {
       .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
   }, [expenses, search, timeFilter]);
 
-  // History rollup projected from each expense's immutable baseline → display
-  // currency, so the total matches the (baseline-aware) per-row amounts. Falls
-  // back to the raw ILS sum only when a non-ILS view has no rates yet.
+  // History rollup — sum each row's snapshot-aware primary display amount so the
+  // total matches the per-row resolver used by ExpenseAmountDisplay.
   const historyTotalIls = historyExpenses.reduce((s, e) => s + e.amount, 0);
   const historyTotal = useMemo(() => {
     if (displayCurrency === 'ILS') return roundMoneyAmount(historyTotalIls);
     if (!statusRates) return null;
-    const ctx = buildMoneyProjectionContext(displayCurrency, {
-      rates: statusRates,
-      applyFees: false,
-    });
-    return sumMoneyProjections(
-      historyExpenses.map((expense) => immutableFromExpense(expense)),
-      displayCurrency,
-      ctx,
+    return roundMoneyAmount(
+      historyExpenses.reduce(
+        (sum, expense) =>
+          sum +
+          resolveStoredExpenseDisplayView(expense, displayCurrency, statusRates)
+            .primaryDisplayAmount,
+        0,
+      ),
     );
   }, [historyExpenses, displayCurrency, statusRates, historyTotalIls]);
   const recentExpenseCurrencies = useMemo<ExpenseCurrency[]>(() => {
@@ -6530,24 +6499,8 @@ function App() {
                         </div>
                         <div className="flex shrink-0 items-center text-left">
                           <ExpenseAmountDisplay
-                            amount={expense.amount}
-                            originalAmount={expense.originalAmount}
-                            originalCurrency={expense.originalCurrency}
+                            expense={expense}
                             variant="card"
-                            showSecondaryLine={
-                              expenseHasDualRateSnapshot(expense) ||
-                              shouldShowExpenseEquivalentLine(expense, displayCurrency)
-                            }
-                            manualBadgeLabel={
-                              expense.manualRateUsed
-                                ? tr('expenseManualRateBadge')
-                                : undefined
-                            }
-                            feeBadgeLabel={
-                              (expense.appliedFeePercent ?? 0) > 0
-                                ? tr('expenseFeeBadge')
-                                : undefined
-                            }
                             dualRateMode={
                               expenseHasDualRateSnapshot(expense)
                                 ? {
@@ -6627,23 +6580,7 @@ function App() {
                         </div>
                         <div role="cell" className="flex items-end justify-end text-end">
                           <ExpenseAmountDisplay
-                            amount={expense.amount}
-                            originalAmount={expense.originalAmount}
-                            originalCurrency={expense.originalCurrency}
-                            showSecondaryLine={
-                              expenseHasDualRateSnapshot(expense) ||
-                              shouldShowExpenseEquivalentLine(expense, displayCurrency)
-                            }
-                            manualBadgeLabel={
-                              expense.manualRateUsed
-                                ? tr('expenseManualRateBadge')
-                                : undefined
-                            }
-                            feeBadgeLabel={
-                              (expense.appliedFeePercent ?? 0) > 0
-                                ? tr('expenseFeeBadge')
-                                : undefined
-                            }
+                            expense={expense}
                             dualRateMode={
                               expenseHasDualRateSnapshot(expense)
                                 ? {

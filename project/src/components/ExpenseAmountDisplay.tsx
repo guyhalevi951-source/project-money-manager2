@@ -1,5 +1,11 @@
 import { getCurrencyMeta, type ExpenseCurrency } from '../constants/currencies';
 import { LtrNumeric, useLanguage } from '../LanguageContext';
+import { getCachedExchangeRates } from '../services/exchangeRateService';
+import {
+  formatStoredExpenseDisplayView,
+  resolveStoredExpenseDisplayView,
+  type StoredExpenseDisplayFields,
+} from '../services/expenseConversionService';
 import { typographyBodyClass, typographyMutedClass } from '../styles/themeSurfaceStyles';
 import CurrencyFlag from './CurrencyFlag';
 
@@ -10,16 +16,8 @@ export interface DualRateMode {
 }
 
 interface ExpenseAmountDisplayProps {
-  amount: number;
-  originalAmount?: number;
-  originalCurrency?: string;
+  expense: StoredExpenseDisplayFields;
   variant?: 'table' | 'card';
-  /** When false, hides the `(≈ …)` equivalent line (e.g. expense currency matches display currency). */
-  showSecondaryLine?: boolean;
-  /** Line 3 badge label shown when a manual exchange rate shaped this row (e.g. "✍️ שער ידני"). */
-  manualBadgeLabel?: string;
-  /** Line 3 badge label shown when a conversion fee was applied (e.g. "💳 כולל עמלה"). */
-  feeBadgeLabel?: string;
   /** When provided, renders a Manual / Market segmented toggle below the amount. */
   dualRateMode?: DualRateMode;
 }
@@ -99,23 +97,26 @@ function DualRateToggle({ manualSelected, onSelectManual, onSelectSpot }: DualRa
 }
 
 export default function ExpenseAmountDisplay({
-  amount,
-  originalAmount,
-  originalCurrency,
+  expense,
   variant = 'table',
-  showSecondaryLine = true,
-  manualBadgeLabel,
-  feeBadgeLabel,
   dualRateMode,
 }: ExpenseAmountDisplayProps) {
-  const { formatExpenseMoney } = useLanguage();
-  const { primary, secondary, secondaryFlagCode } = formatExpenseMoney(
-    amount,
-    originalAmount,
-    originalCurrency,
+  const { displayCurrency, exchangeRates, tr } = useLanguage();
+  const rates = exchangeRates ?? getCachedExchangeRates();
+
+  const view = resolveStoredExpenseDisplayView(expense, displayCurrency, rates);
+  const { primary, secondary, secondaryFlagCode } = formatStoredExpenseDisplayView(
+    view,
+    expense,
+    displayCurrency,
+    rates,
   );
-  const equivalentLine = showSecondaryLine ? secondary : undefined;
+
+  const equivalentLine = view.showSecondaryLine ? secondary : undefined;
+  const manualBadgeLabel = view.showManualBadge ? tr('expenseManualRateBadge') : undefined;
+  const feeBadgeLabel = view.showFeeBadge ? tr('expenseFeeBadge') : undefined;
   const hasBadges = Boolean(manualBadgeLabel || feeBadgeLabel);
+  const activeDualRateMode = view.showDualRateToggle ? dualRateMode : undefined;
 
   const mainClass =
     variant === 'card'
@@ -129,7 +130,7 @@ export default function ExpenseAmountDisplay({
       className={[
         'flex flex-col justify-center',
         variant === 'card' ? 'items-end' : 'items-start sm:items-end',
-        equivalentLine || hasBadges || dualRateMode ? 'gap-0.5' : 'gap-0',
+        equivalentLine || hasBadges || activeDualRateMode ? 'gap-0.5' : 'gap-0',
       ].join(' ')}
     >
       <LtrNumeric className={`${mainClass} whitespace-nowrap`}>{primary}</LtrNumeric>
@@ -151,7 +152,7 @@ export default function ExpenseAmountDisplay({
           {feeBadgeLabel && <ModifierBadge label={feeBadgeLabel} />}
         </div>
       )}
-      {dualRateMode && <DualRateToggle {...dualRateMode} />}
+      {activeDualRateMode && <DualRateToggle {...activeDualRateMode} />}
     </div>
   );
 }
