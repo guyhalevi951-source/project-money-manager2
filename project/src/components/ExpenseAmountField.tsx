@@ -25,7 +25,6 @@ import {
   toActiveExchangeRatesFromSnapshot,
   toActiveFeesFromCommissionEntries,
 } from '../services/transactionProcessingService';
-import { previewExpenseDisplayAmount } from '../services/expenseConversionService';
 import { getLocalTodayIso } from '../services/exchangeRateService';
 import CurrencyLibraryModal from './CurrencyLibraryModal';
 import CurrencyFlag from './CurrencyFlag';
@@ -63,12 +62,8 @@ interface ExpenseAmountFieldProps {
   onRatesReadyChange?: (ready: boolean) => void;
   lockToDisplayCurrency?: boolean;
   onOpenExchangeRatesSettings?: () => void;
-  /** Transaction date for date-scoped / historical conversion preview. */
+  /** Transaction date for conversion preview. */
   transactionDate?: string;
-  /** Accepted historical manual rate (1 input currency = rate × ILS). */
-  historicalManualRate?: number;
-  /** Accepted historical commission percent for the expense currency. */
-  historicalFeePercent?: number;
   /**
    * Snap currency + amount + rates button to the column end (right under the amount label).
    * Preview sub-text stacks below, left-aligned with the currency selector.
@@ -85,8 +80,6 @@ export default function ExpenseAmountField({
   lockToDisplayCurrency = false,
   onOpenExchangeRatesSettings,
   transactionDate,
-  historicalManualRate,
-  historicalFeePercent,
   snapInputGroupToColumnEnd = false,
 }: ExpenseAmountFieldProps) {
   const { tr, displayCurrency } = useLanguage();
@@ -286,76 +279,8 @@ export default function ExpenseAmountField({
     );
   }, [showDisplayPreview, rates, parsedAmount, inputCurrency, displayCurrency, activeFees]);
 
-  const usesHistoricalPipeline =
-    (historicalManualRate != null && historicalManualRate > 0) ||
-    (historicalFeePercent != null && historicalFeePercent > 0);
-
-  const [historicalPreview, setHistoricalPreview] = useState<{
-    displayAmount: number;
-    appliedFeePercent: number;
-    manualRateUsed: boolean;
-  } | null>(null);
-  const [historicalPreviewLoading, setHistoricalPreviewLoading] = useState(false);
-
-  useEffect(() => {
-    if (!showDisplayPreview || !usesHistoricalPipeline || !rates || !(parsedAmount > 0)) {
-      setHistoricalPreview(null);
-      setHistoricalPreviewLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setHistoricalPreviewLoading(true);
-
-    void previewExpenseDisplayAmount(parsedAmount, inputCurrency, rates, {
-      displayCurrency,
-      transactionDate: transactionDate ?? getLocalTodayIso(),
-      historicalManualRate:
-        historicalManualRate != null && historicalManualRate > 0
-          ? historicalManualRate
-          : undefined,
-      historicalFeePercent:
-        historicalFeePercent != null && historicalFeePercent > 0
-          ? historicalFeePercent
-          : undefined,
-    })
-      .then((preview) => {
-        if (cancelled) return;
-        setHistoricalPreview(
-          preview
-            ? {
-                displayAmount: preview.displayAmount,
-                appliedFeePercent: preview.appliedFeePercent,
-                manualRateUsed: preview.manualRateUsed,
-              }
-            : null,
-        );
-      })
-      .finally(() => {
-        if (!cancelled) setHistoricalPreviewLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    showDisplayPreview,
-    usesHistoricalPipeline,
-    rates,
-    parsedAmount,
-    inputCurrency,
-    displayCurrency,
-    transactionDate,
-    historicalManualRate,
-    historicalFeePercent,
-  ]);
-
-  const convertedDisplayAmount = usesHistoricalPipeline
-    ? historicalPreview?.displayAmount ?? null
-    : processedPreview?.finalConvertedAmount ?? null;
-  const activeCommissionPercent = usesHistoricalPipeline
-    ? historicalPreview?.appliedFeePercent ?? 0
-    : processedPreview?.appliedFeePercentage ?? 0;
+  const convertedDisplayAmount = processedPreview?.finalConvertedAmount ?? null;
+  const activeCommissionPercent = processedPreview?.appliedFeePercentage ?? 0;
 
   const convertedAmountFormatted = useMemo(() => {
     if (convertedDisplayAmount == null) return null;
@@ -368,7 +293,6 @@ export default function ExpenseAmountField({
    */
   const hasActivePairManualOverride = useMemo(() => {
     if (!showDisplayPreview) return false;
-    if (usesHistoricalPipeline && historicalPreview?.manualRateUsed) return true;
     return hasActiveManualOverrideForPair(inputCurrency, displayCurrency);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -376,24 +300,7 @@ export default function ExpenseAmountField({
     showDisplayPreview,
     inputCurrency,
     displayCurrency,
-    usesHistoricalPipeline,
-    historicalPreview?.manualRateUsed,
   ]);
-
-  const historicalRateLabel = useMemo(() => {
-    if (
-      !usesHistoricalPipeline ||
-      historicalManualRate == null ||
-      !(historicalManualRate > 0) ||
-      inputCurrency === 'ILS'
-    ) {
-      return null;
-    }
-    return `1 ${inputCurrency} = ${historicalManualRate.toLocaleString(undefined, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 6,
-    })} ILS`;
-  }, [usesHistoricalPipeline, historicalManualRate, inputCurrency]);
 
   const amountInputSize = useMemo(() => getAmountInputWidth(amount), [amount]);
 
@@ -551,7 +458,7 @@ export default function ExpenseAmountField({
               className={previewMotionClassName}
               aria-live="polite"
             >
-              {loading || (usesHistoricalPipeline && historicalPreviewLoading) ? (
+              {loading ? (
                 <span className="inline-flex items-center gap-1.5 text-neutral-500">
                   <Loader2 className="w-3 h-3 animate-spin shrink-0" aria-hidden />
                   {tr('loadingExchangeRates')}
@@ -575,11 +482,6 @@ export default function ExpenseAmountField({
                     <span className={`shrink-0 whitespace-nowrap text-xs text-amber-400/75 ${typographyMutedClass}`}>
                       {tr('expenseManualRateActiveReminder')}
                     </span>
-                  )}
-                  {historicalRateLabel && (
-                    <LtrNumeric className="shrink-0 whitespace-nowrap text-xs font-medium tabular-nums text-amber-300/90">
-                      ({historicalRateLabel})
-                    </LtrNumeric>
                   )}
                 </>
               ) : (

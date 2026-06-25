@@ -32,8 +32,6 @@ import {
   GLOBAL_COMMISSION_CURRENCY,
   isGlobalCommissionCurrency,
   listActiveCurrencyCommissions,
-  removeCloudCurrencyCommissionLocal,
-  removeLocalCurrencyCommission,
   saveCurrencyCommission24h,
   subscribeCurrencyCommissionsUpdated,
   upsertCloudCurrencyCommission,
@@ -51,8 +49,6 @@ import {
 import {
   getActiveManualExchangeOverrideSnapshot,
   listActiveManualExchangeOverrides,
-  removeCloudManualExchangeOverride,
-  removeLocalManualExchangeOverride,
   saveManualExchangeOverride24h,
   subscribeManualOverridesUpdated,
   upsertCloudManualExchangeOverride,
@@ -61,22 +57,18 @@ import {
 import {
   deleteManualExchangeOverrideFromCloud,
   deleteCurrencyCommissionFromCloud,
-  deleteHistoricalOverrideFromCloud,
   saveCurrencyCommissionToCloud,
-  saveHistoricalOverrideToCloud,
   saveManualExchangeOverrideToCloud,
 } from '../services/userFirebaseSync';
 import { syncManualRate } from '../services/rateCacheService';
 import { surfaceInputClass, surfacePanelClass, subCardSmClass } from '../styles/themeSurfaceStyles';
-import HistoricalLogModal, { type HistoricalRestoreKind } from './HistoricalLogModal';
-import ArchiveConfirmModal from './ArchiveConfirmModal';
+import HistoricalLogModal from './HistoricalLogModal';
 import {
-  archiveManualRateOverride,
-  archiveCommissionForCurrency,
-  historicalEntryKey,
-  updateHistoricalOverrideEntry,
-  type HistoricalOverrideEntry,
-} from '../services/historicalOverrideService';
+  deleteManualExchangeOverride,
+} from '../services/manualExchangeOverrideService';
+import {
+  deleteCurrencyCommission,
+} from '../services/currencyCommissionService';
 
 export type ExchangeRateSimulatorSection = 'exchange' | 'manual-rate' | 'commissions';
 
@@ -217,8 +209,6 @@ export default function ExchangeRateSimulator({
   const [manualRateSaveModalOpen, setManualRateSaveModalOpen] = useState(false);
   const [manualRateSaveError, setManualRateSaveError] = useState<string | null>(null);
   const [historicalLogType, setHistoricalLogType] = useState<'rate' | 'fee' | null>(null);
-  const [pendingCancelEntry, setPendingCancelEntry] = useState<StoredOverrideEntry | null>(null);
-  const [pendingDeleteCommission, setPendingDeleteCommission] = useState<CurrencyCommissionEntry | null>(null);
   const [commissionCloudSaving, setCommissionCloudSaving] = useState(false);
   const [storedCommissions, setStoredCommissions] = useState<CurrencyCommissionEntry[]>(() =>
     listActiveCurrencyCommissions(),
@@ -968,109 +958,23 @@ export default function ExchangeRateSimulator({
     setManualRateSaveModalOpen(true);
   }, [canSaveManualRate]);
 
-  /** Populate form state from archive and open the native duration-save modal. */
-  const handleRestoreHistoricalEntry = useCallback(
-    (entry: HistoricalOverrideEntry, kind: HistoricalRestoreKind) => {
-      setHistoricalLogType(null);
-
-      if (kind === 'rate' && entry.manualRate != null && entry.manualRate > 0) {
-        setMainCurrency(entry.fromCurrency);
-        setSecondaryCurrency(entry.toCurrency);
-        setMainAmountInput('1');
-        setSecondaryAmountInput(formatRate(entry.manualRate));
-        setSessionOverride(null);
-        shouldSeedSecondaryRef.current = false;
-        setManualRateSaveError(null);
-        setCloudError(null);
-        setManualRateSaveModalOpen(true);
-        return;
-      }
-
-      if (kind === 'fee' && entry.feePercent != null && entry.feePercent > 0) {
-        const feeCurrency =
-          entry.fromCurrency === 'ILS'
-            ? entry.toCurrency
-            : entry.toCurrency === 'ILS'
-              ? entry.fromCurrency
-              : entry.fromCurrency;
-        setCommissionTargetCurrency(feeCurrency as CommissionCurrency);
-        const percentText =
-          Number.isInteger(entry.feePercent)
-            ? String(entry.feePercent)
-            : entry.feePercent.toFixed(2);
-        setCommissionPercentInput(percentText);
-        shouldSeedSecondaryRef.current = true;
-        setCommissionSaveError(null);
-        setCloudError(null);
-        setCommissionSaveModalOpen(true);
-      }
-    },
-    [],
-  );
-
-  const handleUpdateHistoricalEntry = useCallback(
-    async (previous: HistoricalOverrideEntry, updated: HistoricalOverrideEntry): Promise<boolean> => {
-      const result = updateHistoricalOverrideEntry(previous, updated);
-      if (!result.ok) return false;
+  const cancelOverride = useCallback(
+    async (entry: StoredOverrideEntry) => {
+      deleteManualExchangeOverride(entry.id);
+      mirrorManualRateToCache(entry.baseCurrency, entry.quoteCurrency);
+      refreshStoredOverrides();
 
       const currentUser = auth.currentUser;
       if (currentUser && !currentUser.isAnonymous) {
-        const prevKey = historicalEntryKey(previous);
-        const nextKey = historicalEntryKey(updated);
-        if (prevKey !== nextKey) {
-          await deleteHistoricalOverrideFromCloud(currentUser.uid, previous).catch(() => {});
+        try {
+          await deleteManualExchangeOverrideFromCloud(
+            currentUser.uid,
+            entry.baseCurrency,
+            entry.quoteCurrency,
+          );
+        } catch {
+          setCloudError(tr('exchangeRateCloudCancelFailed'));
         }
-        await saveHistoricalOverrideToCloud(currentUser.uid, result.entry).catch(() => {});
-      }
-      return true;
-    },
-    [],
-  );
-
-  const cancelOverride = useCallback((entry: StoredOverrideEntry) => {
-    setPendingCancelEntry(entry);
-  }, []);
-
-  /** Execute the actual deletion of a manual rate override, with optional archiving. */
-  const executeCancelOverride = useCallback(
-    async (entry: StoredOverrideEntry, shouldArchive: boolean) => {
-      setPendingCancelEntry(null);
-
-      if (shouldArchive) {
-        archiveManualRateOverride(
-          {
-            baseCurrency: entry.baseCurrency,
-            quoteCurrency: entry.quoteCurrency,
-            rate: entry.rate,
-            updatedAt: entry.updatedAt,
-            feePercent: null,
-          },
-          { force: true },
-        );
-      }
-
-      if (entry.source === 'local_24h') {
-        removeLocalManualExchangeOverride(entry.baseCurrency, entry.quoteCurrency);
-        mirrorManualRateToCache(entry.baseCurrency, entry.quoteCurrency);
-        refreshStoredOverrides();
-        return;
-      }
-
-      const currentUser = auth.currentUser;
-      if (!currentUser || currentUser.isAnonymous) {
-        setCloudError(tr('exchangeRateForeverCancelSignedInOnly'));
-        return;
-      }
-      try {
-        removeCloudManualExchangeOverride(entry.baseCurrency, entry.quoteCurrency);
-        mirrorManualRateToCache(entry.baseCurrency, entry.quoteCurrency);
-        await deleteManualExchangeOverrideFromCloud(
-          currentUser.uid,
-          entry.baseCurrency,
-          entry.quoteCurrency,
-        );
-      } catch {
-        setCloudError(tr('exchangeRateCloudCancelFailed'));
       }
     },
     [mirrorManualRateToCache, refreshStoredOverrides, tr],
@@ -1206,53 +1110,21 @@ export default function ExchangeRateSimulator({
   }, [commissionPercentInput, commissionTargetCurrency, refreshStoredCommissions, tr]);
 
   const deleteCommission = useCallback(
-    (entry: CurrencyCommissionEntry) => {
-      // Intercept: ask user whether to archive before deleting.
-      setPendingDeleteCommission(entry);
-    },
-    [],
-  );
-
-  /** Execute the actual deletion of a commission entry, with optional archiving. */
-  const executeDeleteCommission = useCallback(
-    async (entry: CurrencyCommissionEntry, shouldArchive: boolean) => {
-      setPendingDeleteCommission(null);
-
-      if (shouldArchive && !isGlobalCommissionCurrency(entry.currency)) {
-        archiveCommissionForCurrency({
-          currency: entry.currency as ExpenseCurrency,
-          feePercent: entry.percent,
-          updatedAt: entry.updatedAt,
-          force: true,
-        });
-      }
-
-      if (entry.source === 'local_24h') {
-        removeLocalCurrencyCommission(entry.currency);
-        refreshStoredCommissions();
-        if (entry.currency === commissionTargetCurrency) {
-          syncCommissionInputFromStorage(commissionTargetCurrency);
-          shouldSeedSecondaryRef.current = true;
-        }
-        return;
+    async (entry: CurrencyCommissionEntry) => {
+      deleteCurrencyCommission(entry.id);
+      refreshStoredCommissions();
+      if (entry.currency === commissionTargetCurrency) {
+        syncCommissionInputFromStorage(commissionTargetCurrency);
+        shouldSeedSecondaryRef.current = true;
       }
 
       const currentUser = auth.currentUser;
-      if (!currentUser || currentUser.isAnonymous) {
-        setCloudError(tr('exchangeRateForeverCancelSignedInOnly'));
-        return;
-      }
-
-      try {
-        removeCloudCurrencyCommissionLocal(entry.currency);
-        await deleteCurrencyCommissionFromCloud(currentUser.uid, entry.currency);
-        refreshStoredCommissions();
-        if (entry.currency === commissionTargetCurrency) {
-          syncCommissionInputFromStorage(commissionTargetCurrency);
-          shouldSeedSecondaryRef.current = true;
+      if (currentUser && !currentUser.isAnonymous) {
+        try {
+          await deleteCurrencyCommissionFromCloud(currentUser.uid, entry.currency);
+        } catch {
+          setCloudError(tr('exchangeRateCloudCancelFailed'));
         }
-      } catch {
-        setCloudError(tr('exchangeRateCloudCancelFailed'));
       }
     },
     [commissionTargetCurrency, refreshStoredCommissions, syncCommissionInputFromStorage, tr],
@@ -1752,21 +1624,8 @@ export default function ExchangeRateSimulator({
             open
             defaultType={historicalLogType}
             onClose={() => setHistoricalLogType(null)}
-            onRestore={handleRestoreHistoricalEntry}
-            onUpdateEntry={handleUpdateHistoricalEntry}
           />
         )}
-
-        <ArchiveConfirmModal
-          open={pendingCancelEntry !== null}
-          onConfirmArchive={() => {
-            if (pendingCancelEntry) void executeCancelOverride(pendingCancelEntry, true);
-          }}
-          onConfirmDelete={() => {
-            if (pendingCancelEntry) void executeCancelOverride(pendingCancelEntry, false);
-          }}
-          onCancel={() => setPendingCancelEntry(null)}
-        />
 
         <CurrencyLibraryModal
           open={libraryTarget !== null}
@@ -1857,21 +1716,8 @@ export default function ExchangeRateSimulator({
             open
             defaultType={historicalLogType}
             onClose={() => setHistoricalLogType(null)}
-            onRestore={handleRestoreHistoricalEntry}
-            onUpdateEntry={handleUpdateHistoricalEntry}
           />
         )}
-
-        <ArchiveConfirmModal
-          open={pendingDeleteCommission !== null}
-          onConfirmArchive={() => {
-            if (pendingDeleteCommission) void executeDeleteCommission(pendingDeleteCommission, true);
-          }}
-          onConfirmDelete={() => {
-            if (pendingDeleteCommission) void executeDeleteCommission(pendingDeleteCommission, false);
-          }}
-          onCancel={() => setPendingDeleteCommission(null)}
-        />
 
         <CurrencyLibraryModal
           open={libraryTarget !== null}

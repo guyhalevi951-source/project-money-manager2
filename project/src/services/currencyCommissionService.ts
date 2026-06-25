@@ -1,7 +1,6 @@
 import { isSupportedCurrency, type ExpenseCurrency } from '../constants/currencies';
 
 const STORAGE_KEY = 'money_manager_currency_commissions_v1';
-const DAY_MS = 24 * 60 * 60 * 1000;
 const COMMISSIONS_UPDATED_EVENT = 'currency-commissions-updated';
 
 /** Applies the saved fee to every expense/conversion currency (including ILS). */
@@ -12,9 +11,7 @@ export type CommissionCurrency = ExpenseCurrency | typeof GLOBAL_COMMISSION_CURR
 /**
  * Safe localStorage helpers with an in-memory fallback.
  * On iOS Safari private mode and some mobile WebViews, localStorage.setItem
- * throws a SecurityError or QuotaExceededError. The fallback ensures data
- * survives for the duration of the current page session even when persistent
- * storage is unavailable (e.g. guest on a private-mode mobile browser).
+ * throws a SecurityError or QuotaExceededError.
  */
 const _memStore = new Map<string, string>();
 
@@ -29,9 +26,9 @@ function lsRead(key: string): string | null {
 function lsWrite(key: string, value: string): void {
   try {
     localStorage.setItem(key, value);
-    _memStore.delete(key); // real storage works — no need for the fallback copy
+    _memStore.delete(key);
   } catch {
-    _memStore.set(key, value); // persist in memory for this session
+    _memStore.set(key, value);
   }
 }
 
@@ -48,19 +45,20 @@ function resetInMemoryFallback(): void {
   _memStore.clear();
 }
 
-export type CommissionSource = 'local_24h' | 'cloud';
-
 export interface CurrencyCommissionEntry {
+  id: string;
   currency: CommissionCurrency;
   percent: number;
-  source: CommissionSource;
-  expiresAt: number | null;
+  isActive: boolean;
   updatedAt: number;
 }
 
+/** Cloud shape persisted to / read from Firestore. */
 export interface CloudCurrencyCommission {
+  id?: string;
   currency: CommissionCurrency;
   percent: number;
+  isActive?: boolean;
   updatedAt?: number;
 }
 
@@ -73,6 +71,13 @@ function isValidCommissionCurrency(currency: string): currency is CommissionCurr
   return isSupportedCurrency(currency);
 }
 
+function generateId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
 function dispatchCommissionsUpdated(): void {
   window.dispatchEvent(new CustomEvent(COMMISSIONS_UPDATED_EVENT));
 }
@@ -82,38 +87,59 @@ export function subscribeCurrencyCommissionsUpdated(listener: () => void): () =>
   return () => window.removeEventListener(COMMISSIONS_UPDATED_EVENT, listener);
 }
 
+/**
+ * Parse stored entries, migrating legacy `source/expiresAt` shape to `isActive`.
+ */
 function safeParseEntries(raw: string | null): CurrencyCommissionEntry[] {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
 
-    return parsed
-      .filter((item): item is CurrencyCommissionEntry => {
-        if (!item || typeof item !== 'object') return false;
-        const currency = (item as { currency?: unknown }).currency;
-        const percent = (item as { percent?: unknown }).percent;
-        const source = (item as { source?: unknown }).source;
-        const expiresAt = (item as { expiresAt?: unknown }).expiresAt;
-        const updatedAt = (item as { updatedAt?: unknown }).updatedAt;
+    const now = Date.now();
 
-        return (
-          typeof currency === 'string' &&
-          isValidCommissionCurrency(currency) &&
-          typeof percent === 'number' &&
-          isFinitePercent(percent) &&
-          (source === 'local_24h' || source === 'cloud') &&
-          (typeof expiresAt === 'number' || expiresAt === null) &&
-          typeof updatedAt === 'number'
-        );
+    return parsed
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+      .map((item): CurrencyCommissionEntry | null => {
+        const currency = item.currency;
+        const percent = item.percent;
+        const updatedAt = item.updatedAt;
+
+        if (
+          typeof currency !== 'string' ||
+          !isValidCommissionCurrency(currency) ||
+          typeof percent !== 'number' ||
+          !isFinitePercent(percent) ||
+          typeof updatedAt !== 'number'
+        ) {
+          return null;
+        }
+
+        // Resolve isActive — new field takes priority; migrate legacy source/expiresAt
+        let isActive: boolean;
+        if (typeof item.isActive === 'boolean') {
+          isActive = item.isActive;
+        } else {
+          const source = item.source;
+          const expiresAt = item.expiresAt;
+          if (source === 'local_24h') {
+            isActive = typeof expiresAt === 'number' ? expiresAt > now : false;
+          } else {
+            isActive = true; // cloud entries were always active
+          }
+        }
+
+        const id = typeof item.id === 'string' && item.id.length > 0 ? item.id : generateId();
+
+        return {
+          id,
+          currency: currency as CommissionCurrency,
+          percent,
+          isActive,
+          updatedAt,
+        };
       })
-      .map((entry) => ({
-        currency: entry.currency,
-        percent: entry.percent,
-        source: entry.source,
-        expiresAt: entry.expiresAt,
-        updatedAt: entry.updatedAt,
-      }));
+      .filter((e): e is CurrencyCommissionEntry => e !== null);
   } catch {
     return [];
   }
@@ -127,55 +153,41 @@ function writeEntries(entries: CurrencyCommissionEntry[]): void {
   lsWrite(STORAGE_KEY, JSON.stringify(entries));
 }
 
-function isExpired(entry: CurrencyCommissionEntry, now = Date.now()): boolean {
-  return entry.source === 'local_24h' && entry.expiresAt != null && entry.expiresAt <= now;
-}
-
-function readActiveEntries(): CurrencyCommissionEntry[] {
-  const entries = readEntries();
-  const cleaned = entries.filter((entry) => !isExpired(entry));
-  if (cleaned.length !== entries.length) {
-    writeEntries(cleaned);
-    dispatchCommissionsUpdated();
-  }
-  return cleaned;
-}
-
-function findEntryIndex(
-  entries: CurrencyCommissionEntry[],
-  currency: CommissionCurrency,
-  source?: CommissionSource,
-): number {
-  return entries.findIndex(
-    (entry) => entry.currency === currency && (source ? entry.source === source : true),
-  );
-}
+// ── Public read API ────────────────────────────────────────────────────────
 
 export function normalizeCommissionCurrency(currency: string): CommissionCurrency | null {
   const code = currency.trim().toUpperCase();
   if (code === GLOBAL_COMMISSION_CURRENCY) return GLOBAL_COMMISSION_CURRENCY;
   if (!isSupportedCurrency(code)) return null;
-  return code;
+  return code as CommissionCurrency;
 }
 
+/** All stored entries (active + inactive) sorted newest first. */
+export function listAllCurrencyCommissions(): CurrencyCommissionEntry[] {
+  return readEntries().slice().sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+/** Only isActive entries sorted newest first. */
 export function listActiveCurrencyCommissions(): CurrencyCommissionEntry[] {
-  return readActiveEntries().slice().sort((a, b) => b.updatedAt - a.updatedAt);
+  return readEntries()
+    .filter((e) => e.isActive)
+    .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-/** Saved percent for an exact commission target (no global fallback). */
+/** Saved percent for an exact commission target (active only, no global fallback). */
 export function getSavedCommissionPercentForCurrency(currency: CommissionCurrency): number | null {
   const normalized = normalizeCommissionCurrency(currency);
   if (!normalized) return null;
-  const entry = readActiveEntries().find((item) => item.currency === normalized);
+  const entry = readEntries().find((item) => item.currency === normalized && item.isActive);
   return entry?.percent ?? null;
 }
 
-/** Active fee for an expense/conversion currency (specific entry, else global ALL). */
+/** Active fee for an expense/conversion currency (specific active entry, else global ALL). */
 export function getActiveCurrencyCommissionPercent(currency: string): number | null {
   const code = currency.trim().toUpperCase();
   if (!isSupportedCurrency(code)) return null;
 
-  const entries = readActiveEntries();
+  const entries = readEntries().filter((e) => e.isActive);
   const specific = entries.find((item) => item.currency === code);
   if (specific) return specific.percent;
 
@@ -183,125 +195,153 @@ export function getActiveCurrencyCommissionPercent(currency: string): number | n
   return global?.percent ?? null;
 }
 
-export function removeLocalCurrencyCommission(currency: CommissionCurrency): boolean {
+// ── Write API ──────────────────────────────────────────────────────────────
+
+/**
+ * Upsert a commission entry. Creates a new active record.
+ * Any existing active record for the same currency is deactivated first.
+ */
+export function upsertCurrencyCommission(
+  currency: CommissionCurrency,
+  percent: number,
+): CurrencyCommissionEntry | null {
   const normalized = normalizeCommissionCurrency(currency);
-  if (!normalized) return false;
+  if (!normalized || !isFinitePercent(percent)) return null;
 
-  const entries = readActiveEntries();
-  const next = entries.filter(
-    (entry) => !(entry.currency === normalized && entry.source === 'local_24h'),
-  );
-  if (next.length === entries.length) return false;
-  writeEntries(next);
-  dispatchCommissionsUpdated();
-  return true;
-}
-
-export function removeCloudCurrencyCommissionLocal(currency: CommissionCurrency): boolean {
-  const normalized = normalizeCommissionCurrency(currency);
-  if (!normalized) return false;
-
-  const entries = readActiveEntries();
-  const next = entries.filter(
-    (entry) => !(entry.currency === normalized && entry.source === 'cloud'),
-  );
-  if (next.length === entries.length) return false;
-  writeEntries(next);
-  dispatchCommissionsUpdated();
-  return true;
-}
-
-export function saveCurrencyCommission24h(currency: CommissionCurrency, percent: number): boolean {
-  const normalized = normalizeCommissionCurrency(currency);
-  if (!normalized || !isFinitePercent(percent)) return false;
-
+  const entries = readEntries();
   const now = Date.now();
-  const nextEntry: CurrencyCommissionEntry = {
+
+  // Deactivate any existing active entry for this currency
+  const deactivated = entries.map((entry) => {
+    if (entry.isActive && entry.currency === normalized) {
+      return { ...entry, isActive: false };
+    }
+    return entry;
+  });
+
+  const newEntry: CurrencyCommissionEntry = {
+    id: generateId(),
     currency: normalized,
     percent,
-    source: 'local_24h',
-    expiresAt: now + DAY_MS,
+    isActive: true,
     updatedAt: now,
   };
 
-  const entries = readActiveEntries();
-  const localIndex = findEntryIndex(entries, normalized, 'local_24h');
-  if (localIndex >= 0) {
-    entries[localIndex] = nextEntry;
-  } else {
-    entries.push(nextEntry);
+  deactivated.push(newEntry);
+  writeEntries(deactivated);
+  dispatchCommissionsUpdated();
+  return newEntry;
+}
+
+/** Toggle a stored entry's active state by id. */
+export function setCurrencyCommissionActive(id: string, active: boolean): boolean {
+  const entries = readEntries();
+  const idx = entries.findIndex((e) => e.id === id);
+  if (idx < 0) return false;
+
+  const entry = entries[idx]!;
+
+  if (active) {
+    // Deactivate any other active entry for the same currency
+    for (let i = 0; i < entries.length; i++) {
+      if (i !== idx && entries[i]!.isActive && entries[i]!.currency === entry.currency) {
+        entries[i] = { ...entries[i]!, isActive: false };
+      }
+    }
   }
 
-  const cloudIndex = findEntryIndex(entries, normalized, 'cloud');
-  if (cloudIndex >= 0) {
-    entries.splice(cloudIndex, 1);
-  }
-
+  entries[idx] = { ...entry, isActive: active, updatedAt: Date.now() };
   writeEntries(entries);
   dispatchCommissionsUpdated();
   return true;
 }
 
-export function upsertCloudCurrencyCommission(currency: CommissionCurrency, percent: number): boolean {
-  const normalized = normalizeCommissionCurrency(currency);
-  if (!normalized || !isFinitePercent(percent)) return false;
-
-  const entries = readActiveEntries();
-  const cloudEntry: CurrencyCommissionEntry = {
-    currency: normalized,
-    percent,
-    source: 'cloud',
-    expiresAt: null,
-    updatedAt: Date.now(),
-  };
-
-  const cloudIndex = findEntryIndex(entries, normalized, 'cloud');
-  if (cloudIndex >= 0) {
-    entries[cloudIndex] = cloudEntry;
-  } else {
-    entries.push(cloudEntry);
-  }
-
-  const localIndex = findEntryIndex(entries, normalized, 'local_24h');
-  if (localIndex >= 0) {
-    entries.splice(localIndex, 1);
-  }
-
-  writeEntries(entries);
+/** Permanently delete a stored entry by id. */
+export function deleteCurrencyCommission(id: string): boolean {
+  const entries = readEntries();
+  const next = entries.filter((e) => e.id !== id);
+  if (next.length === entries.length) return false;
+  writeEntries(next);
   dispatchCommissionsUpdated();
   return true;
 }
 
+// ── Legacy compatibility wrappers ──────────────────────────────────────────
+
+/** @deprecated Use `upsertCurrencyCommission` directly. */
+export function saveCurrencyCommission24h(currency: CommissionCurrency, percent: number): boolean {
+  return upsertCurrencyCommission(currency, percent) != null;
+}
+
+/** @deprecated Use `upsertCurrencyCommission` directly. */
+export function upsertCloudCurrencyCommission(
+  currency: CommissionCurrency,
+  percent: number,
+): boolean {
+  return upsertCurrencyCommission(currency, percent) != null;
+}
+
+/**
+ * Merge cloud commissions into local storage on login.
+ * Cloud entry with newer updatedAt supersedes matching local entry.
+ */
 export function replaceCloudCurrencyCommissions(cloudEntries: CloudCurrencyCommission[]): void {
   const now = Date.now();
-  const threshold = now - DAY_MS;
-  const localOnly = readActiveEntries().filter((entry) => entry.source !== 'cloud');
-  const normalizedCloud: CurrencyCommissionEntry[] = [];
+  const local = readEntries();
+  const merged = [...local];
 
-  cloudEntries.forEach((entry) => {
-    const normalized = normalizeCommissionCurrency(entry.currency);
-    if (!normalized || !isFinitePercent(entry.percent)) return;
-    const updatedAt = entry.updatedAt ?? now;
-    if (updatedAt < threshold) return;
-    normalizedCloud.push({
-      currency: normalized,
-      percent: entry.percent,
-      source: 'cloud',
-      expiresAt: null,
-      updatedAt,
-    });
-  });
+  for (const cloud of cloudEntries) {
+    const normalized = normalizeCommissionCurrency(cloud.currency);
+    if (!normalized || !isFinitePercent(cloud.percent)) continue;
 
-  writeEntries([...localOnly, ...normalizedCloud]);
+    const cloudUpdatedAt = cloud.updatedAt ?? now;
+    const cloudIsActive = cloud.isActive !== false;
+    const cloudId = cloud.id ?? generateId();
+
+    const existingIdx = merged.findIndex((e) => e.currency === normalized);
+    if (existingIdx >= 0) {
+      const existing = merged[existingIdx]!;
+      if (cloudUpdatedAt >= existing.updatedAt) {
+        merged[existingIdx] = {
+          ...existing,
+          percent: cloud.percent,
+          isActive: cloudIsActive,
+          updatedAt: cloudUpdatedAt,
+        };
+      }
+    } else {
+      merged.push({
+        id: cloudId,
+        currency: normalized,
+        percent: cloud.percent,
+        isActive: cloudIsActive,
+        updatedAt: cloudUpdatedAt,
+      });
+    }
+  }
+
+  writeEntries(merged);
   dispatchCommissionsUpdated();
 }
 
+/** @deprecated Kept for sign-out cleanup. */
+export function removeLocalCurrencyCommission(currency: CommissionCurrency): boolean {
+  const normalized = normalizeCommissionCurrency(currency);
+  if (!normalized) return false;
+  const entries = readEntries();
+  const entry = entries.find((e) => e.currency === normalized);
+  if (!entry) return false;
+  return deleteCurrencyCommission(entry.id);
+}
+
+/** @deprecated Kept for cleanup calls. */
+export function removeCloudCurrencyCommissionLocal(currency: CommissionCurrency): boolean {
+  return removeLocalCurrencyCommission(currency);
+}
+
+/** Alias for sign-out cleanup — clears all local commission entries. */
 export function clearCloudCurrencyCommissions(): void {
-  const entries = readActiveEntries();
-  const localOnly = entries.filter((entry) => entry.source !== 'cloud');
-  if (localOnly.length === entries.length) return;
-  writeEntries(localOnly);
-  dispatchCommissionsUpdated();
+  clearAllCurrencyCommissionsLocal();
 }
 
 export function clearAllCurrencyCommissionsLocal(): void {
@@ -315,3 +355,6 @@ export function isGlobalCommissionCurrency(
 ): currency is typeof GLOBAL_COMMISSION_CURRENCY {
   return currency === GLOBAL_COMMISSION_CURRENCY;
 }
+
+/** @deprecated Legacy type alias. */
+export type CommissionSource = 'local_24h' | 'cloud';

@@ -46,10 +46,8 @@ import { roundMoney } from './money';
 import { parseRateCacheStore, type RateCacheStore } from './rateCacheService';
 import { normalizeStoredOriginalCurrency } from './displayCurrencyUtils';
 import { isSupportedCurrency } from '../constants/currencies';
-import { type HistoricalOverrideEntry, historicalEntryKey } from './historicalOverrideService';
 
 const DOC_ID = 'data';
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface UserSettings {
   lang: 'he' | 'en';
@@ -86,16 +84,20 @@ export interface UserCategoriesData {
 }
 
 export interface CloudManualExchangeOverride {
+  id?: string;
   baseCurrency: ExpenseCurrency;
   quoteCurrency: ExpenseCurrency;
   rate: number;
+  isActive?: boolean;
   updatedAt: number;
   pairSpecific?: boolean;
 }
 
 export interface CloudCurrencyCommission {
+  id?: string;
   currency: CommissionCurrency;
   percent: number;
+  isActive?: boolean;
   updatedAt: number;
 }
 
@@ -137,7 +139,6 @@ const settingsRef = (uid: string) => doc(db, 'users', uid, 'settings', DOC_ID);
 const manualOverridesRef = (uid: string) => doc(db, 'users', uid, 'manual_exchange_overrides', DOC_ID);
 const currencyCommissionsRef = (uid: string) => doc(db, 'users', uid, 'currency_commissions', DOC_ID);
 const rateCacheRef = (uid: string) => doc(db, 'users', uid, 'rate_cache', DOC_ID);
-const historicalOverridesRef = (uid: string) => doc(db, 'users', uid, 'historical_overrides', DOC_ID);
 const legacyAppRef = (uid: string) => doc(db, 'users', uid, 'data', 'app');
 
 export type SnapshotMeta = { hasPendingWrites: boolean; exists: boolean };
@@ -261,8 +262,10 @@ function parseCloudCurrencyCommissions(
         (rawCurrency === GLOBAL_COMMISSION_CURRENCY ? GLOBAL_COMMISSION_CURRENCY : null);
       const percent = typeof item.percent === 'number' ? item.percent : 0;
       const updatedAt = typeof item.updatedAt === 'number' ? item.updatedAt : Date.now();
+      const isActive = typeof item.isActive === 'boolean' ? item.isActive : true;
+      const id = typeof item.id === 'string' ? item.id : undefined;
       if (!currency) return null;
-      return { currency, percent, updatedAt };
+      return { id, currency, percent, isActive, updatedAt };
     })
     .filter(
       (item): item is CloudCurrencyCommission =>
@@ -288,7 +291,9 @@ function parseCloudManualOverrides(
       const rate = typeof item.rate === 'number' ? item.rate : 0;
       const updatedAt = typeof item.updatedAt === 'number' ? item.updatedAt : Date.now();
       const pairSpecific = item.pairSpecific !== false;
-      return { baseCurrency, quoteCurrency, rate, updatedAt, pairSpecific };
+      const isActive = typeof item.isActive === 'boolean' ? item.isActive : true;
+      const id = typeof item.id === 'string' ? item.id : undefined;
+      return { id, baseCurrency, quoteCurrency, rate, isActive, updatedAt, pairSpecific };
     })
     .filter(
       (item) =>
@@ -707,6 +712,7 @@ export async function saveManualExchangeOverrideToCloud(
   toCurrency: ExpenseCurrency,
   rate: number,
   pairSpecific = true,
+  isActive = true,
 ): Promise<void> {
   const normalized = normalizeOverridePair(fromCurrency, toCurrency, rate);
   if (!normalized) return;
@@ -721,9 +727,30 @@ export async function saveManualExchangeOverrideToCloud(
           quoteCurrency: normalized.quoteCurrency,
           rate: normalized.normalizedRate,
           pairSpecific,
+          isActive,
           createdAt: serverTimestamp(),
           updatedAt: Date.now(),
         },
+      },
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+/** Update the isActive flag for a specific manual override pair on Firestore. */
+export async function setManualOverrideActiveOnCloud(
+  uid: string,
+  baseCurrency: ExpenseCurrency,
+  quoteCurrency: ExpenseCurrency,
+  isActive: boolean,
+): Promise<void> {
+  const pairKey = manualPairKey(baseCurrency, quoteCurrency);
+  await setDoc(
+    manualOverridesRef(uid),
+    {
+      overrides: {
+        [pairKey]: { isActive, updatedAt: Date.now() },
       },
       updatedAt: serverTimestamp(),
     },
@@ -735,6 +762,7 @@ export async function saveCurrencyCommissionToCloud(
   uid: string,
   currency: CommissionCurrency,
   percent: number,
+  isActive = true,
 ): Promise<void> {
   if (
     normalizeCommissionCurrency(currency) == null ||
@@ -750,9 +778,28 @@ export async function saveCurrencyCommissionToCloud(
         [currency]: {
           currency,
           percent,
+          isActive,
           createdAt: serverTimestamp(),
           updatedAt: Date.now(),
         },
+      },
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+/** Update the isActive flag for a specific commission currency on Firestore. */
+export async function setCurrencyCommissionActiveOnCloud(
+  uid: string,
+  currency: CommissionCurrency,
+  isActive: boolean,
+): Promise<void> {
+  await setDoc(
+    currencyCommissionsRef(uid),
+    {
+      commissions: {
+        [currency]: { isActive, updatedAt: Date.now() },
       },
       updatedAt: serverTimestamp(),
     },
@@ -800,65 +847,7 @@ export async function deleteManualExchangeOverrideFromCloud(
   );
 }
 
-function resolveFeeEntryTimestampMs(value: unknown): number | null {
-  if (!value || typeof value !== 'object') return null;
-  const item = value as { createdAt?: unknown; updatedAt?: unknown };
 
-  const createdAt = item.createdAt;
-  if (createdAt && typeof createdAt === 'object' && 'toMillis' in createdAt) {
-    const toMillis = (createdAt as { toMillis?: () => number }).toMillis;
-    if (typeof toMillis === 'function') {
-      const ms = toMillis.call(createdAt);
-      if (typeof ms === 'number' && Number.isFinite(ms)) return ms;
-    }
-  }
-  if (typeof createdAt === 'number' && Number.isFinite(createdAt)) return createdAt;
-
-  if (typeof item.updatedAt === 'number' && Number.isFinite(item.updatedAt)) return item.updatedAt;
-  return null;
-}
-
-export async function pruneExpiredCloudExchangeFees(uid: string): Promise<void> {
-  const threshold = Date.now() - DAY_MS;
-
-  const commissionsSnap = await getDoc(currencyCommissionsRef(uid));
-  const commissionsRaw = (commissionsSnap.data()?.commissions ?? {}) as Record<string, unknown>;
-  const expiredCommissions = Object.entries(commissionsRaw)
-    .filter(([, value]) => {
-      const timestampMs = resolveFeeEntryTimestampMs(value);
-      return timestampMs != null && timestampMs < threshold;
-    })
-    .map(([currency]) => currency);
-  if (expiredCommissions.length > 0) {
-    await setDoc(
-      currencyCommissionsRef(uid),
-      {
-        commissions: Object.fromEntries(expiredCommissions.map((currency) => [currency, deleteField()])),
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
-  }
-
-  const overridesSnap = await getDoc(manualOverridesRef(uid));
-  const overridesRaw = (overridesSnap.data()?.overrides ?? {}) as Record<string, unknown>;
-  const expiredOverrides = Object.entries(overridesRaw)
-    .filter(([, value]) => {
-      const timestampMs = resolveFeeEntryTimestampMs(value);
-      return timestampMs != null && timestampMs < threshold;
-    })
-    .map(([pairKey]) => pairKey);
-  if (expiredOverrides.length > 0) {
-    await setDoc(
-      manualOverridesRef(uid),
-      {
-        overrides: Object.fromEntries(expiredOverrides.map((pairKey) => [pairKey, deleteField()])),
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
-  }
-}
 
 export function appendSavedColor(colors: string[], hex: string): string[] {
   const normalized = normalizeCustomHex(hex);
@@ -867,109 +856,5 @@ export function appendSavedColor(colors: string[], hex: string): string[] {
   return [...colors, normalized];
 }
 
-// ---------------------------------------------------------------------------
-// Historical Overrides — cloud persistence
-// ---------------------------------------------------------------------------
-
-/** Persist a single historical override entry to Firestore (merge/upsert). */
-export async function saveHistoricalOverrideToCloud(
-  uid: string,
-  entry: HistoricalOverrideEntry,
-): Promise<void> {
-  const key = historicalEntryKey(entry);
-  await setDoc(
-    historicalOverridesRef(uid),
-    {
-      entries: {
-        [key]: {
-          date: entry.startDate,
-          startDate: entry.startDate,
-          endDate: entry.endDate,
-          fromCurrency: entry.fromCurrency,
-          toCurrency: entry.toCurrency,
-          manualRate: entry.manualRate ?? null,
-          feePercent: entry.feePercent ?? null,
-          updatedAt: entry.updatedAt,
-          applyAutomatically: entry.applyAutomatically ?? false,
-          hideBannerPermanently: entry.hideBannerPermanently ?? false,
-          automationApplyMode: entry.automationApplyMode ?? null,
-        },
-      },
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true },
-  );
-}
-
-/** Permanently delete a single historical override entry from Firestore. */
-export async function deleteHistoricalOverrideFromCloud(
-  uid: string,
-  entry: HistoricalOverrideEntry,
-): Promise<void> {
-  const key = historicalEntryKey(entry);
-  await setDoc(
-    historicalOverridesRef(uid),
-    {
-      entries: { [key]: deleteField() },
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true },
-  );
-}
-
-/** Load all historical overrides from Firestore for the current user. */
-export async function loadHistoricalOverridesFromCloud(
-  uid: string,
-): Promise<HistoricalOverrideEntry[]> {
-  const snap = await getDoc(historicalOverridesRef(uid));
-  if (!snap.exists()) return [];
-  const raw = (snap.data()?.entries ?? {}) as Record<string, unknown>;
-
-  return Object.values(raw)
-    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
-    .map((item) => {
-      const legacyDate = typeof item.date === 'string' ? item.date : '';
-      const startDate =
-        typeof item.startDate === 'string' && item.startDate.length === 10
-          ? item.startDate
-          : legacyDate;
-      let endDate: string;
-      if (typeof item.endDate === 'string' && item.endDate.length === 10) {
-        endDate = item.endDate;
-      } else {
-        endDate = startDate.length === 10 ? startDate : '';
-      }
-
-      return {
-        date: startDate,
-        startDate,
-        endDate,
-        fromCurrency: String(item.fromCurrency ?? '') as HistoricalOverrideEntry['fromCurrency'],
-        toCurrency: String(item.toCurrency ?? '') as HistoricalOverrideEntry['toCurrency'],
-        manualRate:
-          typeof item.manualRate === 'number' && item.manualRate > 0 ? item.manualRate : null,
-        feePercent:
-          typeof item.feePercent === 'number' && item.feePercent > 0 ? item.feePercent : null,
-        updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : Date.now(),
-        applyAutomatically: item.applyAutomatically === true,
-        hideBannerPermanently: item.hideBannerPermanently === true,
-        automationApplyMode:
-          item.automationApplyMode === 'both' ||
-          item.automationApplyMode === 'rateOnly' ||
-          item.automationApplyMode === 'feeOnly' ||
-          item.automationApplyMode === 'none'
-            ? item.automationApplyMode
-            : undefined,
-      };
-    })
-    .filter(
-      (e): e is HistoricalOverrideEntry =>
-        e.startDate.length === 10 &&
-        e.endDate.length === 10 &&
-        e.startDate <= e.endDate &&
-        isSupportedCurrency(e.fromCurrency) &&
-        isSupportedCurrency(e.toCurrency),
-    );
-}
 
 export { EMPTY_USER_APP_DATA };

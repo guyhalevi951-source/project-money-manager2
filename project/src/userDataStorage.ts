@@ -10,25 +10,44 @@ export interface StoredExpense {
   date: string;
   originalAmount?: number;
   originalCurrency?: string;
-  /** Commission % baked into `amount` when this record was converted (0 = none). */
+  /** Commission % baked into `amount` when converted (0 = none). */
   appliedFeePercent?: number;
-  /** True when a manual exchange-rate override was used to convert this record. */
+  /** True when the user chose to apply the manual rate at save time. */
   manualRateUsed?: boolean;
-  /** Persistent override: ignore manual rates, resolve from the date-scoped API rate. */
+  /** True when the user chose to apply the active fee at save time. */
+  feeApplied?: boolean;
+  /** The manual override rate used at save time (1 expense-currency = rate × ILS). */
+  savedManualRate?: number;
+  /** The market/spot rate used at save time (1 expense-currency = rate × ILS). */
+  savedSpotRate?: number;
+  /** ILS ledger amount computed with the manual rate path. */
+  amountInManual?: number;
+  /** ILS ledger amount computed with the spot rate path. */
+  amountInSpot?: number;
+  /** @deprecated Replaced by !manualRateUsed */
   manualRateDisabled?: boolean;
-  /** Persistent override: drop any conversion fee multiplier for this record. */
+  /** @deprecated Replaced by !feeApplied */
   feeDisabled?: boolean;
 }
 
-/** Normalize amounts, currency codes, and legacy override flag names on load. */
+/** Normalize amounts, currency codes, and legacy field names on load. */
 export function normalizeStoredExpense(expense: StoredExpense): StoredExpense {
   const legacy = expense as StoredExpense & {
     disableManualRate?: boolean;
     disableFee?: boolean;
   };
+  const amount = roundMoney(Number(expense.amount ?? 0));
+  const manualRateUsed = Boolean(expense.manualRateUsed);
+
+  // Legacy migration: if amountInManual/amountInSpot are absent, derive from amount
+  const amountInManual =
+    expense.amountInManual != null ? roundMoney(Number(expense.amountInManual)) : (manualRateUsed ? amount : undefined);
+  const amountInSpot =
+    expense.amountInSpot != null ? roundMoney(Number(expense.amountInSpot)) : (!manualRateUsed ? amount : undefined);
+
   return {
     ...expense,
-    amount: roundMoney(Number(expense.amount ?? 0)),
+    amount,
     originalAmount:
       expense.originalAmount != null ? roundMoney(Number(expense.originalAmount)) : undefined,
     originalCurrency:
@@ -37,7 +56,10 @@ export function normalizeStoredExpense(expense: StoredExpense): StoredExpense {
         : undefined,
     manualRateDisabled: Boolean(legacy.manualRateDisabled ?? legacy.disableManualRate),
     feeDisabled: Boolean(legacy.feeDisabled ?? legacy.disableFee),
-    manualRateUsed: Boolean(expense.manualRateUsed),
+    manualRateUsed,
+    feeApplied: expense.feeApplied != null ? Boolean(expense.feeApplied) : (expense.appliedFeePercent ?? 0) > 0,
+    amountInManual,
+    amountInSpot,
   };
 }
 
