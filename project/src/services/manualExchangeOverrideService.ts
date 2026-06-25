@@ -2,6 +2,7 @@ import { isSupportedCurrency, type ExpenseCurrency } from '../constants/currenci
 
 const STORAGE_KEY = 'money_manager_manual_exchange_overrides_v1';
 const OVERRIDES_UPDATED_EVENT = 'manual-exchange-overrides-updated';
+export const MANUAL_RATE_24H_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Safe localStorage helpers with an in-memory session fallback.
@@ -52,6 +53,10 @@ export interface ManualExchangeOverrideEntry {
    * When false, all cross-currency projections use this entry as a general override.
    */
   pairSpecific: boolean;
+  /** Unix ms — when set, entry auto-expires after this timestamp (24h local saves). */
+  expiresAt?: number | null;
+  /** True when synced from Firestore forever save (no local expiry). */
+  cloudPersisted?: boolean;
 }
 
 /** Cloud shape persisted to / read from Firestore. */
@@ -63,6 +68,8 @@ export interface CloudManualExchangeOverride {
   isActive?: boolean;
   updatedAt?: number;
   pairSpecific?: boolean;
+  expiresAt?: number | null;
+  cloudPersisted?: boolean;
 }
 
 function isFinitePositive(value: number): boolean {
@@ -97,6 +104,22 @@ function generateId(): string {
     return crypto.randomUUID();
   }
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+/** Active and not past optional expiry timestamp. */
+export function isManualOverrideEntryLive(
+  entry: ManualExchangeOverrideEntry,
+  now = Date.now(),
+): boolean {
+  if (!entry.isActive) return false;
+  if (entry.expiresAt != null && entry.expiresAt <= now) return false;
+  return true;
+}
+
+function parseExpiresAt(item: Record<string, unknown>): number | null | undefined {
+  if (item.expiresAt === null) return null;
+  if (typeof item.expiresAt === 'number' && Number.isFinite(item.expiresAt)) return item.expiresAt;
+  return undefined;
 }
 
 function dispatchOverridesUpdated(): void {
@@ -158,6 +181,11 @@ function safeParseEntries(raw: string | null): ManualExchangeOverrideEntry[] {
         }
 
         const id = typeof item.id === 'string' && item.id.length > 0 ? item.id : generateId();
+        const parsedExpiresAt = parseExpiresAt(item);
+        const legacySource = item.source;
+        const cloudPersisted =
+          item.cloudPersisted === true ||
+          legacySource === 'cloud';
 
         return {
           id,
@@ -167,6 +195,8 @@ function safeParseEntries(raw: string | null): ManualExchangeOverrideEntry[] {
           isActive,
           updatedAt,
           pairSpecific: item.pairSpecific !== false,
+          ...(parsedExpiresAt !== undefined ? { expiresAt: parsedExpiresAt } : {}),
+          ...(cloudPersisted ? { cloudPersisted: true } : {}),
         };
       })
       .filter((e): e is ManualExchangeOverrideEntry => e !== null);
@@ -190,10 +220,11 @@ export function listAllManualExchangeOverrides(): ManualExchangeOverrideEntry[] 
   return readEntries().slice().sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-/** Only isActive entries sorted newest first. */
+/** Only isActive, non-expired entries sorted newest first. */
 export function listActiveManualExchangeOverrides(): ManualExchangeOverrideEntry[] {
+  const now = Date.now();
   return readEntries()
-    .filter((e) => e.isActive)
+    .filter((e) => isManualOverrideEntryLive(e, now))
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
@@ -220,7 +251,7 @@ export function getManualExchangeOverrideForPair(
   if (fromCurrency === toCurrency) return null;
   if (!isSupportedCurrency(fromCurrency) || !isSupportedCurrency(toCurrency)) return null;
 
-  const entries = readEntries().filter((e) => e.isActive);
+  const entries = readEntries().filter((e) => isManualOverrideEntryLive(e));
   const from = fromCurrency as ExpenseCurrency;
   const to = toCurrency as ExpenseCurrency;
 
@@ -258,19 +289,35 @@ export function getManualExchangeOverride(fromCurrency: string, toCurrency: stri
 export function getActiveManualExchangeOverrideSnapshot(
   fromCurrency: string,
   toCurrency: string,
-): { rate: number; updatedAt: number; pairSpecific: boolean } | null {
+): { rate: number; updatedAt: number; pairSpecific: boolean; expiresAt?: number | null; cloudPersisted?: boolean } | null {
   if (fromCurrency === toCurrency) return null;
   if (!isSupportedCurrency(fromCurrency) || !isSupportedCurrency(toCurrency)) return null;
 
-  const entries = readEntries().filter((e) => e.isActive);
+  const entries = readEntries().filter((e) => isManualOverrideEntryLive(e));
   const from = fromCurrency as ExpenseCurrency;
   const to = toCurrency as ExpenseCurrency;
 
   const direct = entries.find((e) => e.baseCurrency === from && e.quoteCurrency === to);
-  if (direct) return { rate: direct.rate, updatedAt: direct.updatedAt, pairSpecific: direct.pairSpecific };
+  if (direct) {
+    return {
+      rate: direct.rate,
+      updatedAt: direct.updatedAt,
+      pairSpecific: direct.pairSpecific,
+      expiresAt: direct.expiresAt,
+      cloudPersisted: direct.cloudPersisted,
+    };
+  }
 
   const inverse = entries.find((e) => e.baseCurrency === to && e.quoteCurrency === from);
-  if (inverse) return { rate: 1 / inverse.rate, updatedAt: inverse.updatedAt, pairSpecific: inverse.pairSpecific };
+  if (inverse) {
+    return {
+      rate: 1 / inverse.rate,
+      updatedAt: inverse.updatedAt,
+      pairSpecific: inverse.pairSpecific,
+      expiresAt: inverse.expiresAt,
+      cloudPersisted: inverse.cloudPersisted,
+    };
+  }
 
   return null;
 }
@@ -291,6 +338,7 @@ export function upsertManualExchangeOverride(
   toCurrency: string,
   rate: number,
   pairSpecific = true,
+  options?: { expiresAt?: number | null; cloudPersisted?: boolean },
 ): ManualExchangeOverrideEntry | null {
   const normalized = normalizePair(fromCurrency, toCurrency, rate);
   if (!normalized) return null;
@@ -318,6 +366,8 @@ export function upsertManualExchangeOverride(
     isActive: true,
     updatedAt: now,
     pairSpecific,
+    expiresAt: options?.expiresAt ?? null,
+    cloudPersisted: options?.cloudPersisted ?? false,
   };
 
   deactivated.push(newEntry);
@@ -400,7 +450,12 @@ export function saveManualExchangeOverride24h(
   rate: number,
   pairSpecific = true,
 ): boolean {
-  return upsertManualExchangeOverride(fromCurrency, toCurrency, rate, pairSpecific) != null;
+  return (
+    upsertManualExchangeOverride(fromCurrency, toCurrency, rate, pairSpecific, {
+      expiresAt: Date.now() + MANUAL_RATE_24H_MS,
+      cloudPersisted: false,
+    }) != null
+  );
 }
 
 /**
@@ -412,7 +467,12 @@ export function upsertCloudManualExchangeOverride(
   rate: number,
   pairSpecific = true,
 ): boolean {
-  return upsertManualExchangeOverride(fromCurrency, toCurrency, rate, pairSpecific) != null;
+  return (
+    upsertManualExchangeOverride(fromCurrency, toCurrency, rate, pairSpecific, {
+      expiresAt: null,
+      cloudPersisted: true,
+    }) != null
+  );
 }
 
 /**
@@ -450,6 +510,8 @@ export function replaceCloudManualExchangeOverrides(
           isActive: cloudIsActive,
           pairSpecific: cloud.pairSpecific !== false,
           updatedAt: cloudUpdatedAt,
+          expiresAt: cloud.expiresAt ?? null,
+          cloudPersisted: cloud.cloudPersisted ?? true,
         };
       }
     } else {
@@ -461,6 +523,8 @@ export function replaceCloudManualExchangeOverrides(
         isActive: cloudIsActive,
         pairSpecific: cloud.pairSpecific !== false,
         updatedAt: cloudUpdatedAt,
+        expiresAt: cloud.expiresAt ?? null,
+        cloudPersisted: cloud.cloudPersisted ?? true,
       });
     }
   }

@@ -1051,7 +1051,8 @@ export default function ExchangeRateSimulator({
     displayCurrency,
   ]);
 
-  const isFeeApplied = section === 'exchange' && activeCommissionPercent > 0;
+  const isFeeApplied =
+    (section === 'exchange' || section === 'manual-rate') && activeCommissionPercent > 0;
 
   const displayUnitRate = useMemo(() => {
     if (effectiveUnitRate == null || !(effectiveUnitRate > 0)) return null;
@@ -1451,19 +1452,17 @@ export default function ExchangeRateSimulator({
             const quote = entry.quoteCurrency;
             const rate = entry.rate;
             const isPairSpecific = entry.pairSpecific;
-            let validityText = tr('exchangeRateValidSession');
+            let validityText = tr('exchangeRateValidUnlimited');
 
-            if (entry.source === 'cloud') {
+            if (entry.expiresAt != null) {
+              validityText = formatRemainingTime(entry.expiresAt);
+            } else if (entry.cloudPersisted) {
               validityText = tr('exchangeRateValidForeverCloud');
-            } else {
-              validityText = entry.expiresAt != null
-                ? formatRemainingTime(entry.expiresAt)
-                : tr('exchangeRateValidUnlimited');
             }
 
             return (
               <div
-                key={`stored-${base}-${quote}-${entry.source}-${index}`}
+                key={`stored-${base}-${quote}-${entry.id}-${index}`}
                 className="flex flex-col gap-2 rounded-lg border border-neutral-700/80 bg-neutral-950/60 p-2.5 sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="min-w-0">
@@ -1650,6 +1649,14 @@ export default function ExchangeRateSimulator({
                     rate: formatRate(sessionOverride.rate),
                   })}
                 </LtrNumeric>
+              </p>
+            )}
+
+            {isFeeApplied && (
+              <p className="text-xs leading-snug text-amber-200/80">
+                {replaceTokens(tr('exchangeRateCurrencyFeeNotice'), {
+                  percent: formatSavedCommissionPercent(activeCommissionPercent),
+                })}
               </p>
             )}
 

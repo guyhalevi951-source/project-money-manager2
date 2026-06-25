@@ -22,17 +22,20 @@ import {
   type ExpenseCurrency,
 } from './exchangeRateService';
 import {
-  getManualExchangeOverride,
-  listActiveManualExchangeOverrides,
-} from './manualExchangeOverrideService';
-import { getApiRateForDate } from './rateCacheService';
-import { roundMoney, smartRoundMoney } from './money';
-import {
   convertAmountWithActiveRates,
+  getAppliedCommissionPercentForPair,
+  processTransactionWithUserRules,
   resolveActiveFeePercent,
   toActiveExchangeRatesFromSnapshot,
   toActiveFeesFromCommissionEntries,
 } from './transactionProcessingService';
+import {
+  getManualExchangeOverride,
+  hasActiveManualOverrideForPair,
+  listActiveManualExchangeOverrides,
+} from './manualExchangeOverrideService';
+import { getApiRateForDate } from './rateCacheService';
+import { roundMoney, smartRoundMoney } from './money';
 
 export type ConvertExpenseToIlsOptions = {
   displayCurrency?: ExpenseCurrency;
@@ -98,6 +101,106 @@ function resolveExpenseLedgerFeePercent(fromCurrency: string, feeDisabled: boole
 function applyFeeMultiplier(rawIls: number, feePercent: number): number {
   if (!(feePercent > 0)) return roundMoney(rawIls);
   return roundMoney(rawIls * (1 + feePercent / 100));
+}
+
+type DualConversionOptions = {
+  transactionDate?: string;
+  feeDisabled?: boolean;
+  displayCurrency?: ExpenseCurrency;
+};
+
+/** Foreign-to-foreign display path: convert via display currency then back to ILS ledger. */
+function buildDisplayPathDualLedgerSnapshot(
+  amount: number,
+  from: ExpenseCurrency,
+  displayCurrency: ExpenseCurrency,
+  liveRates: ExchangeRates,
+  feeDisabled: boolean,
+): Pick<
+  DualExpenseConversionSnapshot,
+  'savedManualRate' | 'savedSpotRate' | 'amountInManual' | 'amountInSpot' | 'manualRateAvailable' | 'appliedFeePercent'
+> | null {
+  if (from === 'ILS' || displayCurrency === 'ILS' || from === displayCurrency) return null;
+
+  const activeFees = toActiveFeesFromCommissionEntries(listActiveCurrencyCommissions());
+  const manualOverrides = listActiveManualExchangeOverrides();
+  const withManual = toActiveExchangeRatesFromSnapshot(liveRates, manualOverrides);
+  const spotOnly = toActiveExchangeRatesFromSnapshot(liveRates, []);
+
+  const feePercent = feeDisabled
+    ? 0
+    : getAppliedCommissionPercentForPair(activeFees, from, displayCurrency, displayCurrency);
+
+  const manualTx = processTransactionWithUserRules(
+    amount,
+    from,
+    displayCurrency,
+    activeFees,
+    withManual,
+    { displayCurrency },
+  );
+  const spotTx = processTransactionWithUserRules(
+    amount,
+    from,
+    displayCurrency,
+    activeFees,
+    spotOnly,
+    { displayCurrency },
+  );
+  if (manualTx == null || spotTx == null) return null;
+
+  const manualIls = convertAmountWithActiveRates(
+    manualTx.finalConvertedAmount,
+    displayCurrency,
+    'ILS',
+    spotOnly,
+  );
+  const spotIls = convertAmountWithActiveRates(
+    spotTx.finalConvertedAmount,
+    displayCurrency,
+    'ILS',
+    spotOnly,
+  );
+  if (manualIls == null || spotIls == null || !(spotIls > 0)) return null;
+
+  const hasDirectManualPair = hasActiveManualOverrideForPair(from, displayCurrency);
+  const manualDiffers =
+    Math.abs(manualTx.finalConvertedAmount - spotTx.finalConvertedAmount) /
+      Math.max(spotTx.finalConvertedAmount, 1e-9) >
+    1e-6;
+  const manualRateAvailable = hasDirectManualPair || manualDiffers;
+
+  const savedSpotRate = amount > 0 ? spotTx.finalConvertedAmount / amount : spotTx.finalConvertedAmount;
+  const savedManualRate =
+    manualRateAvailable && amount > 0 ? manualTx.finalConvertedAmount / amount : null;
+
+  return {
+    savedManualRate,
+    savedSpotRate,
+    amountInManual: manualRateAvailable ? roundMoney(manualIls) : null,
+    amountInSpot: roundMoney(spotIls),
+    manualRateAvailable,
+    appliedFeePercent: feePercent,
+  };
+}
+
+function mergeDualSnapshots(
+  ilsPath: DualExpenseConversionSnapshot,
+  displayPath: ReturnType<typeof buildDisplayPathDualLedgerSnapshot>,
+  feeAvailable: boolean,
+): DualExpenseConversionSnapshot {
+  if (displayPath == null || !displayPath.manualRateAvailable) {
+    return { ...ilsPath, feeAvailable: ilsPath.feeAvailable || feeAvailable };
+  }
+  return {
+    savedManualRate: displayPath.savedManualRate ?? ilsPath.savedManualRate,
+    savedSpotRate: displayPath.savedSpotRate ?? ilsPath.savedSpotRate,
+    amountInManual: displayPath.amountInManual ?? ilsPath.amountInManual,
+    amountInSpot: displayPath.amountInSpot ?? ilsPath.amountInSpot,
+    appliedFeePercent: displayPath.appliedFeePercent > 0 ? displayPath.appliedFeePercent : ilsPath.appliedFeePercent,
+    manualRateAvailable: true,
+    feeAvailable: feeAvailable || ilsPath.feeAvailable,
+  };
 }
 
 /** Live active manual override rate or spot pivot rate (1 `from` = rate × ILS). */
@@ -172,7 +275,7 @@ export async function recordDualExpenseConversion(
   amount: number,
   currency: string,
   rates: ExchangeRates | null,
-  options?: { transactionDate?: string; feeDisabled?: boolean },
+  options?: DualConversionOptions,
 ): Promise<DualExpenseConversionSnapshot | null> {
   const from = currency.trim().toUpperCase() as ExpenseCurrency;
   if (!(amount > 0)) return null;
@@ -198,30 +301,44 @@ export async function recordDualExpenseConversion(
   const feePercent = resolveExpenseLedgerFeePercent(from, feeDisabled);
   const feeAvailable = feePercent > 0;
 
-  // Manual path
+  // Manual path (ILS pivot)
   const liveResult = resolveLiveManualOrSpotRate(from, liveRates);
   const manualRate = liveResult?.manualRateUsed ? liveResult.rate : null;
-  const manualRateAvailable = manualRate != null;
+  const ilsManualRateAvailable = manualRate != null;
 
   const amountInManual = manualRate != null
     ? applyFeeMultiplier(smartRoundMoney(amount * manualRate), feePercent)
     : null;
 
-  // Spot path
+  // Spot path (ILS pivot)
   const spotRate = await resolveSpotRate(transactionDate, from, liveRates);
   if (spotRate == null || !(spotRate > 0)) return null;
 
   const amountInSpot = applyFeeMultiplier(smartRoundMoney(amount * spotRate), feePercent);
 
-  return {
+  const ilsPath: DualExpenseConversionSnapshot = {
     savedManualRate: manualRate,
     savedSpotRate: spotRate,
     amountInManual,
     amountInSpot,
     appliedFeePercent: feePercent,
-    manualRateAvailable,
+    manualRateAvailable: ilsManualRateAvailable,
     feeAvailable,
   };
+
+  const displayCurrency = options?.displayCurrency;
+  if (displayCurrency && displayCurrency !== 'ILS' && displayCurrency !== from) {
+    const displayPath = buildDisplayPathDualLedgerSnapshot(
+      amount,
+      from,
+      displayCurrency,
+      liveRates,
+      feeDisabled,
+    );
+    return mergeDualSnapshots(ilsPath, displayPath, feeAvailable);
+  }
+
+  return ilsPath;
 }
 
 // ── Legacy single-path conversion (kept for backward compat during transition) ──
@@ -404,6 +521,24 @@ export function expenseHadCreationFee(expense: {
   return expense.creationHadActiveFee === true;
 }
 
+/** Edit modal: show manual-rate toggle when creation had it OR snapshot exists. */
+export function expenseEditShowsManualRateToggle(expense: {
+  creationHadActiveManualRate?: boolean;
+  savedManualRate?: number | null;
+  amountInManual?: number;
+}): boolean {
+  return expenseHadCreationManualRate(expense) || expenseHasSavedManualRateSnapshot(expense);
+}
+
+/** Edit modal: show fee toggle when creation had it OR fee snapshot exists. */
+export function expenseEditShowsFeeToggle(expense: {
+  creationHadActiveFee?: boolean;
+  feeApplied?: boolean;
+  appliedFeePercent?: number;
+}): boolean {
+  return expenseHadCreationFee(expense) || expenseHasSavedFeeSnapshot(expense);
+}
+
 // ── Snapshot visibility helpers (independent of global settings) ─────────────
 
 /**
@@ -436,6 +571,7 @@ export function expenseHasSavedFeeSnapshot(expense: {
 export interface SnapshotAwareConversionOptions {
   transactionDate?: string;
   feeDisabled?: boolean;
+  displayCurrency?: ExpenseCurrency;
   /** Frozen snapshot from the expense being edited. Used to preserve rates when global settings are archived. */
   existingSnapshot?: {
     savedManualRate?: number | null;
@@ -522,7 +658,7 @@ export async function recordDualExpenseConversionFromSnapshot(
     feeDisabled ? 0 : feePercent,
   );
 
-  return {
+  const ilsPath: DualExpenseConversionSnapshot = {
     savedManualRate: manualRate,
     savedSpotRate: spotRate,
     amountInManual,
@@ -531,6 +667,20 @@ export async function recordDualExpenseConversionFromSnapshot(
     manualRateAvailable,
     feeAvailable,
   };
+
+  const displayCurrency = options?.displayCurrency;
+  if (displayCurrency && displayCurrency !== 'ILS' && displayCurrency !== from) {
+    const displayPath = buildDisplayPathDualLedgerSnapshot(
+      amount,
+      from,
+      displayCurrency,
+      liveRates,
+      feeDisabled,
+    );
+    return mergeDualSnapshots(ilsPath, displayPath, feeAvailable);
+  }
+
+  return ilsPath;
 }
 
 /**
@@ -549,6 +699,7 @@ export async function previewExpenseDisplayAmountFromSnapshot(
   const snapshot = await recordDualExpenseConversionFromSnapshot(amount, currency, rates, {
     transactionDate: options.transactionDate,
     feeDisabled: options.feeDisabled,
+    displayCurrency: options.displayCurrency,
     existingSnapshot: options.existingSnapshot,
   });
   if (!snapshot) return null;

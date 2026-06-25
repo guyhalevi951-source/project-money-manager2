@@ -127,6 +127,15 @@ export function resolveCommissionBypassOptions(
   };
 }
 
+/** When exactly one leg is ILS, commission is configured on the foreign currency. */
+export function resolveFeeCurrencyForPair(fromCurrency: string, toCurrency: string): string {
+  const from = normalizeCurrencyCode(fromCurrency);
+  const to = normalizeCurrencyCode(toCurrency);
+  if (from === 'ILS' && to !== 'ILS') return to;
+  if (to === 'ILS' && from !== 'ILS') return from;
+  return from;
+}
+
 /** Percent actually applied between two currencies (fee on from-currency + bypass rules). */
 export function getAppliedCommissionPercentForPair(
   activeFees: ReadonlyArray<ActiveFeeRule>,
@@ -139,13 +148,14 @@ export function getAppliedCommissionPercentForPair(
   const to = normalizeCurrencyCode(toCurrency);
   if (from === to) return 0;
 
+  const feeCurrency = resolveFeeCurrencyForPair(from, to);
   const raw =
     draftPercent != null && draftPercent > 0
       ? draftPercent
-      : resolveActiveFeePercent(activeFees, from) ?? 0;
+      : resolveActiveFeePercent(activeFees, feeCurrency) ?? 0;
   if (!(raw > 0)) return 0;
 
-  const bypassOptions = resolveCommissionBypassOptions(activeFees, from, displayCurrency);
+  const bypassOptions = resolveCommissionBypassOptions(activeFees, feeCurrency, displayCurrency);
   if (!shouldApplyCurrencyCommission(from, to, bypassOptions)) return 0;
 
   return raw;

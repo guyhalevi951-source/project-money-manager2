@@ -98,8 +98,8 @@ import {
   subscribeCurrencyCommissionsUpdated,
 } from './services/currencyCommissionService';
 import {
-  expenseHadCreationFee,
-  expenseHadCreationManualRate,
+  expenseEditShowsFeeToggle,
+  expenseEditShowsManualRateToggle,
   previewExpenseDisplayAmountFromSnapshot,
   recordDualExpenseConversion,
   recordDualExpenseConversionFromSnapshot,
@@ -5271,6 +5271,7 @@ function App() {
       const snapshot = await recordDualExpenseConversion(enteredAmount, inputCurrency, rates, {
         transactionDate: isoDate,
         feeDisabled: false,
+        displayCurrency,
       });
       if (snapshot == null) return null;
 
@@ -5458,15 +5459,15 @@ function App() {
   const editDraftFeeDisabled = !editApplyFee;
   // Whether the expense being edited had a manual rate or fee at creation time —
   // immutable creation-time flags, independent of current global settings or save state.
-  const editCreationHadManualRate = editExpenseSnapshot != null && expenseHadCreationManualRate(editExpenseSnapshot);
-  const editCreationHadFee = editExpenseSnapshot != null && expenseHadCreationFee(editExpenseSnapshot);
+  const editShowsManualRate = editExpenseSnapshot != null && expenseEditShowsManualRateToggle(editExpenseSnapshot);
+  const editShowsFee = editExpenseSnapshot != null && expenseEditShowsFeeToggle(editExpenseSnapshot);
 
   useEffect(() => {
     if (
       editDraftAmount == null ||
       editDraftCurrency == null ||
       editDraftDate == null ||
-      (!editCreationHadManualRate && !editCreationHadFee)
+      (!editShowsManualRate && !editShowsFee)
     ) {
       setEditPreviewAmount(null);
       return;
@@ -5535,17 +5536,18 @@ function App() {
         {
           transactionDate: normalizedDate,
           feeDisabled,
+          displayCurrency,
           existingSnapshot: editExpenseSnapshot,
         },
       );
       if (snapshot == null) return null;
 
-      const manualRateUsed = editCreationHadManualRate ? editApplyManualRate : false;
+      const manualRateUsed = editShowsManualRate ? editApplyManualRate : false;
       const amount = manualRateUsed && snapshot.amountInManual != null
         ? roundMoneyAmount(snapshot.amountInManual)
         : roundMoneyAmount(snapshot.amountInSpot);
 
-      const feeApplied = editCreationHadFee ? editApplyFee : false;
+      const feeApplied = editShowsFee ? editApplyFee : false;
       const appliedFeePercent = feeApplied
         ? snapshot.appliedFeePercent
         : (editExpenseSnapshot?.appliedFeePercent ?? snapshot.appliedFeePercent ?? 0);
@@ -6824,9 +6826,9 @@ function App() {
                 </div>
               </div>
 
-              {(editCreationHadManualRate || editCreationHadFee) && (
+              {(editShowsManualRate || editShowsFee) && (
                   <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3.5 py-3 shadow-sm shadow-black/20 space-y-3">
-                    {editCreationHadManualRate && (
+                    {editShowsManualRate && (
                       <label
                         htmlFor="edit-expense-apply-manual"
                         className="flex cursor-pointer items-center justify-between gap-3"
@@ -6843,7 +6845,7 @@ function App() {
                         />
                       </label>
                     )}
-                    {editCreationHadFee && (
+                    {editShowsFee && (
                       <label
                         htmlFor="edit-expense-apply-fee"
                         className="flex cursor-pointer items-center justify-between gap-3"
