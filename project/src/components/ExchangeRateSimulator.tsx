@@ -473,6 +473,10 @@ export default function ExchangeRateSimulator({
       };
     }
 
+    // Clear stale rate immediately so the previous date's value doesn't flash
+    // while the new async fetch is in-flight.
+    setResolvedRate(null);
+
     const useLiveManualOverride = dateIso === todayIso;
 
     if (useLiveManualOverride && activeSessionRate != null) {
@@ -1336,8 +1340,15 @@ export default function ExchangeRateSimulator({
     if (!Number.isFinite(rawDeltaPercent)) return null;
 
     const roundedDelta = Number(rawDeltaPercent.toFixed(2));
-    if (roundedDelta === 0) return null;
     if (Math.abs(roundedDelta) > 500) return null;
+
+    if (roundedDelta === 0) {
+      return {
+        trend: 'flat' as const,
+        percentText: '0.00%',
+        contextText: tr('exchangeRateVsToday'),
+      };
+    }
 
     const trend: 'up' | 'down' = roundedDelta > 0 ? 'up' : 'down';
     const sign = roundedDelta > 0 ? '+' : '';
@@ -1378,7 +1389,7 @@ export default function ExchangeRateSimulator({
   }, [todayIso]);
 
   const renderDateStepper = () => (
-    <div className="flex w-full items-center gap-2">
+    <div dir="ltr" className="flex w-full items-center gap-2">
       <button
         type="button"
         onClick={handleDateStepBack}
@@ -2152,14 +2163,22 @@ export default function ExchangeRateSimulator({
                     <span
                       aria-hidden
                       className={`text-3xl leading-none md:text-[4rem] ${
-                        rateComparison.trend === 'up' ? 'text-emerald-500' : 'text-rose-600'
+                        rateComparison.trend === 'up'
+                          ? 'text-emerald-500'
+                          : rateComparison.trend === 'down'
+                            ? 'text-rose-600'
+                            : 'text-neutral-400'
                       }`}
                     >
-                      {rateComparison.trend === 'up' ? '⬆' : '⬇'}
+                      {rateComparison.trend === 'up' ? '⬆' : rateComparison.trend === 'down' ? '⬇' : '➡'}
                     </span>
                     <LtrNumeric
                       className={`text-2xl font-black leading-none md:text-4xl ${
-                        rateComparison.trend === 'up' ? 'text-emerald-400' : 'text-rose-500'
+                        rateComparison.trend === 'up'
+                          ? 'text-emerald-400'
+                          : rateComparison.trend === 'down'
+                            ? 'text-rose-500'
+                            : 'text-neutral-400'
                       }`}
                     >
                       {rateComparison.percentText}

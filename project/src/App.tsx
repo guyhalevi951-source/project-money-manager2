@@ -159,6 +159,7 @@ import {
 import {
   clearAllManualExchangeOverridesLocal,
   clearCloudManualExchangeOverrides,
+  getManualExchangeOverride,
   listActiveManualExchangeOverrides,
   replaceCloudManualExchangeOverrides,
 } from './services/manualExchangeOverrideService';
@@ -3586,6 +3587,18 @@ function App() {
       return;
     }
 
+    // If the expense snapshot already has this date+currency (i.e. the expense is being
+    // edited without changing the key fields), it was already converted — no re-prompt.
+    const snapshotDate = editExpenseSnapshot ? normalizeDate(editExpenseSnapshot.date) : null;
+    const snapshotMatchesDraft =
+      snapshotDate === isoDate &&
+      editExpenseSnapshot?.currency === editExpenseDraft.currency;
+
+    if (snapshotMatchesDraft) {
+      setEditHistoricalBanner(null);
+      return;
+    }
+
     const resolved = resolveNewExpenseHistoricalState(
       isoDate,
       editExpenseDraft.currency as ExpenseCurrency,
@@ -3599,13 +3612,20 @@ function App() {
     } else {
       setEditHistoricalBanner(null);
     }
-  }, [displayCurrency, editExpenseDraft]);
+  }, [displayCurrency, editExpenseDraft, editExpenseSnapshot]);
 
   const refreshEditExpenseHistoricalFromAutomation = useCallback(() => {
     if (!editExpenseDraft) return;
 
     const isoDate = normalizeDate(editExpenseDraft.date);
     if (isoDate >= getLocalTodayIso()) return;
+
+    // Same guard as refreshEditExpenseHistoricalState: no banner when snapshot matches draft.
+    const snapshotDate = editExpenseSnapshot ? normalizeDate(editExpenseSnapshot.date) : null;
+    const snapshotMatchesDraft =
+      snapshotDate === isoDate &&
+      editExpenseSnapshot?.currency === editExpenseDraft.currency;
+    if (snapshotMatchesDraft) return;
 
     const resolved = resolveNewExpenseHistoricalState(
       isoDate,
@@ -3624,7 +3644,7 @@ function App() {
     } else if (suppressBanner) {
       setEditHistoricalBanner(null);
     }
-  }, [displayCurrency, editExpenseDraft]);
+  }, [displayCurrency, editExpenseDraft, editExpenseSnapshot]);
 
   useEffect(() => {
     refreshEditExpenseHistoricalState();
@@ -5552,12 +5572,15 @@ function App() {
         (historicalFeePercent != null && historicalFeePercent > 0);
 
       if (inputCurrency === 'ILS' && !hasHistoricalContext) {
+        // ILS→ILS rate is always 1, but the display may use a manual override for displayCurrency↔ILS
+        const ilsDisplayManualRate = getManualExchangeOverride(displayCurrency, 'ILS');
+        const manualRateUsed = ilsDisplayManualRate != null && ilsDisplayManualRate > 0;
         return {
           ilsAmount: roundMoneyAmount(enteredAmount),
           appliedFeePercent: 0,
-          manualRateUsed: false,
+          manualRateUsed,
           appliedUnitRateToIls: 1,
-          appliedRateSource: 'api_spot',
+          appliedRateSource: manualRateUsed ? 'manual_live' : 'api_spot',
           appliedConversionDate: isoDate,
         };
       }
@@ -5804,12 +5827,14 @@ function App() {
       );
 
       if (editExpenseDraft.currency === 'ILS' && !hasHistoricalContext && !hadPersistedModifiers) {
+        const ilsDisplayManualRate = getManualExchangeOverride(displayCurrency, 'ILS');
+        const manualRateUsed = ilsDisplayManualRate != null && ilsDisplayManualRate > 0;
         return {
           ilsAmount: roundMoneyAmount(typedAmount),
           appliedFeePercent: 0,
-          manualRateUsed: false,
+          manualRateUsed,
           appliedUnitRateToIls: 1,
-          appliedRateSource: 'api_spot',
+          appliedRateSource: manualRateUsed ? 'manual_live' : 'api_spot',
           appliedConversionDate: normalizedDate,
         };
       }
@@ -7164,7 +7189,6 @@ function App() {
                   onClick={handleEditExpenseSave}
                   disabled={
                     editExpenseSubmitBlocked ||
-                    !!editHistoricalBanner ||
                     !editExpenseDraft.amount.trim() ||
                     !editExpenseDraft.category.trim() ||
                     !editExpenseDraft.date.trim()

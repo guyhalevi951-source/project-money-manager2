@@ -7,12 +7,12 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { usePinnedCurrencies } from '../hooks/usePinnedCurrencies';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Globe, History, Pencil, RotateCcw, Search, Trash2, X } from 'lucide-react';
 import { auth } from '../firebase';
 import { LtrNumeric, useLanguage } from '../LanguageContext';
 import {
-  CURRENCY_DICTIONARY,
   getCurrencyMeta,
   type ExpenseCurrency,
 } from '../constants/currencies';
@@ -85,14 +85,6 @@ interface HistoricalEditDraft {
   applyAutomatically: boolean;
   hideBannerPermanently: boolean;
 }
-
-const RATE_CURRENCY_OPTIONS = Object.keys(CURRENCY_DICTIONARY)
-  .sort((a, b) => a.localeCompare(b)) as ExpenseCurrency[];
-
-const FEE_CURRENCY_OPTIONS: readonly CommissionCurrency[] = [
-  GLOBAL_COMMISSION_CURRENCY,
-  ...(RATE_CURRENCY_OPTIONS.filter((c) => c !== 'ILS') as ExpenseCurrency[]),
-];
 
 function entryMatchesScope(entry: HistoricalOverrideEntry, scope: HistoricalLogScope): boolean {
   if (scope === 'rate') {
@@ -266,6 +258,8 @@ function HistoryRow({
   onCancelEdit,
   onDraftChange,
   deletingKey,
+  rateCurrencyOptions,
+  feeCurrencyOptions,
 }: {
   entry: HistoricalOverrideEntry;
   scope: HistoricalLogScope;
@@ -280,6 +274,8 @@ function HistoryRow({
   onCancelEdit: () => void;
   onDraftChange: (patch: Partial<HistoricalEditDraft>) => void;
   deletingKey: string | null;
+  rateCurrencyOptions: readonly ExpenseCurrency[];
+  feeCurrencyOptions: readonly CommissionCurrency[];
 }) {
   const { tr } = useLanguage();
   const rowKey = historicalEntryKey(entry);
@@ -350,7 +346,7 @@ function HistoryRow({
                 className={`min-w-[7rem] ${surfaceInputSmClass}`}
                 aria-label={tr('historicalLogFilterCurrency')}
               >
-                {FEE_CURRENCY_OPTIONS.map((code) => (
+                {feeCurrencyOptions.map((code) => (
                   <option key={code} value={code}>
                     {code === GLOBAL_COMMISSION_CURRENCY
                       ? tr('historicalLogFeeAllCurrencies')
@@ -373,7 +369,7 @@ function HistoryRow({
                   className={`min-w-[5rem] ${surfaceInputSmClass}`}
                   aria-label={tr('exchangeRateMainCurrency')}
                 >
-                  {RATE_CURRENCY_OPTIONS.map((code) => (
+                  {rateCurrencyOptions.map((code) => (
                     <option key={`from-${code}`} value={code}>{code}</option>
                   ))}
                 </select>
@@ -397,7 +393,7 @@ function HistoryRow({
                   className={`min-w-[5rem] ${surfaceInputSmClass}`}
                   aria-label={tr('exchangeRateSecondaryCurrency')}
                 >
-                  {RATE_CURRENCY_OPTIONS.map((code) => (
+                  {rateCurrencyOptions.map((code) => (
                     <option key={`to-${code}`} value={code}>{code}</option>
                   ))}
                 </select>
@@ -590,6 +586,7 @@ export default function HistoricalLogModal({
   onUpdateEntry,
 }: HistoricalLogModalProps) {
   const { tr, dir } = useLanguage();
+  const pinnedCurrencies = usePinnedCurrencies();
 
   const [entries, setEntries] = useState<HistoricalOverrideEntry[]>([]);
   const [filterDate, setFilterDate] = useState('');
@@ -603,6 +600,24 @@ export default function HistoricalLogModal({
   const [editDraft, setEditDraft] = useState<HistoricalEditDraft | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Dynamic currency options: pinned layout currencies + any currencies from the entry being
+  // edited so legacy entries with removed currencies remain editable.
+  const rateCurrencyOptions = useMemo<readonly ExpenseCurrency[]>(() => {
+    const base = new Set<string>(pinnedCurrencies);
+    if (editingEntry) {
+      base.add(editingEntry.fromCurrency);
+      base.add(editingEntry.toCurrency);
+    }
+    return [...base].sort((a, b) => a.localeCompare(b)) as ExpenseCurrency[];
+  }, [pinnedCurrencies, editingEntry]);
+
+  const feeCurrencyOptions = useMemo<readonly CommissionCurrency[]>(() => {
+    return [
+      GLOBAL_COMMISSION_CURRENCY,
+      ...(rateCurrencyOptions.filter((c) => c !== 'ILS') as ExpenseCurrency[]),
+    ];
+  }, [rateCurrencyOptions]);
 
   const modalTitleKey =
     defaultType === 'rate' ? 'historicalLogTitleRates' : 'historicalLogTitleFees';
@@ -939,6 +954,8 @@ export default function HistoricalLogModal({
                       onCancelEdit={handleCancelEdit}
                       onDraftChange={handleDraftChange}
                       deletingKey={deletingKey}
+                      rateCurrencyOptions={rateCurrencyOptions}
+                      feeCurrencyOptions={feeCurrencyOptions}
                     />
                   );
                 })}

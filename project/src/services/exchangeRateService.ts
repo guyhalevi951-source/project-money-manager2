@@ -737,6 +737,10 @@ async function fetchCrossRateViaUsdPivot(
     const frankfurterLeg = await fetchRateFromFrankfurterWithInverse(dateIso, fromLeg, toLeg);
     if (frankfurterLeg != null && frankfurterLeg > 0) return frankfurterLeg;
 
+    // For historical dates, never fall back to today's live-spot rates — that
+    // would corrupt the cache by storing a present-day rate under a past date key.
+    if (dateIso < getLocalTodayIso()) return null;
+
     const rates =
       liveRates ??
       getCachedExchangeRates() ??
