@@ -3501,10 +3501,7 @@ function App() {
     setNewExpenseHistoricalLastChoice(null);
     setNewExpenseHistoricalBannerOptions(null);
 
-    if (
-      isoDate >= getLocalTodayIso() ||
-      newExpense.currency === displayCurrency
-    ) {
+    if (isoDate >= getLocalTodayIso()) {
       setNewExpenseHistoricalBanner(null);
       setNewExpenseHistoricalApplied(EMPTY_NEW_EXPENSE_HISTORICAL_APPLIED);
       return;
@@ -3516,7 +3513,9 @@ function App() {
     );
 
     setNewExpenseHistoricalApplied(resolved.autoApplied);
-    if (resolved.showBanner && resolved.bannerContext) {
+
+    const suppressBanner = newExpense.currency === displayCurrency;
+    if (!suppressBanner && resolved.showBanner && resolved.bannerContext) {
       setNewExpenseHistoricalBanner(resolved.bannerContext);
     } else {
       setNewExpenseHistoricalBanner(null);
@@ -3526,14 +3525,7 @@ function App() {
   /** After automation-flag patches — refresh banner visibility / auto-apply without clearing one-shot injections. */
   const refreshNewExpenseHistoricalFromAutomation = useCallback(() => {
     const isoDate = normalizeDate(newExpense.date);
-    if (
-      isoDate >= getLocalTodayIso() ||
-      newExpense.currency === displayCurrency
-    ) {
-      setNewExpenseHistoricalBanner(null);
-      setNewExpenseHistoricalApplied(EMPTY_NEW_EXPENSE_HISTORICAL_APPLIED);
-      return;
-    }
+    if (isoDate >= getLocalTodayIso()) return;
 
     const resolved = resolveNewExpenseHistoricalState(
       isoDate,
@@ -3544,9 +3536,12 @@ function App() {
       setNewExpenseHistoricalApplied(resolved.autoApplied);
     }
 
-    if (resolved.showBanner && resolved.bannerContext) {
+    const suppressBanner = newExpense.currency === displayCurrency;
+    if (!suppressBanner && resolved.showBanner && resolved.bannerContext) {
       setNewExpenseHistoricalBanner(resolved.bannerContext);
-    } else if (!resolved.showBanner) {
+    } else if (!suppressBanner && !resolved.showBanner) {
+      setNewExpenseHistoricalBanner(null);
+    } else if (suppressBanner) {
       setNewExpenseHistoricalBanner(null);
     }
   }, [displayCurrency, newExpense.date, newExpense.currency]);
@@ -3576,10 +3571,7 @@ function App() {
 
     const isoDate = normalizeDate(editExpenseDraft.date);
 
-    if (
-      isoDate >= getLocalTodayIso() ||
-      editExpenseDraft.currency === displayCurrency
-    ) {
+    if (isoDate >= getLocalTodayIso()) {
       setEditHistoricalBanner(null);
       setEditHistoricalApplied(EMPTY_NEW_EXPENSE_HISTORICAL_APPLIED);
       return;
@@ -3591,7 +3583,9 @@ function App() {
     );
 
     setEditHistoricalApplied(resolved.autoApplied);
-    if (resolved.showBanner && resolved.bannerContext) {
+
+    const suppressBanner = editExpenseDraft.currency === displayCurrency;
+    if (!suppressBanner && resolved.showBanner && resolved.bannerContext) {
       setEditHistoricalBanner(resolved.bannerContext);
     } else {
       setEditHistoricalBanner(null);
@@ -3602,14 +3596,7 @@ function App() {
     if (!editExpenseDraft) return;
 
     const isoDate = normalizeDate(editExpenseDraft.date);
-    if (
-      isoDate >= getLocalTodayIso() ||
-      editExpenseDraft.currency === displayCurrency
-    ) {
-      setEditHistoricalBanner(null);
-      setEditHistoricalApplied(EMPTY_NEW_EXPENSE_HISTORICAL_APPLIED);
-      return;
-    }
+    if (isoDate >= getLocalTodayIso()) return;
 
     const resolved = resolveNewExpenseHistoricalState(
       isoDate,
@@ -3620,9 +3607,12 @@ function App() {
       setEditHistoricalApplied(resolved.autoApplied);
     }
 
-    if (resolved.showBanner && resolved.bannerContext) {
+    const suppressBanner = editExpenseDraft.currency === displayCurrency;
+    if (!suppressBanner && resolved.showBanner && resolved.bannerContext) {
       setEditHistoricalBanner(resolved.bannerContext);
-    } else if (!resolved.showBanner) {
+    } else if (!suppressBanner && !resolved.showBanner) {
+      setEditHistoricalBanner(null);
+    } else if (suppressBanner) {
       setEditHistoricalBanner(null);
     }
   }, [displayCurrency, editExpenseDraft]);
@@ -5539,15 +5529,22 @@ function App() {
       appliedFeePercent: number;
       manualRateUsed: boolean;
     } | null> => {
-      if (inputCurrency === 'ILS') {
-        return { ilsAmount: roundMoneyAmount(enteredAmount), appliedFeePercent: 0, manualRateUsed: false };
-      }
-
       const rates = getCachedExchangeRates();
       const isoDate = normalizeDate(newExpense.date);
 
       const historicalRateEntry = submitApplied.rateEntry ?? undefined;
       const historicalFeePercent = submitApplied.feeEntry?.feePercent ?? undefined;
+      const hasHistoricalContext =
+        historicalRateEntry != null ||
+        (historicalFeePercent != null && historicalFeePercent > 0);
+
+      if (inputCurrency === 'ILS' && !hasHistoricalContext) {
+        return {
+          ilsAmount: roundMoneyAmount(enteredAmount),
+          appliedFeePercent: 0,
+          manualRateUsed: false,
+        };
+      }
 
       const recorded = await recordExpenseConversionToIlsAsync(enteredAmount, inputCurrency, rates, {
         displayCurrency,
@@ -5760,15 +5757,30 @@ function App() {
       appliedFeePercent: number;
       manualRateUsed: boolean;
     } | null> => {
-      if (editExpenseDraft.currency === 'ILS') {
-        return { ilsAmount: roundMoneyAmount(typedAmount), appliedFeePercent: 0, manualRateUsed: false };
-      }
       const normalizedDate = normalizeDate(editExpenseDraft.date);
       const rates = getCachedExchangeRates();
 
-      // If user accepted a historical override for this date + currency, inject it.
       const editHistRateEntry = editHistoricalApplied.rateEntry ?? undefined;
       const editHistFeePercent = editHistoricalApplied.feeEntry?.feePercent ?? undefined;
+      const hasHistoricalContext =
+        editHistRateEntry != null ||
+        (editHistFeePercent != null && editHistFeePercent > 0);
+      const hadPersistedModifiers = Boolean(
+        prevExpense?.manualRateUsed ||
+          prevExpense?.manualRateDisabled ||
+          (prevExpense?.appliedFeePercent ?? 0) > 0 ||
+          prevExpense?.feeDisabled ||
+          manualRateDisabled ||
+          feeDisabled,
+      );
+
+      if (editExpenseDraft.currency === 'ILS' && !hasHistoricalContext && !hadPersistedModifiers) {
+        return {
+          ilsAmount: roundMoneyAmount(typedAmount),
+          appliedFeePercent: 0,
+          manualRateUsed: false,
+        };
+      }
 
       const recorded = await recordExpenseConversionToIlsAsync(
         typedAmount,

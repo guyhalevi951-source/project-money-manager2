@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowUpDown, ChevronDown, ChevronLeft, ChevronRight, Copy, History, Plus, Trash2 } from 'lucide-react';
+import { ArrowUpDown, ChevronDown, ChevronLeft, ChevronRight, Copy, History, Pencil, Plus, Trash2 } from 'lucide-react';
 import { auth } from '../firebase';
 import { LtrNumeric, useLanguage } from '../LanguageContext';
 import { usePinnedCurrencies } from '../hooks/usePinnedCurrencies';
@@ -42,9 +42,13 @@ import {
 } from '../services/currencyCommissionService';
 import {
   clearHistoricalDirectRateCache,
+  computeCrossRateViaUsdPivot,
+  fetchExchangeRates,
   fetchHistoricalDirectRateSnapshot,
   getLocalTodayIso,
+  isForeignToForeign,
   peekHistoricalDirectRateSnapshot,
+  resolveIlsLegDirectUnitRate,
 } from '../services/exchangeRateService';
 import { ensureDirectPairUnitRate } from '../services/currencyPairResolver';
 import {
@@ -73,6 +77,7 @@ import {
   archiveManualRateOverride,
   archiveCommissionForCurrency,
   historicalEntryKey,
+  normalizeHistoricalRateEntry,
   updateHistoricalOverrideEntry,
   type HistoricalOverrideEntry,
 } from '../services/historicalOverrideService';
@@ -210,6 +215,7 @@ export default function ExchangeRateSimulator({
   const [historicalRateUpdatedAt, setHistoricalRateUpdatedAt] = useState<number | null>(null);
   const [todayMarketRate, setTodayMarketRate] = useState<number | null>(null);
   const todayIso = getLocalTodayIso();
+  const isPastSelectedDate = dateIso < todayIso;
   const canNavigateForwardDate = dateIso < todayIso;
   const [loadingRate, setLoadingRate] = useState(false);
   const [storedOverrides, setStoredOverrides] = useState<ManualExchangeOverrideEntry[]>(() =>
@@ -253,6 +259,21 @@ export default function ExchangeRateSimulator({
   const historicalFetchIdRef = useRef(0);
   const todayMarketFetchIdRef = useRef(0);
   const historicalContextKeyRef = useRef<string | null>(null);
+  const pairLoadGuardRef = useRef(false);
+
+  const loadManualRatePairIntoForm = useCallback(
+    (base: CurrencyCode, quote: CurrencyCode, unitRate: number) => {
+      if (!(unitRate > 0) || base === quote) return;
+      pairLoadGuardRef.current = true;
+      setSessionOverride(null);
+      setMainCurrency(base);
+      setSecondaryCurrency(quote);
+      setMainAmountInput('1');
+      setSecondaryAmountInput(formatRate(unitRate));
+      shouldSeedSecondaryRef.current = false;
+    },
+    [],
+  );
 
   const formatRemainingTime = useCallback(
     (expiresAt: number): string => {
@@ -312,6 +333,10 @@ export default function ExchangeRateSimulator({
   }, []);
 
   useEffect(() => {
+    if (pairLoadGuardRef.current) {
+      pairLoadGuardRef.current = false;
+      return;
+    }
     setMainCurrency(displayCurrency);
   }, [displayCurrency]);
 
@@ -359,6 +384,7 @@ export default function ExchangeRateSimulator({
   const activeStoredManualRate = activeStoredManualOverride?.rate ?? null;
 
   const isManualRateActive =
+    section !== 'exchange' &&
     mainCurrency !== secondaryCurrency &&
     (activeSessionRate != null || activeStoredManualRate != null);
 
@@ -382,11 +408,13 @@ export default function ExchangeRateSimulator({
     if (mainCurrency === secondaryCurrency) return;
 
     const unitRate =
-      activeSessionRate != null
-        ? activeSessionRate
-        : activeStoredManualRate != null
-          ? activeStoredManualRate
-          : resolvedRate;
+      section === 'exchange' && isPastSelectedDate
+        ? resolvedRate
+        : activeSessionRate != null
+          ? activeSessionRate
+          : activeStoredManualRate != null
+            ? activeStoredManualRate
+            : resolvedRate;
 
     if (unitRate == null || !(unitRate > 0)) return;
     if (!shouldSeedSecondaryRef.current) return;
@@ -418,6 +446,8 @@ export default function ExchangeRateSimulator({
     activeStoredManualRate,
     mainAmountInput,
     dateIso,
+    isPastSelectedDate,
+    section,
     applyDraftCommissionPercent,
     commissionPercentInput,
     activeFees,
@@ -446,14 +476,16 @@ export default function ExchangeRateSimulator({
       };
     }
 
-    if (activeSessionRate != null) {
+    const useLiveManualOverride = dateIso === todayIso;
+
+    if (useLiveManualOverride && activeSessionRate != null) {
       applyResolvedRate(activeSessionRate, sessionOverride?.updatedAt ?? Date.now());
       return () => {
         cancelled = true;
       };
     }
 
-    if (activeStoredManualRate != null) {
+    if (useLiveManualOverride && activeStoredManualRate != null) {
       applyResolvedRate(
         activeStoredManualRate,
         activeStoredManualOverride?.updatedAt ?? Date.now(),
@@ -506,6 +538,7 @@ export default function ExchangeRateSimulator({
     activeStoredManualRate,
     activeStoredManualOverride?.updatedAt,
     sessionOverride?.updatedAt,
+    todayIso,
   ]);
 
   useEffect(() => {
@@ -548,6 +581,18 @@ export default function ExchangeRateSimulator({
         setTodayMarketRate(
           todaySnapshot.rate != null && todaySnapshot.rate > 0 ? todaySnapshot.rate : null,
         );
+        if (todaySnapshot.rate != null && todaySnapshot.rate > 0) return;
+
+        const liveRates = await fetchExchangeRates().catch(() => null);
+        if (cancelled || fetchId !== todayMarketFetchIdRef.current) return;
+        if (liveRates) {
+          const spotRate = isForeignToForeign(mainCurrency, secondaryCurrency)
+            ? computeCrossRateViaUsdPivot(mainCurrency, secondaryCurrency, liveRates.ilsToForeign)
+            : resolveIlsLegDirectUnitRate(mainCurrency, secondaryCurrency, liveRates.ilsToForeign);
+          if (spotRate != null && spotRate > 0) {
+            setTodayMarketRate(spotRate);
+          }
+        }
       } catch (error) {
         console.error('Trend fetch error (today market rate):', error, {
           pair: `${mainCurrency}/${secondaryCurrency}`,
@@ -848,10 +893,19 @@ export default function ExchangeRateSimulator({
   );
 
   const effectiveUnitRate = useMemo(() => {
+    if (section === 'exchange' && isPastSelectedDate) {
+      return resolvedRate;
+    }
     if (activeSessionRate != null) return activeSessionRate;
     if (activeStoredManualRate != null) return activeStoredManualRate;
     return resolvedRate;
-  }, [activeSessionRate, activeStoredManualRate, resolvedRate]);
+  }, [
+    section,
+    isPastSelectedDate,
+    activeSessionRate,
+    activeStoredManualRate,
+    resolvedRate,
+  ]);
 
   const sameCurrencyManualRate = mainCurrency === secondaryCurrency;
 
@@ -998,12 +1052,13 @@ export default function ExchangeRateSimulator({
       setHistoricalLogType(null);
 
       if (kind === 'rate' && entry.manualRate != null && entry.manualRate > 0) {
-        setMainCurrency(entry.fromCurrency);
-        setSecondaryCurrency(entry.toCurrency);
-        setMainAmountInput('1');
-        setSecondaryAmountInput(formatRate(entry.manualRate));
-        setSessionOverride(null);
-        shouldSeedSecondaryRef.current = false;
+        const normalized = normalizeHistoricalRateEntry(entry);
+        if (normalized.manualRate == null || !(normalized.manualRate > 0)) return;
+        loadManualRatePairIntoForm(
+          normalized.fromCurrency,
+          normalized.toCurrency,
+          normalized.manualRate,
+        );
         setManualRateSaveError(null);
         setCloudError(null);
         setManualRateSaveModalOpen(true);
@@ -1029,7 +1084,7 @@ export default function ExchangeRateSimulator({
         setCommissionSaveModalOpen(true);
       }
     },
-    [],
+    [loadManualRatePairIntoForm],
   );
 
   const handleUpdateHistoricalEntry = useCallback(
@@ -1283,8 +1338,6 @@ export default function ExchangeRateSimulator({
   );
 
   const rateComparison = useMemo(() => {
-    if (isManualRateActive) return null;
-    const todayIso = getLocalTodayIso();
     if (dateIso === todayIso) return null;
     if (loadingRate) return null;
     if (!(effectiveUnitRate != null && effectiveUnitRate > 0)) return null;
@@ -1304,27 +1357,20 @@ export default function ExchangeRateSimulator({
       percentText: `${sign}${roundedDelta.toFixed(2)}%`,
       contextText: tr('exchangeRateVsToday'),
     };
-  }, [dateIso, effectiveUnitRate, isManualRateActive, loadingRate, todayMarketRate, tr]);
+  }, [dateIso, effectiveUnitRate, loadingRate, todayIso, todayMarketRate, tr]);
 
   const showNoTrendData = useMemo(() => {
-    if (isManualRateActive) return false;
-    const todayIso = getLocalTodayIso();
     if (dateIso === todayIso) return false;
     if (loadingRate) return false;
-    if (rateComparison) return false;
     if (mainCurrency === secondaryCurrency) return false;
-    if (!(effectiveUnitRate != null && effectiveUnitRate > 0)) return false;
-    if (!(todayMarketRate != null && todayMarketRate > 0)) return false;
-    return true;
+    return !(effectiveUnitRate != null && effectiveUnitRate > 0);
   }, [
     dateIso,
     effectiveUnitRate,
-    isManualRateActive,
     loadingRate,
     mainCurrency,
-    rateComparison,
     secondaryCurrency,
-    todayMarketRate,
+    todayIso,
   ]);
 
   const handleDateStepBack = useCallback(() => {
@@ -1338,6 +1384,37 @@ export default function ExchangeRateSimulator({
       return next > todayIso ? todayIso : next;
     });
   }, [todayIso]);
+
+  const renderDateStepper = () => (
+    <div className="flex w-full items-center gap-2">
+      <button
+        type="button"
+        onClick={handleDateStepBack}
+        className={`h-12 w-12 shrink-0 ${utilityNavIconButtonClass}`}
+        aria-label={tr('prevDay')}
+        title={tr('prevDay')}
+      >
+        <ChevronLeft className="mx-auto h-4 w-4" />
+      </button>
+      <input
+        type="date"
+        value={dateIso}
+        onChange={(event) => setDateIso(event.target.value)}
+        max={todayIso}
+        className={`${controlBaseClass} w-full text-center [color-scheme:dark]`}
+      />
+      <button
+        type="button"
+        onClick={handleDateStepForward}
+        disabled={!canNavigateForwardDate}
+        className={`h-12 w-12 shrink-0 ${utilityNavIconButtonClass}`}
+        aria-label={tr('nextDay')}
+        title={tr('nextDay')}
+      >
+        <ChevronRight className="mx-auto h-4 w-4" />
+      </button>
+    </div>
+  );
 
   const renderCommissionCurrencySelector = () => {
     const isGlobal = isGlobalCommissionCurrency(commissionTargetCurrency);
@@ -1581,13 +1658,24 @@ export default function ExchangeRateSimulator({
                   </p>
                   <p className="text-[11px] text-neutral-500">{validityText}</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void cancelOverride(entry)}
-                  className="min-h-[2.25rem] rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-200 transition-colors hover:bg-rose-500/20"
-                >
-                  {tr('cancel')}
-                </button>
+                <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
+                  <button
+                    type="button"
+                    onClick={() => loadManualRatePairIntoForm(base, quote, rate)}
+                    className="inline-flex min-h-[2.25rem] items-center justify-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-200 transition-colors hover:border-amber-500/45 hover:bg-amber-500/20"
+                    aria-label={tr('historicalLogEditRow')}
+                  >
+                    <Pencil className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                    {tr('historicalLogEditRow')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void cancelOverride(entry)}
+                    className="min-h-[2.25rem] rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-200 transition-colors hover:bg-rose-500/20"
+                  >
+                    {tr('cancel')}
+                  </button>
+                </div>
               </div>
             );
           })
@@ -1956,33 +2044,8 @@ export default function ExchangeRateSimulator({
             <label className="mb-1.5 block w-full text-start text-xs font-medium text-neutral-400">
               {tr('date')}
             </label>
-            <div className="flex w-full items-center gap-2">
-              <button
-                type="button"
-                onClick={handleDateStepBack}
-                className={`h-12 w-12 shrink-0 ${utilityNavIconButtonClass}`}
-                aria-label={tr('prevDay')}
-                title={tr('prevDay')}
-              >
-                <ChevronLeft className="mx-auto h-4 w-4" />
-              </button>
-              <input
-                type="date"
-                value={dateIso}
-                onChange={(event) => setDateIso(event.target.value)}
-                max={todayIso}
-                className={`${controlBaseClass} w-full text-center [color-scheme:dark]`}
-              />
-              <button
-                type="button"
-                onClick={handleDateStepForward}
-                disabled={!canNavigateForwardDate}
-                className={`h-12 w-12 shrink-0 ${utilityNavIconButtonClass}`}
-                aria-label={tr('nextDay')}
-                title={tr('nextDay')}
-              >
-                <ChevronRight className="mx-auto h-4 w-4" />
-              </button>
+            <div className="w-full">
+              {renderDateStepper()}
             </div>
             <div className="mt-2 flex w-full flex-col flex-wrap items-stretch gap-2 md:flex-row md:items-center">
               {currenciesToPin.map((code) => (

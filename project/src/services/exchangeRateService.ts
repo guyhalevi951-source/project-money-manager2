@@ -407,8 +407,13 @@ function isCacheEntryValid(dateIso: string, entry: CurrencyCacheEntry): boolean 
 
   const todayIso = getLocalTodayIso();
   if (dateIso < todayIso) {
-    // Historical dates are immutable, so only trust rates fetched from historical API.
-    return entry.source === 'historical_api';
+    // Historical dates are immutable — accept any persisted market snapshot source.
+    return (
+      entry.source === 'historical_api' ||
+      entry.source === 'usd_pivot_fallback' ||
+      entry.source === 'legacy' ||
+      entry.source === 'today_live_fallback'
+    );
   }
   if (dateIso > todayIso) return false;
 
