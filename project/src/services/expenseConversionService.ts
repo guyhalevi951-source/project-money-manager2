@@ -82,6 +82,10 @@ export interface DualExpenseConversionSnapshot {
   manualRateAvailable: boolean;
   /** Whether an active global commission fee exists for this currency. */
   feeAvailable: boolean;
+  /** F2F: display-currency amount via manual rate path (e.g. JPY when display is JPY). */
+  displayAmountInManual?: number | null;
+  /** F2F: display-currency amount via spot rate path. */
+  displayAmountInSpot?: number;
 }
 
 /** Resolve the displayed ILS amount from a saved dual snapshot based on user toggles. */
@@ -124,7 +128,14 @@ function buildDisplayPathDualLedgerSnapshot(
   feeDisabled: boolean,
 ): Pick<
   DualExpenseConversionSnapshot,
-  'savedManualRate' | 'savedSpotRate' | 'amountInManual' | 'amountInSpot' | 'manualRateAvailable' | 'appliedFeePercent'
+  | 'savedManualRate'
+  | 'savedSpotRate'
+  | 'amountInManual'
+  | 'amountInSpot'
+  | 'manualRateAvailable'
+  | 'appliedFeePercent'
+  | 'displayAmountInManual'
+  | 'displayAmountInSpot'
 > | null {
   if (from === 'ILS' || displayCurrency === 'ILS' || from === displayCurrency) return null;
 
@@ -187,6 +198,8 @@ function buildDisplayPathDualLedgerSnapshot(
     amountInSpot: roundMoney(spotIls),
     manualRateAvailable,
     appliedFeePercent: feePercent,
+    displayAmountInManual: manualRateAvailable ? roundMoney(manualTx.finalConvertedAmount) : null,
+    displayAmountInSpot: roundMoney(spotTx.finalConvertedAmount),
   };
 }
 
@@ -195,8 +208,16 @@ function mergeDualSnapshots(
   displayPath: ReturnType<typeof buildDisplayPathDualLedgerSnapshot>,
   feeAvailable: boolean,
 ): DualExpenseConversionSnapshot {
+  const displayAmounts =
+    displayPath != null
+      ? {
+          displayAmountInManual: displayPath.displayAmountInManual,
+          displayAmountInSpot: displayPath.displayAmountInSpot,
+        }
+      : {};
+
   if (displayPath == null || !displayPath.manualRateAvailable) {
-    return { ...ilsPath, feeAvailable: ilsPath.feeAvailable || feeAvailable };
+    return { ...ilsPath, feeAvailable: ilsPath.feeAvailable || feeAvailable, ...displayAmounts };
   }
   return {
     savedManualRate: displayPath.savedManualRate ?? ilsPath.savedManualRate,
@@ -206,6 +227,7 @@ function mergeDualSnapshots(
     appliedFeePercent: displayPath.appliedFeePercent > 0 ? displayPath.appliedFeePercent : ilsPath.appliedFeePercent,
     manualRateAvailable: true,
     feeAvailable: feeAvailable || ilsPath.feeAvailable,
+    ...displayAmounts,
   };
 }
 
@@ -459,6 +481,130 @@ export function projectExpensePrimaryDisplayAmount(
   return ilsAmount;
 }
 
+/** True when expense currency and display currency are both non-ILS and differ. */
+export function isForeignToForeignDisplayCase(
+  expenseCurrency: ExpenseCurrency,
+  displayCurrency: ExpenseCurrency,
+): boolean {
+  return (
+    expenseCurrency !== 'ILS' &&
+    displayCurrency !== 'ILS' &&
+    expenseCurrency !== displayCurrency
+  );
+}
+
+/** Resolve display amount from persisted F2F snapshot paths. */
+function resolveStoredForeignDisplayAmount(
+  snapshot: Pick<
+    DualExpenseConversionSnapshot,
+    'displayAmountInManual' | 'displayAmountInSpot'
+  >,
+  manualRateUsed: boolean,
+): number | null {
+  if (manualRateUsed && snapshot.displayAmountInManual != null) {
+    return snapshot.displayAmountInManual;
+  }
+  if (snapshot.displayAmountInSpot != null) {
+    return snapshot.displayAmountInSpot;
+  }
+  return null;
+}
+
+/**
+ * Live F2F display amount — same pipeline as ExpenseAmountField preview.
+ * Direct `from → displayCurrency` via the transaction engine (no ILS round-trip).
+ */
+export function resolveLiveForeignDisplayAmount(
+  amount: number,
+  from: ExpenseCurrency,
+  displayCurrency: ExpenseCurrency,
+  rates: ExchangeRates,
+  options?: {
+    manualRateDisabled?: boolean;
+    feeDisabled?: boolean;
+  },
+): number | null {
+  if (!(amount > 0)) return null;
+
+  const activeFees = options?.feeDisabled
+    ? []
+    : toActiveFeesFromCommissionEntries(listActiveCurrencyCommissions());
+  const manualOverrides = listActiveManualExchangeOverrides();
+  const exchangeRates = options?.manualRateDisabled
+    ? toActiveExchangeRatesFromSnapshot(rates, [])
+    : toActiveExchangeRatesFromSnapshot(rates, manualOverrides);
+
+  const result = processTransactionWithUserRules(
+    amount,
+    from,
+    displayCurrency,
+    activeFees,
+    exchangeRates,
+    { displayCurrency },
+  );
+  return result?.finalConvertedAmount ?? null;
+}
+
+/**
+ * Unified primary display resolver for preview, edit, and history rows.
+ * F2F uses direct transaction conversion or stored display-currency snapshots.
+ */
+export function resolveExpensePrimaryDisplayAmount(
+  typedAmount: number,
+  expenseCurrency: ExpenseCurrency,
+  ledgerIlsAmount: number,
+  displayCurrency: ExpenseCurrency,
+  rates: ExchangeRates | null,
+  options?: {
+    manualRateUsed?: boolean;
+    manualRateDisabled?: boolean;
+    feeDisabled?: boolean;
+    storedSnapshot?: Pick<
+      DualExpenseConversionSnapshot,
+      'displayAmountInManual' | 'displayAmountInSpot'
+    > | null;
+  },
+): number {
+  if (displayCurrency === 'ILS') return ledgerIlsAmount;
+  if (expenseCurrency === displayCurrency) return typedAmount;
+
+  if (isForeignToForeignDisplayCase(expenseCurrency, displayCurrency)) {
+    const manualRateUsed =
+      options?.manualRateDisabled === true
+        ? false
+        : options?.manualRateUsed !== false;
+
+    const stored = options?.storedSnapshot
+      ? resolveStoredForeignDisplayAmount(options.storedSnapshot, manualRateUsed)
+      : null;
+    if (stored != null) return stored;
+
+    if (rates) {
+      const live = resolveLiveForeignDisplayAmount(
+        typedAmount,
+        expenseCurrency,
+        displayCurrency,
+        rates,
+        {
+          manualRateDisabled: !manualRateUsed,
+          feeDisabled: options?.feeDisabled,
+        },
+      );
+      if (live != null) return live;
+    }
+    return typedAmount;
+  }
+
+  if (!rates) return ledgerIlsAmount;
+  return projectExpensePrimaryDisplayAmount(
+    typedAmount,
+    expenseCurrency,
+    ledgerIlsAmount,
+    displayCurrency,
+    rates,
+  );
+}
+
 export async function previewExpenseDisplayAmount(
   amount: number,
   currency: ExpenseCurrency,
@@ -471,12 +617,17 @@ export async function previewExpenseDisplayAmount(
   const liveRates = rates ?? (await fetchExchangeRates().catch(() => null));
   if (!liveRates) return null;
 
-  const displayAmount = projectExpensePrimaryDisplayAmount(
+  const displayAmount = resolveExpensePrimaryDisplayAmount(
     amount,
     currency,
     recorded.ilsAmount,
     options.displayCurrency,
     liveRates,
+    {
+      manualRateUsed: recorded.manualRateUsed,
+      manualRateDisabled: options.manualRateDisabled,
+      feeDisabled: options.feeDisabled,
+    },
   );
 
   return { ...recorded, displayAmount };
@@ -716,12 +867,18 @@ export async function previewExpenseDisplayAmountFromSnapshot(
   const manualRateUsed = !options.manualRateDisabled && snapshot.manualRateAvailable;
   const ilsAmount = resolveExpenseAmountFromSnapshot(snapshot, { manualRateUsed });
 
-  const displayAmount = projectExpensePrimaryDisplayAmount(
+  const displayAmount = resolveExpensePrimaryDisplayAmount(
     amount,
     currency,
     ilsAmount,
     options.displayCurrency,
     liveRates,
+    {
+      manualRateUsed,
+      manualRateDisabled: options.manualRateDisabled,
+      feeDisabled: options.feeDisabled,
+      storedSnapshot: snapshot,
+    },
   );
 
   return { ilsAmount, appliedFeePercent: snapshot.appliedFeePercent, manualRateUsed, displayAmount };
@@ -738,6 +895,8 @@ export interface StoredExpenseDisplayFields {
   amountInSpot?: number;
   savedManualRate?: number | null;
   savedSpotRate?: number;
+  displayAmountInManual?: number | null;
+  displayAmountInSpot?: number;
   manualRateUsed?: boolean;
   feeApplied?: boolean;
   creationHadActiveManualRate?: boolean;
@@ -821,18 +980,18 @@ export function resolveStoredExpenseDisplayView(
   let primaryDisplayAmount: number;
   if (displayCurrency === 'ILS') {
     primaryDisplayAmount = ledgerIlsAmount;
-  } else if (rates) {
-    primaryDisplayAmount = projectExpensePrimaryDisplayAmount(
+  } else {
+    primaryDisplayAmount = resolveExpensePrimaryDisplayAmount(
       typedAmount,
       expenseCurrency,
       ledgerIlsAmount,
       displayCurrency,
       rates,
+      {
+        manualRateUsed: manualRateSelected,
+        storedSnapshot: expense,
+      },
     );
-  } else if (expenseCurrency === displayCurrency) {
-    primaryDisplayAmount = typedAmount;
-  } else {
-    primaryDisplayAmount = ledgerIlsAmount;
   }
 
   const showDualRateToggle = expenseHasDualRateSnapshot(expense);

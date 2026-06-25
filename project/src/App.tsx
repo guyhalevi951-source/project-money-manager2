@@ -306,6 +306,10 @@ interface Expense {
   amountInManual?: number;
   /** ILS ledger amount computed with the spot rate path. */
   amountInSpot?: number;
+  /** F2F: display-currency amount via manual rate path. */
+  displayAmountInManual?: number | null;
+  /** F2F: display-currency amount via spot rate path. */
+  displayAmountInSpot?: number;
   /** @deprecated Replaced by !manualRateUsed */
   manualRateDisabled?: boolean;
   /** @deprecated Replaced by !feeApplied */
@@ -5256,6 +5260,14 @@ function App() {
         savedSpotRate: snapshot.savedSpotRate,
         amountInManual: snapshot.amountInManual != null ? roundMoneyAmount(snapshot.amountInManual) : undefined,
         amountInSpot: roundMoneyAmount(snapshot.amountInSpot),
+        displayAmountInManual:
+          snapshot.displayAmountInManual != null
+            ? roundMoneyAmount(snapshot.displayAmountInManual)
+            : undefined,
+        displayAmountInSpot:
+          snapshot.displayAmountInSpot != null
+            ? roundMoneyAmount(snapshot.displayAmountInSpot)
+            : undefined,
         appliedFeePercent: snapshot.appliedFeePercent,
         manualRateUsed,
         feeApplied: snapshot.feeAvailable,
@@ -5283,6 +5295,8 @@ function App() {
           savedSpotRate: conversion.savedSpotRate,
           amountInManual: conversion.amountInManual,
           amountInSpot: conversion.amountInSpot,
+          displayAmountInManual: conversion.displayAmountInManual,
+          displayAmountInSpot: conversion.displayAmountInSpot,
           manualRateDisabled: !conversion.manualRateUsed,
           feeDisabled: !conversion.feeApplied,
           creationHadActiveManualRate: conversion.creationHadActiveManualRate,
@@ -5528,6 +5542,14 @@ function App() {
         savedSpotRate: snapshot.savedSpotRate,
         amountInManual: snapshot.amountInManual != null ? roundMoneyAmount(snapshot.amountInManual) : undefined,
         amountInSpot: roundMoneyAmount(snapshot.amountInSpot),
+        displayAmountInManual:
+          snapshot.displayAmountInManual != null
+            ? roundMoneyAmount(snapshot.displayAmountInManual)
+            : undefined,
+        displayAmountInSpot:
+          snapshot.displayAmountInSpot != null
+            ? roundMoneyAmount(snapshot.displayAmountInSpot)
+            : undefined,
         appliedFeePercent,
         manualRateUsed,
         feeApplied,
@@ -5558,6 +5580,8 @@ function App() {
               savedSpotRate: conversion.savedSpotRate,
               amountInManual: conversion.amountInManual,
               amountInSpot: conversion.amountInSpot,
+              displayAmountInManual: conversion.displayAmountInManual,
+              displayAmountInSpot: conversion.displayAmountInSpot,
               manualRateDisabled: !conversion.manualRateUsed,
               feeDisabled: !conversion.feeApplied,
             }

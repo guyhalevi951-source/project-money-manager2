@@ -6,6 +6,9 @@ import { getCurrencyMeta, type CurrencyCode } from '../constants/currencies';
 import { usePinnedCurrencies } from '../hooks/usePinnedCurrencies';
 import { formatAmountWithSymbol } from '../services/displayCurrencyUtils';
 import {
+  resolveLiveForeignDisplayAmount,
+} from '../services/expenseConversionService';
+import {
   listActiveCurrencyCommissions,
   subscribeCurrencyCommissionsUpdated,
 } from '../services/currencyCommissionService';
@@ -16,16 +19,13 @@ import {
   type ExchangeRates,
 } from '../services/exchangeRateService';
 import {
-  hasActiveManualOverrideForPair,
-  listActiveManualExchangeOverrides,
-  subscribeManualOverridesUpdated,
-} from '../services/manualExchangeOverrideService';
-import {
-  processTransactionWithUserRules,
-  toActiveExchangeRatesFromSnapshot,
+  getAppliedCommissionPercentForPair,
   toActiveFeesFromCommissionEntries,
 } from '../services/transactionProcessingService';
-import { getLocalTodayIso } from '../services/exchangeRateService';
+import {
+  hasActiveManualOverrideForPair,
+  subscribeManualOverridesUpdated,
+} from '../services/manualExchangeOverrideService';
 import CurrencyLibraryModal from './CurrencyLibraryModal';
 import CurrencyFlag from './CurrencyFlag';
 import {
@@ -249,12 +249,7 @@ export default function ExpenseAmountField({
     [isMaxLengthReached, parsedAmount, lockToDisplayCurrency, inputCurrency, displayCurrency],
   );
 
-  const activeFees = useMemo(
-    () => toActiveFeesFromCommissionEntries(listActiveCurrencyCommissions()),
-    [commissionVersion],
-  );
-
-  const processedPreview = useMemo(() => {
+  const convertedDisplayAmount = useMemo(() => {
     if (!showDisplayPreview || !rates) return null;
 
     if (
@@ -264,23 +259,24 @@ export default function ExpenseAmountField({
       return null;
     }
 
-    const activeExchangeRates = toActiveExchangeRatesFromSnapshot(
-      rates,
-      listActiveManualExchangeOverrides(),
-    );
-
-    return processTransactionWithUserRules(
+    return resolveLiveForeignDisplayAmount(
       parsedAmount,
       inputCurrency,
       displayCurrency,
-      activeFees,
-      activeExchangeRates,
-      { displayCurrency },
+      rates,
     );
-  }, [showDisplayPreview, rates, parsedAmount, inputCurrency, displayCurrency, activeFees]);
+  }, [showDisplayPreview, rates, parsedAmount, inputCurrency, displayCurrency, commissionVersion, manualOverrideVersion]);
 
-  const convertedDisplayAmount = processedPreview?.finalConvertedAmount ?? null;
-  const activeCommissionPercent = processedPreview?.appliedFeePercentage ?? 0;
+  const activeCommissionPercent = useMemo(() => {
+    if (convertedDisplayAmount == null || !rates) return 0;
+    const activeFees = toActiveFeesFromCommissionEntries(listActiveCurrencyCommissions());
+    return getAppliedCommissionPercentForPair(
+      activeFees,
+      inputCurrency,
+      displayCurrency,
+      displayCurrency,
+    );
+  }, [convertedDisplayAmount, inputCurrency, displayCurrency, commissionVersion, rates]);
 
   const convertedAmountFormatted = useMemo(() => {
     if (convertedDisplayAmount == null) return null;

@@ -24,6 +24,10 @@ export interface StoredExpense {
   amountInManual?: number;
   /** ILS ledger amount computed with the spot rate path. */
   amountInSpot?: number;
+  /** F2F: display-currency amount via manual rate path. */
+  displayAmountInManual?: number | null;
+  /** F2F: display-currency amount via spot rate path. */
+  displayAmountInSpot?: number;
   /** @deprecated Replaced by !manualRateUsed */
   manualRateDisabled?: boolean;
   /** @deprecated Replaced by !feeApplied */
@@ -77,6 +81,14 @@ export function normalizeStoredExpense(expense: StoredExpense): StoredExpense {
     feeApplied: expense.feeApplied != null ? Boolean(expense.feeApplied) : (expense.appliedFeePercent ?? 0) > 0,
     amountInManual,
     amountInSpot,
+    displayAmountInManual:
+      expense.displayAmountInManual != null
+        ? roundMoney(Number(expense.displayAmountInManual))
+        : undefined,
+    displayAmountInSpot:
+      expense.displayAmountInSpot != null
+        ? roundMoney(Number(expense.displayAmountInSpot))
+        : undefined,
     creationHadActiveManualRate:
       expense.creationHadActiveManualRate ??
       Boolean(
