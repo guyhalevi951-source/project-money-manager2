@@ -5445,6 +5445,8 @@ function App() {
   // immutable creation-time flags, independent of current global settings or save state.
   const editShowsManualRate = editExpenseSnapshot != null && expenseEditShowsManualRateToggle(editExpenseSnapshot);
   const editShowsFee = editExpenseSnapshot != null && expenseEditShowsFeeToggle(editExpenseSnapshot);
+  const editPreviewManualRateDisabled = editShowsManualRate ? editDraftManualRateDisabled : true;
+  const editPreviewFeeDisabled = editShowsFee ? editDraftFeeDisabled : true;
 
   useEffect(() => {
     if (
@@ -5470,8 +5472,8 @@ function App() {
     void previewExpenseDisplayAmountFromSnapshot(typed, editDraftCurrency, rates, {
       displayCurrency,
       transactionDate: date,
-      manualRateDisabled: editDraftManualRateDisabled,
-      feeDisabled: editDraftFeeDisabled,
+      manualRateDisabled: editPreviewManualRateDisabled,
+      feeDisabled: editPreviewFeeDisabled,
       existingSnapshot: editExpenseSnapshot,
     }).then((preview) => {
       if (!cancelled) {
@@ -5486,8 +5488,10 @@ function App() {
     editDraftAmount,
     editDraftCurrency,
     editDraftDate,
-    editDraftManualRateDisabled,
-    editDraftFeeDisabled,
+    editPreviewManualRateDisabled,
+    editPreviewFeeDisabled,
+    editShowsManualRate,
+    editShowsFee,
     displayCurrency,
     editExpenseSnapshot,
   ]);
@@ -6740,6 +6744,8 @@ function App() {
                   }
                   onRatesReadyChange={setEditExpenseRatesReady}
                   transactionDate={normalizeDate(editExpenseDraft.date)}
+                  previewManualRateDisabled={editPreviewManualRateDisabled}
+                  previewFeeDisabled={editPreviewFeeDisabled}
                 />
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col gap-4 sm:flex-row sm:items-end">

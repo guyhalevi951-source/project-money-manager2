@@ -144,6 +144,7 @@ function buildDisplayPathDualLedgerSnapshot(
   const withManual = toActiveExchangeRatesFromSnapshot(liveRates, manualOverrides);
   const spotOnly = toActiveExchangeRatesFromSnapshot(liveRates, []);
 
+  const feesForTx = feeDisabled ? [] : activeFees;
   const feePercent = feeDisabled
     ? 0
     : getAppliedCommissionPercentForPair(activeFees, from, displayCurrency, displayCurrency);
@@ -152,7 +153,7 @@ function buildDisplayPathDualLedgerSnapshot(
     amount,
     from,
     displayCurrency,
-    activeFees,
+    feesForTx,
     withManual,
     { displayCurrency },
   );
@@ -160,7 +161,7 @@ function buildDisplayPathDualLedgerSnapshot(
     amount,
     from,
     displayCurrency,
-    activeFees,
+    feesForTx,
     spotOnly,
     { displayCurrency },
   );

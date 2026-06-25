@@ -69,6 +69,10 @@ interface ExpenseAmountFieldProps {
    * Preview sub-text stacks below, left-aligned with the currency selector.
    */
   snapInputGroupToColumnEnd?: boolean;
+  /** Edit modal: when true, preview uses spot rates only (manual override off). */
+  previewManualRateDisabled?: boolean;
+  /** Edit modal: when true, preview excludes commission fees. */
+  previewFeeDisabled?: boolean;
 }
 
 export default function ExpenseAmountField({
@@ -81,6 +85,8 @@ export default function ExpenseAmountField({
   onOpenExchangeRatesSettings,
   transactionDate,
   snapInputGroupToColumnEnd = false,
+  previewManualRateDisabled = false,
+  previewFeeDisabled = false,
 }: ExpenseAmountFieldProps) {
   const { tr, displayCurrency } = useLanguage();
   const displayMeta = getCurrencyMeta(displayCurrency);
@@ -264,11 +270,25 @@ export default function ExpenseAmountField({
       inputCurrency,
       displayCurrency,
       rates,
+      {
+        manualRateDisabled: previewManualRateDisabled,
+        feeDisabled: previewFeeDisabled,
+      },
     );
-  }, [showDisplayPreview, rates, parsedAmount, inputCurrency, displayCurrency, commissionVersion, manualOverrideVersion]);
+  }, [
+    showDisplayPreview,
+    rates,
+    parsedAmount,
+    inputCurrency,
+    displayCurrency,
+    commissionVersion,
+    manualOverrideVersion,
+    previewManualRateDisabled,
+    previewFeeDisabled,
+  ]);
 
   const activeCommissionPercent = useMemo(() => {
-    if (convertedDisplayAmount == null || !rates) return 0;
+    if (previewFeeDisabled || convertedDisplayAmount == null || !rates) return 0;
     const activeFees = toActiveFeesFromCommissionEntries(listActiveCurrencyCommissions());
     return getAppliedCommissionPercentForPair(
       activeFees,
@@ -276,7 +296,7 @@ export default function ExpenseAmountField({
       displayCurrency,
       displayCurrency,
     );
-  }, [convertedDisplayAmount, inputCurrency, displayCurrency, commissionVersion, rates]);
+  }, [convertedDisplayAmount, inputCurrency, displayCurrency, commissionVersion, rates, previewFeeDisabled]);
 
   const convertedAmountFormatted = useMemo(() => {
     if (convertedDisplayAmount == null) return null;
@@ -288,7 +308,7 @@ export default function ExpenseAmountField({
    * (inputCurrency → displayCurrency), respecting the pairSpecific scope of each entry.
    */
   const hasActivePairManualOverride = useMemo(() => {
-    if (!showDisplayPreview) return false;
+    if (previewManualRateDisabled || !showDisplayPreview) return false;
     return hasActiveManualOverrideForPair(inputCurrency, displayCurrency);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -296,6 +316,7 @@ export default function ExpenseAmountField({
     showDisplayPreview,
     inputCurrency,
     displayCurrency,
+    previewManualRateDisabled,
   ]);
 
   const amountInputSize = useMemo(() => getAmountInputWidth(amount), [amount]);
@@ -445,7 +466,7 @@ export default function ExpenseAmountField({
         <AnimatePresence mode="wait">
           {!isMaxLengthReached && showDisplayPreview && (
             <motion.div
-              key={`${inputCurrency}-${displayCurrency}-${amount}`}
+              key={`${inputCurrency}-${displayCurrency}-${amount}-${previewManualRateDisabled}-${previewFeeDisabled}`}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
