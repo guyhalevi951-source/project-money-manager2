@@ -3501,7 +3501,10 @@ function App() {
     setNewExpenseHistoricalLastChoice(null);
     setNewExpenseHistoricalBannerOptions(null);
 
-    if (isoDate >= getLocalTodayIso() || newExpense.currency === 'ILS') {
+    if (
+      isoDate >= getLocalTodayIso() ||
+      newExpense.currency === displayCurrency
+    ) {
       setNewExpenseHistoricalBanner(null);
       setNewExpenseHistoricalApplied(EMPTY_NEW_EXPENSE_HISTORICAL_APPLIED);
       return;
@@ -3518,12 +3521,19 @@ function App() {
     } else {
       setNewExpenseHistoricalBanner(null);
     }
-  }, [newExpense.date, newExpense.currency]);
+  }, [displayCurrency, newExpense.date, newExpense.currency]);
 
   /** After automation-flag patches — refresh banner visibility / auto-apply without clearing one-shot injections. */
   const refreshNewExpenseHistoricalFromAutomation = useCallback(() => {
     const isoDate = normalizeDate(newExpense.date);
-    if (isoDate >= getLocalTodayIso() || newExpense.currency === 'ILS') return;
+    if (
+      isoDate >= getLocalTodayIso() ||
+      newExpense.currency === displayCurrency
+    ) {
+      setNewExpenseHistoricalBanner(null);
+      setNewExpenseHistoricalApplied(EMPTY_NEW_EXPENSE_HISTORICAL_APPLIED);
+      return;
+    }
 
     const resolved = resolveNewExpenseHistoricalState(
       isoDate,
@@ -3539,7 +3549,7 @@ function App() {
     } else if (!resolved.showBanner) {
       setNewExpenseHistoricalBanner(null);
     }
-  }, [newExpense.date, newExpense.currency]);
+  }, [displayCurrency, newExpense.date, newExpense.currency]);
 
   useEffect(() => {
     refreshNewExpenseHistoricalState();
@@ -3566,7 +3576,10 @@ function App() {
 
     const isoDate = normalizeDate(editExpenseDraft.date);
 
-    if (isoDate >= getLocalTodayIso() || editExpenseDraft.currency === 'ILS') {
+    if (
+      isoDate >= getLocalTodayIso() ||
+      editExpenseDraft.currency === displayCurrency
+    ) {
       setEditHistoricalBanner(null);
       setEditHistoricalApplied(EMPTY_NEW_EXPENSE_HISTORICAL_APPLIED);
       return;
@@ -3583,13 +3596,20 @@ function App() {
     } else {
       setEditHistoricalBanner(null);
     }
-  }, [editExpenseDraft]);
+  }, [displayCurrency, editExpenseDraft]);
 
   const refreshEditExpenseHistoricalFromAutomation = useCallback(() => {
     if (!editExpenseDraft) return;
 
     const isoDate = normalizeDate(editExpenseDraft.date);
-    if (isoDate >= getLocalTodayIso() || editExpenseDraft.currency === 'ILS') return;
+    if (
+      isoDate >= getLocalTodayIso() ||
+      editExpenseDraft.currency === displayCurrency
+    ) {
+      setEditHistoricalBanner(null);
+      setEditHistoricalApplied(EMPTY_NEW_EXPENSE_HISTORICAL_APPLIED);
+      return;
+    }
 
     const resolved = resolveNewExpenseHistoricalState(
       isoDate,
@@ -3605,7 +3625,7 @@ function App() {
     } else if (!resolved.showBanner) {
       setEditHistoricalBanner(null);
     }
-  }, [editExpenseDraft]);
+  }, [displayCurrency, editExpenseDraft]);
 
   useEffect(() => {
     refreshEditExpenseHistoricalState();
@@ -5488,7 +5508,6 @@ function App() {
   // Add new expense
   const handleAddExpense = (e: React.FormEvent) => {
     e.preventDefault();
-    if (newExpenseHistoricalBanner) return;
     const enteredAmount = parseFloat(newExpense.amount);
     const inputCurrency = newExpense.currency;
 
@@ -5619,9 +5638,7 @@ function App() {
     });
   };
 
-  const expenseSubmitBlocked =
-    !!newExpenseHistoricalBanner ||
-    (displayCurrency !== 'ILS' && !expenseRatesReady);
+  const expenseSubmitBlocked = displayCurrency !== 'ILS' && !expenseRatesReady;
   const editExpenseSubmitBlocked =
     !!editExpenseDraft &&
     (editExpenseDraft.currency !== 'ILS' && !editExpenseRatesReady);

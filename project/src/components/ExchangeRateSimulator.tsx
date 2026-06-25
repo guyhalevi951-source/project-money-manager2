@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowUpDown, ChevronDown, Copy, History, Plus, Trash2 } from 'lucide-react';
+import { ArrowUpDown, ChevronDown, ChevronLeft, ChevronRight, Copy, History, Plus, Trash2 } from 'lucide-react';
 import { auth } from '../firebase';
 import { LtrNumeric, useLanguage } from '../LanguageContext';
 import { usePinnedCurrencies } from '../hooks/usePinnedCurrencies';
@@ -109,6 +109,13 @@ const yesterdayIso = (): string => {
   return toIsoDateLocal(date);
 };
 
+const shiftIsoDate = (isoDate: string, deltaDays: number): string => {
+  const parsed = new Date(`${isoDate}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return isoDate;
+  parsed.setDate(parsed.getDate() + deltaDays);
+  return toIsoDateLocal(parsed);
+};
+
 function formatRate(rate: number): string {
   if (!Number.isFinite(rate)) return '-';
   if (rate >= 1000) return rate.toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -202,6 +209,8 @@ export default function ExchangeRateSimulator({
   const [resolvedRate, setResolvedRate] = useState<number | null>(null);
   const [historicalRateUpdatedAt, setHistoricalRateUpdatedAt] = useState<number | null>(null);
   const [todayMarketRate, setTodayMarketRate] = useState<number | null>(null);
+  const todayIso = getLocalTodayIso();
+  const canNavigateForwardDate = dateIso < todayIso;
   const [loadingRate, setLoadingRate] = useState(false);
   const [storedOverrides, setStoredOverrides] = useState<ManualExchangeOverrideEntry[]>(() =>
     listActiveManualExchangeOverrides(),
@@ -522,8 +531,22 @@ export default function ExchangeRateSimulator({
         });
         if (cancelled || fetchId !== todayMarketFetchIdRef.current) return;
 
+        if (resolved.rate != null && resolved.rate > 0) {
+          setTodayMarketRate(resolved.rate);
+          return;
+        }
+
+        // Fallback: query today's historical snapshot path so trend comparison
+        // survives transient pair-resolver/cache misses.
+        const todaySnapshot = await fetchHistoricalDirectRateSnapshot(
+          today,
+          mainCurrency,
+          secondaryCurrency,
+          { bypassCache: true },
+        );
+        if (cancelled || fetchId !== todayMarketFetchIdRef.current) return;
         setTodayMarketRate(
-          resolved.rate != null && resolved.rate > 0 ? resolved.rate : null,
+          todaySnapshot.rate != null && todaySnapshot.rate > 0 ? todaySnapshot.rate : null,
         );
       } catch (error) {
         console.error('Trend fetch error (today market rate):', error, {
@@ -1291,6 +1314,7 @@ export default function ExchangeRateSimulator({
     if (rateComparison) return false;
     if (mainCurrency === secondaryCurrency) return false;
     if (!(effectiveUnitRate != null && effectiveUnitRate > 0)) return false;
+    if (!(todayMarketRate != null && todayMarketRate > 0)) return false;
     return true;
   }, [
     dateIso,
@@ -1300,7 +1324,20 @@ export default function ExchangeRateSimulator({
     mainCurrency,
     rateComparison,
     secondaryCurrency,
+    todayMarketRate,
   ]);
+
+  const handleDateStepBack = useCallback(() => {
+    setDateIso((current) => shiftIsoDate(current, -1));
+  }, []);
+
+  const handleDateStepForward = useCallback(() => {
+    setDateIso((current) => {
+      if (current >= todayIso) return current;
+      const next = shiftIsoDate(current, 1);
+      return next > todayIso ? todayIso : next;
+    });
+  }, [todayIso]);
 
   const renderCommissionCurrencySelector = () => {
     const isGlobal = isGlobalCommissionCurrency(commissionTargetCurrency);
@@ -1919,14 +1956,33 @@ export default function ExchangeRateSimulator({
             <label className="mb-1.5 block w-full text-start text-xs font-medium text-neutral-400">
               {tr('date')}
             </label>
-            <div className="w-full">
+            <div className="flex w-full items-center gap-2">
+              <button
+                type="button"
+                onClick={handleDateStepBack}
+                className={`h-12 w-12 shrink-0 ${utilityNavIconButtonClass}`}
+                aria-label={tr('prevDay')}
+                title={tr('prevDay')}
+              >
+                <ChevronLeft className="mx-auto h-4 w-4" />
+              </button>
               <input
                 type="date"
                 value={dateIso}
                 onChange={(event) => setDateIso(event.target.value)}
-                max={toIsoDateLocal(new Date())}
+                max={todayIso}
                 className={`${controlBaseClass} w-full text-center [color-scheme:dark]`}
               />
+              <button
+                type="button"
+                onClick={handleDateStepForward}
+                disabled={!canNavigateForwardDate}
+                className={`h-12 w-12 shrink-0 ${utilityNavIconButtonClass}`}
+                aria-label={tr('nextDay')}
+                title={tr('nextDay')}
+              >
+                <ChevronRight className="mx-auto h-4 w-4" />
+              </button>
             </div>
             <div className="mt-2 flex w-full flex-col flex-wrap items-stretch gap-2 md:flex-row md:items-center">
               {currenciesToPin.map((code) => (
