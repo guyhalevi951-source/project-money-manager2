@@ -1,13 +1,16 @@
 /**
- * Rate & Fee Log Modal (formerly Historical Log)
+ * Historical Log Modal — archive-only view.
  *
- * Displays all saved manual rate / commission entries with isActive toggle
- * and delete. No date columns, no date filters — purely status-bound records.
+ * Shows only INACTIVE (archived) manual rate / commission entries.
+ * Active entries live in the Simulator panel and do NOT appear here.
+ *
+ * Per row: currency pair / value, a Reactivate button (clones entry back to
+ * active), and a permanent-delete button.  No active-toggle UI.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Globe, Search, Trash2, X } from 'lucide-react';
+import { Globe, RotateCcw, Search, Trash2, X } from 'lucide-react';
 import { auth } from '../firebase';
 import { useLanguage } from '../LanguageContext';
 import { CORE_CURRENCY_CODES, getCurrencyMeta, type ExpenseCurrency } from '../constants/currencies';
@@ -16,22 +19,18 @@ import {
   type CommissionCurrency,
   type CurrencyCommissionEntry,
   deleteCurrencyCommission,
-  listAllCurrencyCommissions,
-  setCurrencyCommissionActive,
+  listArchivedCurrencyCommissions,
   subscribeCurrencyCommissionsUpdated,
 } from '../services/currencyCommissionService';
 import {
   type ManualExchangeOverrideEntry,
   deleteManualExchangeOverride,
-  listAllManualExchangeOverrides,
-  setManualOverrideActive,
+  listArchivedManualExchangeOverrides,
   subscribeManualOverridesUpdated,
 } from '../services/manualExchangeOverrideService';
 import {
   deleteManualExchangeOverrideFromCloud,
   deleteCurrencyCommissionFromCloud,
-  saveManualExchangeOverrideToCloud,
-  saveCurrencyCommissionToCloud,
   shouldSyncToFirestore,
 } from '../services/userFirebaseSync';
 import CurrencyFlag from './CurrencyFlag';
@@ -60,58 +59,28 @@ interface HistoricalLogModalProps {
   onClose: () => void;
   /** Locks the modal to rates-only or fees-only; no cross-category UI. */
   defaultType: HistoricalLogScope;
+  /** Called when the user reactivates an archived manual rate. */
+  onRestoreRate?: (entry: ManualExchangeOverrideEntry) => void;
+  /** Called when the user reactivates an archived commission fee. */
+  onRestoreFee?: (entry: CurrencyCommissionEntry) => void;
 }
 
-const RATE_CURRENCY_OPTIONS = CORE_CURRENCY_CODES as readonly ExpenseCurrency[];
-
-const FEE_CURRENCY_OPTIONS: readonly CommissionCurrency[] = [
+// Keep these exported so older callers compile without errors
+export const RATE_CURRENCY_OPTIONS = CORE_CURRENCY_CODES as readonly ExpenseCurrency[];
+export const FEE_CURRENCY_OPTIONS: readonly CommissionCurrency[] = [
   GLOBAL_COMMISSION_CURRENCY,
   ...CORE_CURRENCY_CODES.filter((c) => c !== 'ILS'),
 ];
-
-// ── Toggle switch component ────────────────────────────────────────────────
-
-function ActiveToggle({
-  checked,
-  onChange,
-  label,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      onClick={() => onChange(!checked)}
-      className={[
-        'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500',
-        checked ? 'bg-emerald-500' : 'bg-neutral-600',
-      ].join(' ')}
-    >
-      <span
-        aria-hidden
-        className={[
-          'pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow ring-0 transition-transform duration-200 ease-in-out',
-          checked ? 'translate-x-4' : 'translate-x-0',
-        ].join(' ')}
-      />
-    </button>
-  );
-}
 
 // ── Rate entry row ─────────────────────────────────────────────────────────
 
 function RateEntryRow({
   entry,
-  onToggle,
+  onReactivate,
   onDelete,
 }: {
   entry: ManualExchangeOverrideEntry;
-  onToggle: (id: string, active: boolean) => void;
+  onReactivate: (entry: ManualExchangeOverrideEntry) => void;
   onDelete: (entry: ManualExchangeOverrideEntry) => void;
 }) {
   const { tr, dir } = useLanguage();
@@ -129,12 +98,7 @@ function RateEntryRow({
   return (
     <div
       dir={dir}
-      className={[
-        'flex items-center gap-3 rounded-xl border p-3 transition-colors',
-        entry.isActive
-          ? 'border-[var(--color-sub-cards-border)] bg-[var(--color-sub-cards)]'
-          : 'border-[var(--color-sub-cards-border)] bg-[var(--color-depth-inner)] opacity-60',
-      ].join(' ')}
+      className="flex items-center gap-3 rounded-xl border border-[var(--color-sub-cards-border)] bg-[var(--color-depth-inner)] p-3 transition-colors"
     >
       {/* Currency pair */}
       <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -152,14 +116,19 @@ function RateEntryRow({
         </div>
       </div>
 
-      {/* Active toggle */}
-      <ActiveToggle
-        checked={entry.isActive}
-        onChange={(v) => onToggle(entry.id, v)}
-        label={tr('rateLogActiveToggle')}
-      />
+      {/* Reactivate */}
+      <button
+        type="button"
+        onClick={() => onReactivate(entry)}
+        className="inline-flex min-h-[2rem] shrink-0 items-center justify-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-medium text-emerald-300 transition-all hover:border-emerald-500/50 hover:bg-emerald-500/20 active:scale-95"
+        aria-label={tr('historicalLogRestoreEntry')}
+        title={tr('historicalLogRestoreEntry')}
+      >
+        <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+        <span className="hidden sm:inline">{tr('historicalLogRestoreEntry')}</span>
+      </button>
 
-      {/* Delete */}
+      {/* Permanent delete */}
       <button
         type="button"
         onClick={() => onDelete(entry)}
@@ -177,11 +146,11 @@ function RateEntryRow({
 
 function FeeEntryRow({
   entry,
-  onToggle,
+  onReactivate,
   onDelete,
 }: {
   entry: CurrencyCommissionEntry;
-  onToggle: (id: string, active: boolean) => void;
+  onReactivate: (entry: CurrencyCommissionEntry) => void;
   onDelete: (entry: CurrencyCommissionEntry) => void;
 }) {
   const { tr, dir } = useLanguage();
@@ -191,12 +160,7 @@ function FeeEntryRow({
   return (
     <div
       dir={dir}
-      className={[
-        'flex items-center gap-3 rounded-xl border p-3 transition-colors',
-        entry.isActive
-          ? 'border-[var(--color-sub-cards-border)] bg-[var(--color-sub-cards)]'
-          : 'border-[var(--color-sub-cards-border)] bg-[var(--color-depth-inner)] opacity-60',
-      ].join(' ')}
+      className="flex items-center gap-3 rounded-xl border border-[var(--color-sub-cards-border)] bg-[var(--color-depth-inner)] p-3 transition-colors"
     >
       {/* Currency */}
       <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -217,14 +181,19 @@ function FeeEntryRow({
         </div>
       </div>
 
-      {/* Active toggle */}
-      <ActiveToggle
-        checked={entry.isActive}
-        onChange={(v) => onToggle(entry.id, v)}
-        label={tr('rateLogActiveToggle')}
-      />
+      {/* Reactivate */}
+      <button
+        type="button"
+        onClick={() => onReactivate(entry)}
+        className="inline-flex min-h-[2rem] shrink-0 items-center justify-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-medium text-emerald-300 transition-all hover:border-emerald-500/50 hover:bg-emerald-500/20 active:scale-95"
+        aria-label={tr('historicalLogRestoreEntry')}
+        title={tr('historicalLogRestoreEntry')}
+      >
+        <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+        <span className="hidden sm:inline">{tr('historicalLogRestoreEntry')}</span>
+      </button>
 
-      {/* Delete */}
+      {/* Permanent delete */}
       <button
         type="button"
         onClick={() => onDelete(entry)}
@@ -240,7 +209,13 @@ function FeeEntryRow({
 
 // ── Main modal ─────────────────────────────────────────────────────────────
 
-export default function HistoricalLogModal({ open, onClose, defaultType }: HistoricalLogModalProps) {
+export default function HistoricalLogModal({
+  open,
+  onClose,
+  defaultType,
+  onRestoreRate,
+  onRestoreFee,
+}: HistoricalLogModalProps) {
   const { tr, dir } = useLanguage();
   const scope = defaultType;
 
@@ -248,9 +223,10 @@ export default function HistoricalLogModal({ open, onClose, defaultType }: Histo
   const [feeEntries, setFeeEntries] = useState<CurrencyCommissionEntry[]>([]);
   const [currencyFilter, setCurrencyFilter] = useState('');
   const [deletedToast, setDeletedToast] = useState(false);
+  const [reactivatedToast, setReactivatedToast] = useState(false);
 
-  const refreshRates = useCallback(() => setRateEntries(listAllManualExchangeOverrides()), []);
-  const refreshFees = useCallback(() => setFeeEntries(listAllCurrencyCommissions()), []);
+  const refreshRates = useCallback(() => setRateEntries(listArchivedManualExchangeOverrides()), []);
+  const refreshFees = useCallback(() => setFeeEntries(listArchivedCurrencyCommissions()), []);
 
   useEffect(() => {
     if (!open) return;
@@ -273,9 +249,7 @@ export default function HistoricalLogModal({ open, onClose, defaultType }: Histo
   const filteredRates = useMemo(() => {
     if (!filterText) return rateEntries;
     return rateEntries.filter(
-      (e) =>
-        e.baseCurrency.includes(filterText) ||
-        e.quoteCurrency.includes(filterText),
+      (e) => e.baseCurrency.includes(filterText) || e.quoteCurrency.includes(filterText),
     );
   }, [rateEntries, filterText]);
 
@@ -289,65 +263,58 @@ export default function HistoricalLogModal({ open, onClose, defaultType }: Histo
     setTimeout(() => setDeletedToast(false), 2200);
   }, []);
 
+  const showReactivatedToast = useCallback(() => {
+    setReactivatedToast(true);
+    setTimeout(() => setReactivatedToast(false), 2200);
+  }, []);
+
   // ── Rate handlers ────────────────────────────────────────────────────────
 
-  const handleToggleRate = useCallback(async (id: string, active: boolean) => {
-    setManualOverrideActive(id, active);
-    const currentUser = auth.currentUser;
-    if (shouldSyncToFirestore(currentUser)) {
-      const entry = listAllManualExchangeOverrides().find((e) => e.id === id);
-      if (entry) {
-        await saveManualExchangeOverrideToCloud(
+  const handleReactivateRate = useCallback(
+    (entry: ManualExchangeOverrideEntry) => {
+      onRestoreRate?.(entry);
+      showReactivatedToast();
+    },
+    [onRestoreRate, showReactivatedToast],
+  );
+
+  const handleDeleteRate = useCallback(
+    async (entry: ManualExchangeOverrideEntry) => {
+      deleteManualExchangeOverride(entry.id);
+      showDeletedToast();
+      const currentUser = auth.currentUser;
+      if (shouldSyncToFirestore(currentUser)) {
+        await deleteManualExchangeOverrideFromCloud(
           currentUser.uid,
           entry.baseCurrency,
           entry.quoteCurrency,
-          entry.rate,
-          entry.pairSpecific,
-          active,
         ).catch(() => {});
       }
-    }
-  }, []);
-
-  const handleDeleteRate = useCallback(async (entry: ManualExchangeOverrideEntry) => {
-    deleteManualExchangeOverride(entry.id);
-    showDeletedToast();
-    const currentUser = auth.currentUser;
-    if (shouldSyncToFirestore(currentUser)) {
-      await deleteManualExchangeOverrideFromCloud(
-        currentUser.uid,
-        entry.baseCurrency,
-        entry.quoteCurrency,
-      ).catch(() => {});
-    }
-  }, [showDeletedToast]);
+    },
+    [showDeletedToast],
+  );
 
   // ── Fee handlers ─────────────────────────────────────────────────────────
 
-  const handleToggleFee = useCallback(async (id: string, active: boolean) => {
-    setCurrencyCommissionActive(id, active);
-    const currentUser = auth.currentUser;
-    if (shouldSyncToFirestore(currentUser)) {
-      const entry = listAllCurrencyCommissions().find((e) => e.id === id);
-      if (entry) {
-        await saveCurrencyCommissionToCloud(
-          currentUser.uid,
-          entry.currency,
-          entry.percent,
-          active,
-        ).catch(() => {});
-      }
-    }
-  }, []);
+  const handleReactivateFee = useCallback(
+    (entry: CurrencyCommissionEntry) => {
+      onRestoreFee?.(entry);
+      showReactivatedToast();
+    },
+    [onRestoreFee, showReactivatedToast],
+  );
 
-  const handleDeleteFee = useCallback(async (entry: CurrencyCommissionEntry) => {
-    deleteCurrencyCommission(entry.id);
-    showDeletedToast();
-    const currentUser = auth.currentUser;
-    if (shouldSyncToFirestore(currentUser)) {
-      await deleteCurrencyCommissionFromCloud(currentUser.uid, entry.currency).catch(() => {});
-    }
-  }, [showDeletedToast]);
+  const handleDeleteFee = useCallback(
+    async (entry: CurrencyCommissionEntry) => {
+      deleteCurrencyCommission(entry.id);
+      showDeletedToast();
+      const currentUser = auth.currentUser;
+      if (shouldSyncToFirestore(currentUser)) {
+        await deleteCurrencyCommissionFromCloud(currentUser.uid, entry.currency).catch(() => {});
+      }
+    },
+    [showDeletedToast],
+  );
 
   if (!open) return null;
 
@@ -396,7 +363,10 @@ export default function HistoricalLogModal({ open, onClose, defaultType }: Histo
         {/* Currency filter */}
         <div className="shrink-0 border-b border-[var(--color-sub-cards-border)] p-3 sm:p-4">
           <div className="relative">
-            <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-500" aria-hidden />
+            <Search
+              className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-500"
+              aria-hidden
+            />
             <input
               type="text"
               value={currencyFilter}
@@ -412,9 +382,7 @@ export default function HistoricalLogModal({ open, onClose, defaultType }: Histo
         {/* Entries list */}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4">
           {isEmpty ? (
-            <p className={`py-8 text-center text-sm ${themeTextMutedClass}`}>
-              {tr(emptyKey)}
-            </p>
+            <p className={`py-8 text-center text-sm ${themeTextMutedClass}`}>{tr(emptyKey)}</p>
           ) : (
             <div className="flex flex-col gap-2">
               {scope === 'rate'
@@ -422,7 +390,7 @@ export default function HistoricalLogModal({ open, onClose, defaultType }: Histo
                     <RateEntryRow
                       key={entry.id}
                       entry={entry}
-                      onToggle={(id, active) => void handleToggleRate(id, active)}
+                      onReactivate={handleReactivateRate}
                       onDelete={(e) => void handleDeleteRate(e)}
                     />
                   ))
@@ -430,7 +398,7 @@ export default function HistoricalLogModal({ open, onClose, defaultType }: Histo
                     <FeeEntryRow
                       key={entry.id}
                       entry={entry}
-                      onToggle={(id, active) => void handleToggleFee(id, active)}
+                      onReactivate={handleReactivateFee}
                       onDelete={(e) => void handleDeleteFee(e)}
                     />
                   ))}
@@ -449,7 +417,7 @@ export default function HistoricalLogModal({ open, onClose, defaultType }: Histo
           </button>
         </div>
 
-        {/* Deleted toast */}
+        {/* Toasts */}
         <AnimatePresence>
           {deletedToast && (
             <motion.div
@@ -460,6 +428,17 @@ export default function HistoricalLogModal({ open, onClose, defaultType }: Histo
               className="pointer-events-none absolute bottom-20 left-1/2 -translate-x-1/2 rounded-full bg-neutral-800 px-4 py-2 text-xs font-medium text-white shadow-lg"
             >
               {tr('rateLogDeletedToast')}
+            </motion.div>
+          )}
+          {reactivatedToast && (
+            <motion.div
+              key="reactivated-toast"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="pointer-events-none absolute bottom-20 left-1/2 -translate-x-1/2 rounded-full bg-emerald-900/90 px-4 py-2 text-xs font-medium text-emerald-200 shadow-lg"
+            >
+              {tr('historicalLogRestoreEntry')}
             </motion.div>
           )}
         </AnimatePresence>

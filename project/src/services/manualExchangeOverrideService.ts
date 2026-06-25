@@ -197,6 +197,13 @@ export function listActiveManualExchangeOverrides(): ManualExchangeOverrideEntry
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
+/** Only archived (inactive) entries sorted newest first. */
+export function listArchivedManualExchangeOverrides(): ManualExchangeOverrideEntry[] {
+  return readEntries()
+    .filter((e) => !e.isActive)
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
 /**
  * Resolve the active override rate for a specific pair, respecting pairSpecific scope.
  *
@@ -355,6 +362,30 @@ export function deleteManualExchangeOverride(id: string): boolean {
   writeEntries(next);
   dispatchOverridesUpdated();
   return true;
+}
+
+/**
+ * Archive (soft-delete) an active entry by id — sets `isActive: false`.
+ * The entry stays in storage and appears in the Historical Log.
+ */
+export function archiveManualExchangeOverride(id: string): boolean {
+  return setManualOverrideActive(id, false);
+}
+
+/**
+ * Reactivate an archived entry by creating a fresh active record from it.
+ * Uses `upsertManualExchangeOverride` so any existing active entry for the
+ * same pair is automatically deactivated first.
+ */
+export function reactivateManualExchangeOverride(
+  entry: ManualExchangeOverrideEntry,
+): ManualExchangeOverrideEntry | null {
+  return upsertManualExchangeOverride(
+    entry.baseCurrency,
+    entry.quoteCurrency,
+    entry.rate,
+    entry.pairSpecific,
+  );
 }
 
 // ── Legacy compatibility wrappers (used by ExchangeRateSimulator and Firebase sync) ──

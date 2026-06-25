@@ -384,6 +384,164 @@ export function resolvePersistedExpenseConversionMeta(
   return { manualRateUsed, appliedFeePercent };
 }
 
+// ── Snapshot visibility helpers (independent of global settings) ─────────────
+
+/**
+ * Returns true when an expense has a saved manual rate snapshot that should be
+ * displayed in the edit modal, regardless of whether the global rate is still active.
+ */
+export function expenseHasSavedManualRateSnapshot(expense: {
+  savedManualRate?: number | null;
+  amountInManual?: number;
+}): boolean {
+  return (
+    (expense.savedManualRate != null && expense.savedManualRate > 0) ||
+    expense.amountInManual != null
+  );
+}
+
+/**
+ * Returns true when an expense has a saved fee snapshot that should be displayed
+ * in the edit modal, regardless of whether the global fee is still active.
+ */
+export function expenseHasSavedFeeSnapshot(expense: {
+  feeApplied?: boolean;
+  appliedFeePercent?: number;
+}): boolean {
+  return expense.feeApplied === true || (expense.appliedFeePercent ?? 0) > 0;
+}
+
+// ── Snapshot-aware edit conversion ────────────────────────────────────────────
+
+export interface SnapshotAwareConversionOptions {
+  transactionDate?: string;
+  feeDisabled?: boolean;
+  /** Frozen snapshot from the expense being edited. Used to preserve rates when global settings are archived. */
+  existingSnapshot?: {
+    savedManualRate?: number | null;
+    savedSpotRate?: number;
+    appliedFeePercent?: number;
+  } | null;
+}
+
+/**
+ * Snapshot-aware dual conversion for the edit flow.
+ *
+ * Manual path: use live global active rate if available; fall back to
+ * `existingSnapshot.savedManualRate` so the field stays available even when
+ * the global override has been archived.
+ *
+ * Spot path: always recalculate from live/historical spot (date may have changed).
+ * Falls back to `existingSnapshot.savedSpotRate` when live data is unavailable.
+ *
+ * Fee: use the global active fee; fall back to `existingSnapshot.appliedFeePercent`
+ * when `feeDisabled` is false but no global fee is active (archived situation).
+ */
+export async function recordDualExpenseConversionFromSnapshot(
+  amount: number,
+  currency: string,
+  rates: ExchangeRates | null,
+  options?: SnapshotAwareConversionOptions,
+): Promise<DualExpenseConversionSnapshot | null> {
+  const from = currency.trim().toUpperCase() as ExpenseCurrency;
+  if (!(amount > 0)) return null;
+
+  const liveRates = rates ?? (await fetchExchangeRates().catch(() => null));
+  if (!liveRates) return null;
+
+  if (from === 'ILS') {
+    const ils = roundMoney(amount);
+    return {
+      savedManualRate: null,
+      savedSpotRate: 1,
+      amountInManual: null,
+      amountInSpot: ils,
+      appliedFeePercent: 0,
+      manualRateAvailable: false,
+      feeAvailable: false,
+    };
+  }
+
+  const transactionDate = options?.transactionDate ?? getLocalTodayIso();
+  const feeDisabled = options?.feeDisabled ?? false;
+  const existingSnapshot = options?.existingSnapshot;
+
+  // Fee resolution: prefer live active fee, fall back to snapshot fee when not disabled
+  let feePercent = resolveExpenseLedgerFeePercent(from, feeDisabled);
+  if (feePercent === 0 && !feeDisabled && existingSnapshot?.appliedFeePercent) {
+    feePercent = existingSnapshot.appliedFeePercent;
+  }
+  const feeAvailable = feePercent > 0;
+
+  // Manual path: prefer live global active rate; fall back to saved snapshot rate
+  const liveResult = resolveLiveManualOrSpotRate(from, liveRates);
+  let manualRate: number | null = liveResult?.manualRateUsed ? liveResult.rate : null;
+  if (manualRate == null && existingSnapshot?.savedManualRate != null && existingSnapshot.savedManualRate > 0) {
+    manualRate = existingSnapshot.savedManualRate;
+  }
+  const manualRateAvailable = manualRate != null;
+
+  const amountInManual = manualRate != null
+    ? applyFeeMultiplier(smartRoundMoney(amount * manualRate), feePercent)
+    : null;
+
+  // Spot path: fresh recalculation; fall back to snapshot spot rate when unavailable
+  let spotRate = await resolveSpotRate(transactionDate, from, liveRates);
+  if ((spotRate == null || !(spotRate > 0)) && existingSnapshot?.savedSpotRate != null && existingSnapshot.savedSpotRate > 0) {
+    spotRate = existingSnapshot.savedSpotRate;
+  }
+  if (spotRate == null || !(spotRate > 0)) return null;
+
+  const amountInSpot = applyFeeMultiplier(smartRoundMoney(amount * spotRate), feePercent);
+
+  return {
+    savedManualRate: manualRate,
+    savedSpotRate: spotRate,
+    amountInManual,
+    amountInSpot,
+    appliedFeePercent: feePercent,
+    manualRateAvailable,
+    feeAvailable,
+  };
+}
+
+/**
+ * Preview display amount for edit modal — snapshot-aware.
+ * Calls `recordDualExpenseConversionFromSnapshot` so archived rates are respected.
+ */
+export async function previewExpenseDisplayAmountFromSnapshot(
+  amount: number,
+  currency: ExpenseCurrency,
+  rates: ExchangeRates | null,
+  options: SnapshotAwareConversionOptions & {
+    displayCurrency: ExpenseCurrency;
+    manualRateDisabled: boolean;
+  },
+): Promise<ExpenseDisplayPreview | null> {
+  const snapshot = await recordDualExpenseConversionFromSnapshot(amount, currency, rates, {
+    transactionDate: options.transactionDate,
+    feeDisabled: options.feeDisabled,
+    existingSnapshot: options.existingSnapshot,
+  });
+  if (!snapshot) return null;
+
+  const liveRates = rates ?? (await fetchExchangeRates().catch(() => null));
+  if (!liveRates) return null;
+
+  const manualRateUsed = !options.manualRateDisabled && snapshot.manualRateAvailable;
+  const ilsAmount = resolveExpenseAmountFromSnapshot(snapshot, { manualRateUsed });
+
+  const displayAmount = projectExpensePrimaryDisplayAmount(
+    amount,
+    currency,
+    ilsAmount,
+    options.displayCurrency,
+    liveRates,
+  );
+
+  return { ilsAmount, appliedFeePercent: snapshot.appliedFeePercent, manualRateUsed, displayAmount };
+}
+
 /** @deprecated Kept for any remaining callers outside the new dual-snapshot flow. */
 export function resolveExpenseEditModifierVisibility(
   expense: {

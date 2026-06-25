@@ -174,6 +174,13 @@ export function listActiveCurrencyCommissions(): CurrencyCommissionEntry[] {
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
+/** Only archived (inactive) entries sorted newest first. */
+export function listArchivedCurrencyCommissions(): CurrencyCommissionEntry[] {
+  return readEntries()
+    .filter((e) => !e.isActive)
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
 /** Saved percent for an exact commission target (active only, no global fallback). */
 export function getSavedCommissionPercentForCurrency(currency: CommissionCurrency): number | null {
   const normalized = normalizeCommissionCurrency(currency);
@@ -264,6 +271,25 @@ export function deleteCurrencyCommission(id: string): boolean {
   writeEntries(next);
   dispatchCommissionsUpdated();
   return true;
+}
+
+/**
+ * Archive (soft-delete) an active entry by id — sets `isActive: false`.
+ * The entry stays in storage and appears in the Historical Log.
+ */
+export function archiveCurrencyCommission(id: string): boolean {
+  return setCurrencyCommissionActive(id, false);
+}
+
+/**
+ * Reactivate an archived entry by creating a fresh active record from it.
+ * Uses `upsertCurrencyCommission` so any existing active entry for the same
+ * currency is automatically deactivated first.
+ */
+export function reactivateCurrencyCommission(
+  entry: CurrencyCommissionEntry,
+): CurrencyCommissionEntry | null {
+  return upsertCurrencyCommission(entry.currency, entry.percent);
 }
 
 // ── Legacy compatibility wrappers ──────────────────────────────────────────

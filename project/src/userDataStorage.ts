@@ -39,11 +39,24 @@ export function normalizeStoredExpense(expense: StoredExpense): StoredExpense {
   const amount = roundMoney(Number(expense.amount ?? 0));
   const manualRateUsed = Boolean(expense.manualRateUsed);
 
-  // Legacy migration: if amountInManual/amountInSpot are absent, derive from amount
-  const amountInManual =
-    expense.amountInManual != null ? roundMoney(Number(expense.amountInManual)) : (manualRateUsed ? amount : undefined);
-  const amountInSpot =
-    expense.amountInSpot != null ? roundMoney(Number(expense.amountInSpot)) : (!manualRateUsed ? amount : undefined);
+  // Normalize both snapshot sides.
+  // Prefer stored values; fall back: whichever path was active gets `amount`,
+  // and if the other side is also missing we leave it undefined (toggle stays hidden
+  // for truly pre-snapshot rows, which is correct — they only have one amount).
+  const storedInManual = expense.amountInManual != null ? roundMoney(Number(expense.amountInManual)) : undefined;
+  const storedInSpot = expense.amountInSpot != null ? roundMoney(Number(expense.amountInSpot)) : undefined;
+
+  // If one side is stored but the other is not, do NOT copy amount into the blank side
+  // (that would hide the fact that only one rate path was ever computed for this row).
+  // Only back-fill the active side from `amount` when neither is stored (pure legacy row).
+  const amountInManual: number | undefined =
+    storedInManual != null ? storedInManual
+    : (storedInSpot == null && manualRateUsed) ? amount
+    : undefined;
+  const amountInSpot: number | undefined =
+    storedInSpot != null ? storedInSpot
+    : (storedInManual == null && !manualRateUsed) ? amount
+    : undefined;
 
   return {
     ...expense,

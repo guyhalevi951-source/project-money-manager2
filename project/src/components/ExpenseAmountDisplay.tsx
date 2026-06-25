@@ -3,6 +3,12 @@ import { LtrNumeric, useLanguage } from '../LanguageContext';
 import { typographyBodyClass, typographyMutedClass } from '../styles/themeSurfaceStyles';
 import CurrencyFlag from './CurrencyFlag';
 
+export interface DualRateMode {
+  manualSelected: boolean;
+  onSelectManual: () => void;
+  onSelectSpot: () => void;
+}
+
 interface ExpenseAmountDisplayProps {
   amount: number;
   originalAmount?: number;
@@ -14,6 +20,8 @@ interface ExpenseAmountDisplayProps {
   manualBadgeLabel?: string;
   /** Line 3 badge label shown when a conversion fee was applied (e.g. "💳 כולל עמלה"). */
   feeBadgeLabel?: string;
+  /** When provided, renders a Manual / Market segmented toggle below the amount. */
+  dualRateMode?: DualRateMode;
 }
 
 /**
@@ -59,6 +67,37 @@ function ModifierBadge({ label }: { label: string }) {
   );
 }
 
+/** Segmented Manual ↔ Market pill toggle rendered below the amount in history cards. */
+function DualRateToggle({ manualSelected, onSelectManual, onSelectSpot }: DualRateMode) {
+  const { tr } = useLanguage();
+  return (
+    <div className="mt-1 inline-flex overflow-hidden rounded-lg border border-neutral-700/80 text-[11px] font-medium">
+      <button
+        type="button"
+        onClick={onSelectManual}
+        className={`px-2 py-1 transition-colors ${
+          manualSelected
+            ? 'bg-amber-500/25 text-amber-300'
+            : 'bg-transparent text-neutral-500 hover:text-neutral-300'
+        }`}
+      >
+        {tr('expenseRateSwitchManual')}
+      </button>
+      <button
+        type="button"
+        onClick={onSelectSpot}
+        className={`border-s border-neutral-700/80 px-2 py-1 transition-colors ${
+          !manualSelected
+            ? 'bg-blue-500/20 text-blue-300'
+            : 'bg-transparent text-neutral-500 hover:text-neutral-300'
+        }`}
+      >
+        {tr('expenseRateSwitchSpot')}
+      </button>
+    </div>
+  );
+}
+
 export default function ExpenseAmountDisplay({
   amount,
   originalAmount,
@@ -67,6 +106,7 @@ export default function ExpenseAmountDisplay({
   showSecondaryLine = true,
   manualBadgeLabel,
   feeBadgeLabel,
+  dualRateMode,
 }: ExpenseAmountDisplayProps) {
   const { formatExpenseMoney } = useLanguage();
   const { primary, secondary, secondaryFlagCode } = formatExpenseMoney(
@@ -89,7 +129,7 @@ export default function ExpenseAmountDisplay({
       className={[
         'flex flex-col justify-center',
         variant === 'card' ? 'items-end' : 'items-start sm:items-end',
-        equivalentLine || hasBadges ? 'gap-0.5' : 'gap-0',
+        equivalentLine || hasBadges || dualRateMode ? 'gap-0.5' : 'gap-0',
       ].join(' ')}
     >
       <LtrNumeric className={`${mainClass} whitespace-nowrap`}>{primary}</LtrNumeric>
@@ -111,6 +151,7 @@ export default function ExpenseAmountDisplay({
           {feeBadgeLabel && <ModifierBadge label={feeBadgeLabel} />}
         </div>
       )}
+      {dualRateMode && <DualRateToggle {...dualRateMode} />}
     </div>
   );
 }

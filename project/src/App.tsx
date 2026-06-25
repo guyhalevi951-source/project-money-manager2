@@ -98,10 +98,11 @@ import {
   subscribeCurrencyCommissionsUpdated,
 } from './services/currencyCommissionService';
 import {
-  previewExpenseDisplayAmount,
+  expenseHasSavedFeeSnapshot,
+  expenseHasSavedManualRateSnapshot,
+  previewExpenseDisplayAmountFromSnapshot,
   recordDualExpenseConversion,
-  recordExpenseConversionToIlsAsync,
-  resolvePersistedExpenseConversionMeta,
+  recordDualExpenseConversionFromSnapshot,
 } from './services/expenseConversionService';
 import {
   currencySymbolTriggerClass,
@@ -528,11 +529,13 @@ function expenseHasDualRateSnapshot(expense: {
   amountInManual?: number;
   amountInSpot?: number;
   savedManualRate?: number;
+  savedSpotRate?: number;
 }): boolean {
   return (
     expense.amountInManual != null &&
     expense.amountInSpot != null &&
-    expense.savedManualRate != null
+    // accept either savedManualRate or a positive savedSpotRate to handle legacy rows
+    (expense.savedManualRate != null || (expense.savedSpotRate != null && expense.savedSpotRate > 0))
   );
 }
 
@@ -5415,13 +5418,15 @@ function App() {
       setExpenses((prev) => {
         const nextExpenses = prev.map((expense) => {
           if (expense.id !== expenseId) return expense;
-          if (useManual && expense.amountInManual != null) {
-            return { ...expense, amount: expense.amountInManual, manualRateUsed: true };
+          if (useManual) {
+            // Prefer amountInManual; fall back to current amount if undefined (legacy)
+            const manual = expense.amountInManual ?? expense.amount;
+            return { ...expense, amount: manual, manualRateUsed: true };
+          } else {
+            // Prefer amountInSpot; fall back to current amount if undefined (legacy)
+            const spot = expense.amountInSpot ?? expense.amount;
+            return { ...expense, amount: spot, manualRateUsed: false };
           }
-          if (!useManual && expense.amountInSpot != null) {
-            return { ...expense, amount: expense.amountInSpot, manualRateUsed: false };
-          }
-          return expense;
         });
         const payload = buildCurrentFinancialPayload(nextExpenses);
         commitFinancialPayloadRef.current(payload, { cloud: true });
@@ -5477,9 +5482,10 @@ function App() {
   const editDraftDate = editExpenseDraft?.date;
   const editDraftManualRateDisabled = !editApplyManualRate;
   const editDraftFeeDisabled = !editApplyFee;
-  // Whether the expense being edited had a manual rate or fee at creation time
-  const editSnapshotHasManualRate = Boolean(editExpenseSnapshot?.manualRateUsed || editExpenseSnapshot?.savedManualRate);
-  const editSnapshotHasFee = Boolean((editExpenseSnapshot?.appliedFeePercent ?? 0) > 0);
+  // Whether the expense being edited had a manual rate or fee at creation time —
+  // purely snapshot-driven, independent of whether global settings are still active.
+  const editSnapshotHasManualRate = editExpenseSnapshot != null && expenseHasSavedManualRateSnapshot(editExpenseSnapshot);
+  const editSnapshotHasFee = editExpenseSnapshot != null && expenseHasSavedFeeSnapshot(editExpenseSnapshot);
 
   useEffect(() => {
     if (
@@ -5502,11 +5508,12 @@ function App() {
     const rates = getCachedExchangeRates();
     const date = normalizeDate(editDraftDate);
 
-    void previewExpenseDisplayAmount(typed, editDraftCurrency, rates, {
+    void previewExpenseDisplayAmountFromSnapshot(typed, editDraftCurrency, rates, {
       displayCurrency,
       transactionDate: date,
       manualRateDisabled: editDraftManualRateDisabled,
       feeDisabled: editDraftFeeDisabled,
+      existingSnapshot: editExpenseSnapshot,
     }).then((preview) => {
       if (!cancelled) {
         setEditPreviewAmount(preview?.displayAmount ?? null);
@@ -5523,6 +5530,7 @@ function App() {
     editDraftManualRateDisabled,
     editDraftFeeDisabled,
     displayCurrency,
+    editExpenseSnapshot,
   ]);
 
   const handleEditExpenseSave = () => {
@@ -5546,10 +5554,16 @@ function App() {
         };
       }
 
-      const snapshot = await recordDualExpenseConversion(typedAmount, editExpenseDraft.currency, rates, {
-        transactionDate: normalizedDate,
-        feeDisabled,
-      });
+      const snapshot = await recordDualExpenseConversionFromSnapshot(
+        typedAmount,
+        editExpenseDraft.currency,
+        rates,
+        {
+          transactionDate: normalizedDate,
+          feeDisabled,
+          existingSnapshot: editExpenseSnapshot,
+        },
+      );
       if (snapshot == null) return null;
 
       const manualRateUsed = editApplyManualRate && snapshot.manualRateAvailable;
@@ -6319,13 +6333,13 @@ function App() {
 
             {/* Apply toggles: shown when an active rate/fee exists for the selected currency */}
             {(newExpenseHasActiveRate || newExpenseHasActiveFee) && (
-              <div className="space-y-2 rounded-xl border border-[var(--color-sub-cards-border)] p-3 sm:p-4">
+              <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3.5 py-3 shadow-sm shadow-black/20 space-y-3">
                 {newExpenseHasActiveRate && (
                   <label
                     htmlFor="new-expense-apply-manual"
                     className="flex cursor-pointer items-center justify-between gap-3"
                   >
-                    <span className={`text-sm ${typographyBodyClass}`}>
+                    <span className="text-sm leading-snug text-amber-100/95">
                       {tr('applyActiveManualRate')}
                     </span>
                     <input
@@ -6333,7 +6347,7 @@ function App() {
                       type="checkbox"
                       checked={newExpenseApplyManualRate}
                       onChange={(e) => setNewExpenseApplyManualRate(e.target.checked)}
-                      className="h-5 w-5 shrink-0 rounded border-gray-600 bg-neutral-800 text-emerald-500 focus:ring-emerald-500/30"
+                      className="mt-0.5 h-5 w-5 shrink-0 rounded border-amber-500/40 bg-black/20 text-amber-400 focus:ring-amber-500/30"
                     />
                   </label>
                 )}
@@ -6342,7 +6356,7 @@ function App() {
                     htmlFor="new-expense-apply-fee"
                     className="flex cursor-pointer items-center justify-between gap-3"
                   >
-                    <span className={`text-sm ${typographyBodyClass}`}>
+                    <span className="text-sm leading-snug text-amber-100/95">
                       {tr('applyActiveCommissionFee')}
                     </span>
                     <input
@@ -6350,7 +6364,7 @@ function App() {
                       type="checkbox"
                       checked={newExpenseApplyFee}
                       onChange={(e) => setNewExpenseApplyFee(e.target.checked)}
-                      className="h-5 w-5 shrink-0 rounded border-gray-600 bg-neutral-800 text-emerald-500 focus:ring-emerald-500/30"
+                      className="mt-0.5 h-5 w-5 shrink-0 rounded border-amber-500/40 bg-black/20 text-amber-400 focus:ring-amber-500/30"
                     />
                   </label>
                 )}
@@ -6573,13 +6587,16 @@ function App() {
                             <p className="mt-0.5 text-xs font-medium text-emerald-300">{tr('expenseUpdated')}</p>
                           )}
                         </div>
-                        <div className="flex shrink-0 flex-col items-end gap-1 text-left">
+                        <div className="flex shrink-0 items-center text-left">
                           <ExpenseAmountDisplay
                             amount={expense.amount}
                             originalAmount={expense.originalAmount}
                             originalCurrency={expense.originalCurrency}
                             variant="card"
-                            showSecondaryLine={shouldShowExpenseEquivalentLine(expense, displayCurrency)}
+                            showSecondaryLine={
+                              expenseHasDualRateSnapshot(expense) ||
+                              shouldShowExpenseEquivalentLine(expense, displayCurrency)
+                            }
                             manualBadgeLabel={
                               expense.manualRateUsed
                                 ? tr('expenseManualRateBadge')
@@ -6590,27 +6607,16 @@ function App() {
                                 ? tr('expenseFeeBadge')
                                 : undefined
                             }
+                            dualRateMode={
+                              expenseHasDualRateSnapshot(expense)
+                                ? {
+                                    manualSelected: expense.manualRateUsed !== false,
+                                    onSelectManual: () => handleToggleExpenseRate(expense.id, true),
+                                    onSelectSpot: () => handleToggleExpenseRate(expense.id, false),
+                                  }
+                                : undefined
+                            }
                           />
-                          {expenseHasDualRateSnapshot(expense) && (
-                            <div className="flex gap-1 text-[10px]">
-                              <button
-                                type="button"
-                                onClick={() => handleToggleExpenseRate(expense.id, true)}
-                                className={`rounded px-1.5 py-0.5 font-medium transition-colors ${expense.manualRateUsed ? 'bg-amber-500/20 text-amber-300' : 'text-neutral-500 hover:text-neutral-300'}`}
-                                title={tr('expenseRateSwitchManual')}
-                              >
-                                {tr('expenseRateSwitchManual')}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleToggleExpenseRate(expense.id, false)}
-                                className={`rounded px-1.5 py-0.5 font-medium transition-colors ${!expense.manualRateUsed ? 'bg-blue-500/20 text-blue-300' : 'text-neutral-500 hover:text-neutral-300'}`}
-                                title={tr('expenseRateSwitchSpot')}
-                              >
-                                {tr('expenseRateSwitchSpot')}
-                              </button>
-                            </div>
-                          )}
                         </div>
                         <div className="shrink-0 flex items-center gap-1">
                           <button
@@ -6678,12 +6684,15 @@ function App() {
                             }`}
                           />
                         </div>
-                        <div role="cell" className="flex flex-col items-end justify-end gap-1 text-end">
+                        <div role="cell" className="flex items-end justify-end text-end">
                           <ExpenseAmountDisplay
                             amount={expense.amount}
                             originalAmount={expense.originalAmount}
                             originalCurrency={expense.originalCurrency}
-                            showSecondaryLine={shouldShowExpenseEquivalentLine(expense, displayCurrency)}
+                            showSecondaryLine={
+                              expenseHasDualRateSnapshot(expense) ||
+                              shouldShowExpenseEquivalentLine(expense, displayCurrency)
+                            }
                             manualBadgeLabel={
                               expense.manualRateUsed
                                 ? tr('expenseManualRateBadge')
@@ -6694,25 +6703,16 @@ function App() {
                                 ? tr('expenseFeeBadge')
                                 : undefined
                             }
+                            dualRateMode={
+                              expenseHasDualRateSnapshot(expense)
+                                ? {
+                                    manualSelected: expense.manualRateUsed !== false,
+                                    onSelectManual: () => handleToggleExpenseRate(expense.id, true),
+                                    onSelectSpot: () => handleToggleExpenseRate(expense.id, false),
+                                  }
+                                : undefined
+                            }
                           />
-                          {expenseHasDualRateSnapshot(expense) && (
-                            <div className="flex gap-1 text-[10px]">
-                              <button
-                                type="button"
-                                onClick={() => handleToggleExpenseRate(expense.id, true)}
-                                className={`rounded px-1.5 py-0.5 font-medium transition-colors ${expense.manualRateUsed ? 'bg-amber-500/20 text-amber-300' : 'text-neutral-500 hover:text-neutral-300'}`}
-                              >
-                                {tr('expenseRateSwitchManual')}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleToggleExpenseRate(expense.id, false)}
-                                className={`rounded px-1.5 py-0.5 font-medium transition-colors ${!expense.manualRateUsed ? 'bg-blue-500/20 text-blue-300' : 'text-neutral-500 hover:text-neutral-300'}`}
-                              >
-                                {tr('expenseRateSwitchSpot')}
-                              </button>
-                            </div>
-                          )}
                         </div>
                         <div role="cell" className="flex justify-end">
                           <CategoryColorChip color={categoryInfo.color} icon={IconComponent}>
@@ -6886,21 +6886,21 @@ function App() {
               </div>
 
               {(editSnapshotHasManualRate || editSnapshotHasFee) && (
-                  <div className="space-y-3 rounded-xl border border-[var(--color-sub-cards-border)] p-3 sm:p-4">
+                  <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3.5 py-3 shadow-sm shadow-black/20 space-y-3">
                     {editSnapshotHasManualRate && (
                       <label
                         htmlFor="edit-expense-apply-manual"
                         className="flex cursor-pointer items-center justify-between gap-3"
                       >
-                        <span className={`text-sm ${typographyBodyClass}`}>
-                          {tr('applyActiveManualRate')}
+                        <span className="text-sm leading-snug text-amber-100/95">
+                          {tr('applySavedManualRate')}
                         </span>
                         <input
                           id="edit-expense-apply-manual"
                           type="checkbox"
                           checked={editApplyManualRate}
                           onChange={(e) => setEditApplyManualRate(e.target.checked)}
-                          className="h-5 w-5 shrink-0 rounded border-gray-600 bg-neutral-800 text-emerald-500 focus:ring-emerald-500/30"
+                          className="mt-0.5 h-5 w-5 shrink-0 rounded border-amber-500/40 bg-black/20 text-amber-400 focus:ring-amber-500/30"
                         />
                       </label>
                     )}
@@ -6909,20 +6909,20 @@ function App() {
                         htmlFor="edit-expense-apply-fee"
                         className="flex cursor-pointer items-center justify-between gap-3"
                       >
-                        <span className={`text-sm ${typographyBodyClass}`}>
-                          {tr('applyActiveCommissionFee')}
+                        <span className="text-sm leading-snug text-amber-100/95">
+                          {tr('applySavedCommissionFee')}
                         </span>
                         <input
                           id="edit-expense-apply-fee"
                           type="checkbox"
                           checked={editApplyFee}
                           onChange={(e) => setEditApplyFee(e.target.checked)}
-                          className="h-5 w-5 shrink-0 rounded border-gray-600 bg-neutral-800 text-emerald-500 focus:ring-emerald-500/30"
+                          className="mt-0.5 h-5 w-5 shrink-0 rounded border-amber-500/40 bg-black/20 text-amber-400 focus:ring-amber-500/30"
                         />
                       </label>
                     )}
                     {editPreviewAmount != null && (
-                      <p className={`text-sm font-medium ${typographyBodyClass}`}>
+                      <p className="text-sm font-medium leading-snug text-amber-100/90">
                         <LtrNumeric>
                           {formatTranslation(lang, 'expenseCurrentChoicePreview', {
                             amount: formatAmountWithSymbol(editPreviewAmount, displayCurrency, {
