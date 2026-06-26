@@ -98,13 +98,19 @@ import {
   subscribeCurrencyCommissionsUpdated,
 } from './services/currencyCommissionService';
 import {
+  capsuleHasFeeForCurrency,
+  capsuleHasManualRateForConversion,
+  captureExpenseTimeCapsule,
   expenseEditShowsFeeToggle,
   expenseEditShowsManualRateToggle,
   expenseHasDualRateSnapshot,
   previewExpenseDisplayAmountFromSnapshot,
+  previewExpenseDisplayAmountFromTimeCapsule,
   recordDualExpenseConversion,
   recordDualExpenseConversionFromSnapshot,
+  recordDualExpenseConversionFromTimeCapsule,
   resolveStoredExpenseDisplayView,
+  type ExpenseCreationTimeCapsule,
 } from './services/expenseConversionService';
 import {
   currencySymbolTriggerClass,
@@ -318,6 +324,8 @@ interface Expense {
   creationHadActiveManualRate?: boolean;
   /** Immutable: global commission fee was active for this currency at creation time. */
   creationHadActiveFee?: boolean;
+  /** Immutable snapshot of all active manual rates + fees at creation (Time Capsule). */
+  creationTimeCapsule?: ExpenseCreationTimeCapsule;
 }
 
 // Sentinel value used by the category <select> to trigger the "add custom" flow
@@ -5228,6 +5236,10 @@ function App() {
 
     if (isNaN(enteredAmount) || !(enteredAmount > 0)) return;
 
+    // Time Capsule: freeze every active manual rate + fee at the exact save moment,
+    // so later currency edits resolve historical pairs from the expense itself.
+    const creationTimeCapsule = captureExpenseTimeCapsule();
+
     const resolveConversion = async () => {
       const rates = getCachedExchangeRates();
       const isoDate = normalizeDate(newExpense.date);
@@ -5301,6 +5313,7 @@ function App() {
           feeDisabled: !conversion.feeApplied,
           creationHadActiveManualRate: conversion.creationHadActiveManualRate,
           creationHadActiveFee: conversion.creationHadActiveFee,
+          creationTimeCapsule,
         };
 
         const nextExpenses = [expense, ...expenses];
@@ -5455,12 +5468,39 @@ function App() {
   const editDraftDate = editExpenseDraft?.date;
   const editDraftManualRateDisabled = !editApplyManualRate;
   const editDraftFeeDisabled = !editApplyFee;
-  // Whether the expense being edited had a manual rate or fee at creation time —
-  // immutable creation-time flags, independent of current global settings or save state.
-  const editShowsManualRate = editExpenseSnapshot != null && expenseEditShowsManualRateToggle(editExpenseSnapshot);
-  const editShowsFee = editExpenseSnapshot != null && expenseEditShowsFeeToggle(editExpenseSnapshot);
+  // Checkbox visibility is driven by the expense's own immutable Time Capsule,
+  // evaluated against the currently selected draft currency (ignores live globals).
+  // Legacy rows without a capsule fall back to the persisted creation flags.
+  const editCapsule = editExpenseSnapshot?.creationTimeCapsule;
+  const editShowsManualRate =
+    editCapsule != null && editDraftCurrency != null
+      ? capsuleHasManualRateForConversion(editCapsule, editDraftCurrency, displayCurrency)
+      : editExpenseSnapshot != null && expenseEditShowsManualRateToggle(editExpenseSnapshot);
+  const editShowsFee =
+    editCapsule != null && editDraftCurrency != null
+      ? capsuleHasFeeForCurrency(editCapsule, editDraftCurrency)
+      : editExpenseSnapshot != null && expenseEditShowsFeeToggle(editExpenseSnapshot);
   const editPreviewManualRateDisabled = editShowsManualRate ? editDraftManualRateDisabled : true;
   const editPreviewFeeDisabled = editShowsFee ? editDraftFeeDisabled : true;
+
+  // When the user changes the draft currency, re-default the checkboxes against the
+  // capsule: a newly relevant checkbox defaults to checked, an irrelevant one to off.
+  // The initial open keeps the expense's saved checkbox state (handled on edit start).
+  const editCurrencyResetRef = useRef<ExpenseCurrency | null>(null);
+  useEffect(() => {
+    if (editDraftCurrency == null) {
+      editCurrencyResetRef.current = null;
+      return;
+    }
+    if (editCurrencyResetRef.current == null) {
+      editCurrencyResetRef.current = editDraftCurrency;
+      return;
+    }
+    if (editCurrencyResetRef.current === editDraftCurrency) return;
+    editCurrencyResetRef.current = editDraftCurrency;
+    setEditApplyManualRate(editShowsManualRate);
+    setEditApplyFee(editShowsFee);
+  }, [editDraftCurrency, editShowsManualRate, editShowsFee]);
 
   useEffect(() => {
     if (
@@ -5483,13 +5523,25 @@ function App() {
     const rates = getCachedExchangeRates();
     const date = normalizeDate(editDraftDate);
 
-    void previewExpenseDisplayAmountFromSnapshot(typed, editDraftCurrency, rates, {
-      displayCurrency,
-      transactionDate: date,
-      manualRateDisabled: editPreviewManualRateDisabled,
-      feeDisabled: editPreviewFeeDisabled,
-      existingSnapshot: editExpenseSnapshot,
-    }).then((preview) => {
+    // Capsule sandbox: conversions read only the frozen creation-time rates/fees.
+    // Legacy rows without a capsule keep the snapshot-aware preview.
+    const previewPromise = editCapsule != null
+      ? previewExpenseDisplayAmountFromTimeCapsule(typed, editDraftCurrency, rates, {
+          displayCurrency,
+          transactionDate: date,
+          manualRateDisabled: editPreviewManualRateDisabled,
+          feeDisabled: editPreviewFeeDisabled,
+          capsule: editCapsule,
+        })
+      : previewExpenseDisplayAmountFromSnapshot(typed, editDraftCurrency, rates, {
+          displayCurrency,
+          transactionDate: date,
+          manualRateDisabled: editPreviewManualRateDisabled,
+          feeDisabled: editPreviewFeeDisabled,
+          existingSnapshot: editExpenseSnapshot,
+        });
+
+    void previewPromise.then((preview) => {
       if (!cancelled) {
         setEditPreviewAmount(preview?.displayAmount ?? null);
       }
@@ -5508,6 +5560,7 @@ function App() {
     editShowsFee,
     displayCurrency,
     editExpenseSnapshot,
+    editCapsule,
   ]);
 
   const handleEditExpenseSave = () => {
@@ -5522,7 +5575,8 @@ function App() {
       const normalizedDate = normalizeDate(editExpenseDraft.date);
       const rates = getCachedExchangeRates();
 
-      if (editExpenseDraft.currency === 'ILS') {
+      // Legacy rows without a capsule keep the simple ILS 1:1 path.
+      if (editCapsule == null && editExpenseDraft.currency === 'ILS') {
         const ils = roundMoneyAmount(typedAmount);
         return {
           amount: ils, savedManualRate: null as number | null, savedSpotRate: 1,
@@ -5531,17 +5585,31 @@ function App() {
         };
       }
 
-      const snapshot = await recordDualExpenseConversionFromSnapshot(
-        typedAmount,
-        editExpenseDraft.currency,
-        rates,
-        {
-          transactionDate: normalizedDate,
-          feeDisabled,
-          displayCurrency,
-          existingSnapshot: editExpenseSnapshot,
-        },
-      );
+      // Capsule sandbox: all currency pairs (ILS included) resolve manual rates and
+      // fees strictly from the expense's frozen capsule — never live globals.
+      const snapshot = editCapsule != null
+        ? await recordDualExpenseConversionFromTimeCapsule(
+            typedAmount,
+            editExpenseDraft.currency,
+            rates,
+            {
+              transactionDate: normalizedDate,
+              feeDisabled,
+              displayCurrency,
+              capsule: editCapsule,
+            },
+          )
+        : await recordDualExpenseConversionFromSnapshot(
+            typedAmount,
+            editExpenseDraft.currency,
+            rates,
+            {
+              transactionDate: normalizedDate,
+              feeDisabled,
+              displayCurrency,
+              existingSnapshot: editExpenseSnapshot,
+            },
+          );
       if (snapshot == null) return null;
 
       const manualRateUsed = editShowsManualRate ? editApplyManualRate : false;
@@ -6662,10 +6730,10 @@ function App() {
       </main>
       </div>
 
-      {editingExpenseId && editExpenseDraft && (
+      {editingExpenseId && editExpenseDraft && createPortal(
         <div
           dir={dir}
-          className="fixed inset-0 z-50 flex items-center justify-center px-4"
+          className="fixed inset-0 z-[100] flex items-center justify-center px-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="edit-expense-title"
@@ -6676,7 +6744,7 @@ function App() {
             aria-label={tr('close')}
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"
           />
-          <div className={`relative z-10 w-full max-w-2xl p-4 sm:p-6 ${surfaceModalClass}`}>
+          <div className={`relative z-[101] w-full max-w-2xl p-4 sm:p-6 ${surfaceModalClass}`}>
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
                 <h3 id="edit-expense-title" className={`text-base font-semibold sm:text-lg ${typographyTitleClass}`}>
@@ -6744,6 +6812,7 @@ function App() {
                   transactionDate={normalizeDate(editExpenseDraft.date)}
                   previewManualRateDisabled={editPreviewManualRateDisabled}
                   previewFeeDisabled={editPreviewFeeDisabled}
+                  previewTimeCapsule={editCapsule}
                 />
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col gap-4 sm:flex-row sm:items-end">
@@ -6866,7 +6935,8 @@ function App() {
 
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {isInsideActiveBudget && (

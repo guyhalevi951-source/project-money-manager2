@@ -11,7 +11,12 @@
  *   finalIls    = rawIls × (1 + appliedFeePercent / 100)   when fee active
  */
 
-import { listActiveCurrencyCommissions } from './currencyCommissionService';
+import {
+  GLOBAL_COMMISSION_CURRENCY,
+  listActiveCurrencyCommissions,
+  type CommissionCurrency,
+  type CurrencyCommissionEntry,
+} from './currencyCommissionService';
 import {
   computeDirectUnitRateFromIlsPivot,
   convertIlsToForeign,
@@ -33,6 +38,7 @@ import {
   getManualExchangeOverride,
   hasActiveManualOverrideForPair,
   listActiveManualExchangeOverrides,
+  type ManualExchangeOverrideEntry,
 } from './manualExchangeOverrideService';
 import { getApiRateForDate } from './rateCacheService';
 import { roundMoney, smartRoundMoney } from './money';
@@ -97,6 +103,149 @@ export function resolveExpenseAmountFromSnapshot(
     return snapshot.amountInManual;
   }
   return snapshot.amountInSpot;
+}
+
+// ── Time Capsule: immutable creation-time snapshot of all active rates & fees ──
+
+/**
+ * Immutable snapshot of the entire manual-rate / commission environment captured
+ * at the exact moment an expense is created. The edit modal reads this capsule
+ * (never live globals) so an expense's checkbox visibility and conversions stay
+ * historically accurate even after global settings change. Captures ALL active
+ * pairs — ILS pairs, foreign pairs, and global (non-pair-specific) rules alike.
+ */
+export interface ExpenseCreationTimeCapsule {
+  capturedAt: number;
+  manualRates: Array<{
+    baseCurrency: ExpenseCurrency;
+    quoteCurrency: ExpenseCurrency;
+    rate: number;
+    pairSpecific: boolean;
+  }>;
+  fees: Array<{
+    currency: CommissionCurrency;
+    percent: number;
+  }>;
+}
+
+/** Snapshot every active manual override + commission fee at expense-save time. */
+export function captureExpenseTimeCapsule(): ExpenseCreationTimeCapsule {
+  const manualRates = listActiveManualExchangeOverrides().map((entry) => ({
+    baseCurrency: entry.baseCurrency,
+    quoteCurrency: entry.quoteCurrency,
+    rate: entry.rate,
+    pairSpecific: entry.pairSpecific,
+  }));
+  const fees = listActiveCurrencyCommissions().map((entry) => ({
+    currency: entry.currency,
+    percent: entry.percent,
+  }));
+  return { capturedAt: Date.now(), manualRates, fees };
+}
+
+/** Adapt frozen capsule manual rates into the entry shape pure converters expect. */
+function capsuleManualEntries(
+  capsule: ExpenseCreationTimeCapsule,
+): ManualExchangeOverrideEntry[] {
+  return capsule.manualRates.map((entry, index) => ({
+    id: `capsule-${index}`,
+    baseCurrency: entry.baseCurrency,
+    quoteCurrency: entry.quoteCurrency,
+    rate: entry.rate,
+    isActive: true,
+    updatedAt: capsule.capturedAt,
+    pairSpecific: entry.pairSpecific,
+  }));
+}
+
+/** Adapt frozen capsule fees into the entry shape pure converters expect. */
+function capsuleFeeEntries(capsule: ExpenseCreationTimeCapsule): CurrencyCommissionEntry[] {
+  return capsule.fees.map((fee, index) => ({
+    id: `capsule-fee-${index}`,
+    currency: fee.currency,
+    percent: fee.percent,
+    isActive: true,
+    updatedAt: capsule.capturedAt,
+  }));
+}
+
+/**
+ * Resolve a manual rate from a capsule (1 `from` = rate × `to`), mirroring the
+ * pair-specific → global fallback order of `getManualExchangeOverrideForPair`.
+ * No ILS bypass — all pairs route through the same lookup.
+ */
+export function resolveManualRateFromCapsule(
+  capsule: ExpenseCreationTimeCapsule,
+  fromCurrency: string,
+  toCurrency: string,
+): number | null {
+  const from = fromCurrency.trim().toUpperCase();
+  const to = toCurrency.trim().toUpperCase();
+  if (from === to) return null;
+  const entries = capsule.manualRates;
+
+  const directSpecific = entries.find(
+    (e) => e.pairSpecific && e.baseCurrency === from && e.quoteCurrency === to,
+  );
+  if (directSpecific) return directSpecific.rate;
+  const inverseSpecific = entries.find(
+    (e) => e.pairSpecific && e.baseCurrency === to && e.quoteCurrency === from,
+  );
+  if (inverseSpecific) return 1 / inverseSpecific.rate;
+
+  const directGlobal = entries.find(
+    (e) => !e.pairSpecific && e.baseCurrency === from && e.quoteCurrency === to,
+  );
+  if (directGlobal) return directGlobal.rate;
+  const inverseGlobal = entries.find(
+    (e) => !e.pairSpecific && e.baseCurrency === to && e.quoteCurrency === from,
+  );
+  if (inverseGlobal) return 1 / inverseGlobal.rate;
+
+  return null;
+}
+
+/** Resolve a fee percent from a capsule (specific currency, then global `ALL`). */
+export function resolveFeePercentFromCapsule(
+  capsule: ExpenseCreationTimeCapsule,
+  currency: string,
+): number | null {
+  const code = currency.trim().toUpperCase();
+  const specific = capsule.fees.find((f) => f.currency === code);
+  if (specific) return specific.percent;
+  const global = capsule.fees.find((f) => f.currency === GLOBAL_COMMISSION_CURRENCY);
+  return global?.percent ?? null;
+}
+
+/**
+ * True when the capsule holds a manual rate relevant to converting an expense
+ * of `from` currency displayed in `displayCurrency` (toward ILS ledger or the
+ * display currency for F2F). Drives edit-modal manual-rate checkbox visibility.
+ */
+export function capsuleHasManualRateForConversion(
+  capsule: ExpenseCreationTimeCapsule,
+  from: ExpenseCurrency,
+  displayCurrency: ExpenseCurrency,
+): boolean {
+  if (from !== 'ILS' && resolveManualRateFromCapsule(capsule, from, 'ILS') != null) {
+    return true;
+  }
+  if (
+    displayCurrency !== 'ILS' &&
+    from !== displayCurrency &&
+    resolveManualRateFromCapsule(capsule, from, displayCurrency) != null
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** True when the capsule holds a fee for the currency (specific or global `ALL`). */
+export function capsuleHasFeeForCurrency(
+  capsule: ExpenseCreationTimeCapsule,
+  currency: ExpenseCurrency,
+): boolean {
+  return (resolveFeePercentFromCapsule(capsule, currency) ?? 0) > 0;
 }
 
 /** Commission % for ledger conversion — honors source-currency rules (incl. global ALL). */
@@ -839,6 +988,275 @@ export async function recordDualExpenseConversionFromSnapshot(
   }
 
   return ilsPath;
+}
+
+// ── Time Capsule sandbox conversion (edit-only, zero live globals) ────────────
+
+/** Capsule ledger fee percent for `from → ILS` (specific or global `ALL`). */
+function resolveCapsuleLedgerFeePercent(
+  capsule: ExpenseCreationTimeCapsule,
+  fromCurrency: string,
+  feeDisabled: boolean,
+): number {
+  if (feeDisabled || fromCurrency === 'ILS') return 0;
+  const percent = resolveFeePercentFromCapsule(capsule, fromCurrency) ?? 0;
+  if (!(percent > 0) || percent > 100) return 0;
+  return percent;
+}
+
+/** Capsule analogue of `resolveLiveManualOrSpotRate` — reads frozen rates only. */
+function resolveCapsuleManualOrSpotRate(
+  from: ExpenseCurrency,
+  rates: ExchangeRates,
+  capsule: ExpenseCreationTimeCapsule,
+): { rate: number; manualRateUsed: boolean } | null {
+  if (from === 'ILS') return { rate: 1, manualRateUsed: false };
+
+  const direct = resolveManualRateFromCapsule(capsule, from, 'ILS');
+  if (direct != null && direct > 0) {
+    return { rate: direct, manualRateUsed: true };
+  }
+
+  const withManual = toActiveExchangeRatesFromSnapshot(rates, capsuleManualEntries(capsule));
+  const spotOnly = toActiveExchangeRatesFromSnapshot(rates, []);
+
+  const rateWithManual = convertAmountWithActiveRates(1, from, 'ILS', withManual);
+  const rateSpotOnly = convertAmountWithActiveRates(1, from, 'ILS', spotOnly);
+
+  if (rateWithManual == null || !(rateWithManual > 0)) return null;
+
+  const manualUsed =
+    rateSpotOnly == null ||
+    Math.abs(rateWithManual - rateSpotOnly) / Math.max(rateSpotOnly, 1e-9) > 1e-6;
+
+  return { rate: rateWithManual, manualRateUsed: manualUsed };
+}
+
+/** F2F display path built strictly from frozen capsule manual rates and fees. */
+function buildDisplayPathDualLedgerSnapshotFromCapsule(
+  amount: number,
+  from: ExpenseCurrency,
+  displayCurrency: ExpenseCurrency,
+  liveRates: ExchangeRates,
+  feeDisabled: boolean,
+  capsule: ExpenseCreationTimeCapsule,
+): Pick<
+  DualExpenseConversionSnapshot,
+  | 'savedManualRate'
+  | 'savedSpotRate'
+  | 'amountInManual'
+  | 'amountInSpot'
+  | 'manualRateAvailable'
+  | 'appliedFeePercent'
+  | 'displayAmountInManual'
+  | 'displayAmountInSpot'
+> | null {
+  if (from === 'ILS' || displayCurrency === 'ILS' || from === displayCurrency) return null;
+
+  const activeFees = feeDisabled ? [] : toActiveFeesFromCommissionEntries(capsuleFeeEntries(capsule));
+  const withManual = toActiveExchangeRatesFromSnapshot(liveRates, capsuleManualEntries(capsule));
+  const spotOnly = toActiveExchangeRatesFromSnapshot(liveRates, []);
+
+  const feesForTx = feeDisabled ? [] : activeFees;
+  const feePercent = feeDisabled
+    ? 0
+    : getAppliedCommissionPercentForPair(activeFees, from, displayCurrency, displayCurrency);
+
+  const manualTx = processTransactionWithUserRules(amount, from, displayCurrency, feesForTx, withManual, {
+    displayCurrency,
+  });
+  const spotTx = processTransactionWithUserRules(amount, from, displayCurrency, feesForTx, spotOnly, {
+    displayCurrency,
+  });
+  if (manualTx == null || spotTx == null) return null;
+
+  const manualIls = convertAmountWithActiveRates(manualTx.finalConvertedAmount, displayCurrency, 'ILS', spotOnly);
+  const spotIls = convertAmountWithActiveRates(spotTx.finalConvertedAmount, displayCurrency, 'ILS', spotOnly);
+  if (manualIls == null || spotIls == null || !(spotIls > 0)) return null;
+
+  const hasDirectManualPair = resolveManualRateFromCapsule(capsule, from, displayCurrency) != null;
+  const manualDiffers =
+    Math.abs(manualTx.finalConvertedAmount - spotTx.finalConvertedAmount) /
+      Math.max(spotTx.finalConvertedAmount, 1e-9) >
+    1e-6;
+  const manualRateAvailable = hasDirectManualPair || manualDiffers;
+
+  const savedSpotRate = amount > 0 ? spotTx.finalConvertedAmount / amount : spotTx.finalConvertedAmount;
+  const savedManualRate =
+    manualRateAvailable && amount > 0 ? manualTx.finalConvertedAmount / amount : null;
+
+  return {
+    savedManualRate,
+    savedSpotRate,
+    amountInManual: manualRateAvailable ? roundMoney(manualIls) : null,
+    amountInSpot: roundMoney(spotIls),
+    manualRateAvailable,
+    appliedFeePercent: feePercent,
+    displayAmountInManual: manualRateAvailable ? roundMoney(manualTx.finalConvertedAmount) : null,
+    displayAmountInSpot: roundMoney(spotTx.finalConvertedAmount),
+  };
+}
+
+export interface TimeCapsuleConversionOptions {
+  transactionDate?: string;
+  feeDisabled?: boolean;
+  displayCurrency?: ExpenseCurrency;
+  /** Immutable creation-time capsule of the edited expense — the sole rate/fee source. */
+  capsule: ExpenseCreationTimeCapsule;
+}
+
+/**
+ * Isolated dual conversion for the edit modal sandbox. Manual rates and fees come
+ * exclusively from the expense's own creation-time capsule — never live globals.
+ * Spot rates remain date-scoped market rates. Universal across all currency pairs
+ * (ILS included): no hardcoded ILS calculation bypass for visibility/projection.
+ */
+export async function recordDualExpenseConversionFromTimeCapsule(
+  amount: number,
+  currency: string,
+  rates: ExchangeRates | null,
+  options: TimeCapsuleConversionOptions,
+): Promise<DualExpenseConversionSnapshot | null> {
+  const from = currency.trim().toUpperCase() as ExpenseCurrency;
+  if (!(amount > 0)) return null;
+
+  const liveRates = rates ?? (await fetchExchangeRates().catch(() => null));
+  if (!liveRates) return null;
+
+  const { capsule } = options;
+  const transactionDate = options.transactionDate ?? getLocalTodayIso();
+  const feeDisabled = options.feeDisabled ?? false;
+
+  // ILS-typed amount ledgers 1:1 (mathematically exact); capsule still governs
+  // cross-currency display projection below when display differs.
+  if (from === 'ILS') {
+    return {
+      savedManualRate: null,
+      savedSpotRate: 1,
+      amountInManual: null,
+      amountInSpot: roundMoney(amount),
+      appliedFeePercent: 0,
+      manualRateAvailable: false,
+      feeAvailable: false,
+    };
+  }
+
+  const feePercent = resolveCapsuleLedgerFeePercent(capsule, from, feeDisabled);
+  const feeAvailable = (resolveFeePercentFromCapsule(capsule, from) ?? 0) > 0;
+
+  const manualResult = resolveCapsuleManualOrSpotRate(from, liveRates, capsule);
+  const manualRate = manualResult?.manualRateUsed ? manualResult.rate : null;
+  const manualRateAvailable = manualRate != null;
+  const amountInManual =
+    manualRate != null
+      ? applyFeeMultiplier(smartRoundMoney(amount * manualRate), feeDisabled ? 0 : feePercent)
+      : null;
+
+  const spotRate = await resolveSpotRate(transactionDate, from, liveRates);
+  if (spotRate == null || !(spotRate > 0)) return null;
+  const amountInSpot = applyFeeMultiplier(smartRoundMoney(amount * spotRate), feeDisabled ? 0 : feePercent);
+
+  const ilsPath: DualExpenseConversionSnapshot = {
+    savedManualRate: manualRate,
+    savedSpotRate: spotRate,
+    amountInManual,
+    amountInSpot,
+    appliedFeePercent: feePercent,
+    manualRateAvailable,
+    feeAvailable,
+  };
+
+  const displayCurrency = options.displayCurrency;
+  if (displayCurrency && displayCurrency !== 'ILS' && displayCurrency !== from) {
+    const displayPath = buildDisplayPathDualLedgerSnapshotFromCapsule(
+      amount,
+      from,
+      displayCurrency,
+      liveRates,
+      feeDisabled,
+      capsule,
+    );
+    return mergeDualSnapshots(ilsPath, displayPath, feeAvailable);
+  }
+
+  return ilsPath;
+}
+
+/**
+ * Capsule-aware foreign display resolver for the upper edit preview. Reads manual
+ * rates and fees from the frozen capsule instead of live globals.
+ */
+export function resolveCapsuleForeignDisplayAmount(
+  amount: number,
+  from: ExpenseCurrency,
+  displayCurrency: ExpenseCurrency,
+  rates: ExchangeRates,
+  capsule: ExpenseCreationTimeCapsule,
+  options?: {
+    manualRateDisabled?: boolean;
+    feeDisabled?: boolean;
+  },
+): number | null {
+  if (!(amount > 0)) return null;
+
+  const activeFees = options?.feeDisabled
+    ? []
+    : toActiveFeesFromCommissionEntries(capsuleFeeEntries(capsule));
+  const exchangeRates = options?.manualRateDisabled
+    ? toActiveExchangeRatesFromSnapshot(rates, [])
+    : toActiveExchangeRatesFromSnapshot(rates, capsuleManualEntries(capsule));
+
+  const result = processTransactionWithUserRules(amount, from, displayCurrency, activeFees, exchangeRates, {
+    displayCurrency,
+  });
+  return result?.finalConvertedAmount ?? null;
+}
+
+/**
+ * Preview display amount for the edit modal sandbox — capsule-driven.
+ * Calls `recordDualExpenseConversionFromTimeCapsule` so only frozen rates apply.
+ */
+export async function previewExpenseDisplayAmountFromTimeCapsule(
+  amount: number,
+  currency: ExpenseCurrency,
+  rates: ExchangeRates | null,
+  options: {
+    displayCurrency: ExpenseCurrency;
+    manualRateDisabled: boolean;
+    feeDisabled?: boolean;
+    transactionDate?: string;
+    capsule: ExpenseCreationTimeCapsule;
+  },
+): Promise<ExpenseDisplayPreview | null> {
+  const snapshot = await recordDualExpenseConversionFromTimeCapsule(amount, currency, rates, {
+    transactionDate: options.transactionDate,
+    feeDisabled: options.feeDisabled,
+    displayCurrency: options.displayCurrency,
+    capsule: options.capsule,
+  });
+  if (!snapshot) return null;
+
+  const liveRates = rates ?? (await fetchExchangeRates().catch(() => null));
+  if (!liveRates) return null;
+
+  const manualRateUsed = !options.manualRateDisabled && snapshot.manualRateAvailable;
+  const ilsAmount = resolveExpenseAmountFromSnapshot(snapshot, { manualRateUsed });
+
+  const displayAmount = resolveExpensePrimaryDisplayAmount(
+    amount,
+    currency,
+    ilsAmount,
+    options.displayCurrency,
+    liveRates,
+    {
+      manualRateUsed,
+      manualRateDisabled: options.manualRateDisabled,
+      feeDisabled: options.feeDisabled,
+      storedSnapshot: snapshot,
+    },
+  );
+
+  return { ilsAmount, appliedFeePercent: snapshot.appliedFeePercent, manualRateUsed, displayAmount };
 }
 
 /**

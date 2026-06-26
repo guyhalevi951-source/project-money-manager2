@@ -1,6 +1,9 @@
 import { type User } from 'firebase/auth';
 import { roundMoney } from './services/money';
 import { normalizeStoredOriginalCurrency } from './services/displayCurrencyUtils';
+import { isSupportedCurrency, type ExpenseCurrency } from './constants/currencies';
+import type { ExpenseCreationTimeCapsule } from './services/expenseConversionService';
+import type { CommissionCurrency } from './services/currencyCommissionService';
 
 export interface StoredExpense {
   id: string;
@@ -36,6 +39,39 @@ export interface StoredExpense {
   creationHadActiveManualRate?: boolean;
   /** Immutable: global commission fee was active for this currency at creation time. */
   creationHadActiveFee?: boolean;
+  /** Immutable snapshot of all active manual rates + fees at creation (Time Capsule). */
+  creationTimeCapsule?: ExpenseCreationTimeCapsule;
+}
+
+/**
+ * Build a minimal capsule for pre-capsule rows from persisted single-pair fields.
+ * Returns undefined when nothing meaningful can be reconstructed, so the edit
+ * modal falls back to the legacy `creationHadActive*` flags.
+ */
+function synthesizeLegacyTimeCapsule(
+  expense: StoredExpense,
+  normalizedCurrency: string | undefined,
+): ExpenseCreationTimeCapsule | undefined {
+  const code = normalizedCurrency?.trim().toUpperCase();
+  if (!code || code === 'ILS' || !isSupportedCurrency(code)) return undefined;
+
+  const manualRates: ExpenseCreationTimeCapsule['manualRates'] = [];
+  const fees: ExpenseCreationTimeCapsule['fees'] = [];
+
+  if (expense.savedManualRate != null && expense.savedManualRate > 0) {
+    manualRates.push({
+      baseCurrency: code as ExpenseCurrency,
+      quoteCurrency: 'ILS',
+      rate: expense.savedManualRate,
+      pairSpecific: true,
+    });
+  }
+  if ((expense.appliedFeePercent ?? 0) > 0) {
+    fees.push({ currency: code as CommissionCurrency, percent: expense.appliedFeePercent! });
+  }
+
+  if (manualRates.length === 0 && fees.length === 0) return undefined;
+  return { capturedAt: 0, manualRates, fees };
 }
 
 /** Normalize amounts, currency codes, and legacy field names on load. */
@@ -66,15 +102,19 @@ export function normalizeStoredExpense(expense: StoredExpense): StoredExpense {
     : (storedInManual == null && !manualRateUsed) ? amount
     : undefined;
 
+  const normalizedCurrency =
+    expense.originalCurrency != null
+      ? normalizeStoredOriginalCurrency(expense.originalCurrency)
+      : undefined;
+
   return {
     ...expense,
     amount,
     originalAmount:
       expense.originalAmount != null ? roundMoney(Number(expense.originalAmount)) : undefined,
-    originalCurrency:
-      expense.originalCurrency != null
-        ? normalizeStoredOriginalCurrency(expense.originalCurrency)
-        : undefined,
+    originalCurrency: normalizedCurrency,
+    creationTimeCapsule:
+      expense.creationTimeCapsule ?? synthesizeLegacyTimeCapsule(expense, normalizedCurrency),
     manualRateDisabled: Boolean(legacy.manualRateDisabled ?? legacy.disableManualRate),
     feeDisabled: Boolean(legacy.feeDisabled ?? legacy.disableFee),
     manualRateUsed,

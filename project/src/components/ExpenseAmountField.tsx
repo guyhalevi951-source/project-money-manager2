@@ -6,7 +6,10 @@ import { getCurrencyMeta, type CurrencyCode } from '../constants/currencies';
 import { usePinnedCurrencies } from '../hooks/usePinnedCurrencies';
 import { formatAmountWithSymbol } from '../services/displayCurrencyUtils';
 import {
+  resolveCapsuleForeignDisplayAmount,
   resolveLiveForeignDisplayAmount,
+  resolveManualRateFromCapsule,
+  type ExpenseCreationTimeCapsule,
 } from '../services/expenseConversionService';
 import {
   listActiveCurrencyCommissions,
@@ -73,6 +76,11 @@ interface ExpenseAmountFieldProps {
   previewManualRateDisabled?: boolean;
   /** Edit modal: when true, preview excludes commission fees. */
   previewFeeDisabled?: boolean;
+  /**
+   * Edit modal: when set, the upper `≈` preview reads manual rates + fees from this
+   * frozen creation-time capsule instead of live global settings (sandbox isolation).
+   */
+  previewTimeCapsule?: ExpenseCreationTimeCapsule;
 }
 
 export default function ExpenseAmountField({
@@ -87,6 +95,7 @@ export default function ExpenseAmountField({
   snapInputGroupToColumnEnd = false,
   previewManualRateDisabled = false,
   previewFeeDisabled = false,
+  previewTimeCapsule,
 }: ExpenseAmountFieldProps) {
   const { tr, displayCurrency } = useLanguage();
   const displayMeta = getCurrencyMeta(displayCurrency);
@@ -265,6 +274,20 @@ export default function ExpenseAmountField({
       return null;
     }
 
+    if (previewTimeCapsule != null) {
+      return resolveCapsuleForeignDisplayAmount(
+        parsedAmount,
+        inputCurrency,
+        displayCurrency,
+        rates,
+        previewTimeCapsule,
+        {
+          manualRateDisabled: previewManualRateDisabled,
+          feeDisabled: previewFeeDisabled,
+        },
+      );
+    }
+
     return resolveLiveForeignDisplayAmount(
       parsedAmount,
       inputCurrency,
@@ -285,18 +308,22 @@ export default function ExpenseAmountField({
     manualOverrideVersion,
     previewManualRateDisabled,
     previewFeeDisabled,
+    previewTimeCapsule,
   ]);
 
   const activeCommissionPercent = useMemo(() => {
     if (previewFeeDisabled || convertedDisplayAmount == null || !rates) return 0;
-    const activeFees = toActiveFeesFromCommissionEntries(listActiveCurrencyCommissions());
+    const activeFees =
+      previewTimeCapsule != null
+        ? previewTimeCapsule.fees
+        : toActiveFeesFromCommissionEntries(listActiveCurrencyCommissions());
     return getAppliedCommissionPercentForPair(
       activeFees,
       inputCurrency,
       displayCurrency,
       displayCurrency,
     );
-  }, [convertedDisplayAmount, inputCurrency, displayCurrency, commissionVersion, rates, previewFeeDisabled]);
+  }, [convertedDisplayAmount, inputCurrency, displayCurrency, commissionVersion, rates, previewFeeDisabled, previewTimeCapsule]);
 
   const convertedAmountFormatted = useMemo(() => {
     if (convertedDisplayAmount == null) return null;
@@ -309,6 +336,9 @@ export default function ExpenseAmountField({
    */
   const hasActivePairManualOverride = useMemo(() => {
     if (previewManualRateDisabled || !showDisplayPreview) return false;
+    if (previewTimeCapsule != null) {
+      return resolveManualRateFromCapsule(previewTimeCapsule, inputCurrency, displayCurrency) != null;
+    }
     return hasActiveManualOverrideForPair(inputCurrency, displayCurrency);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -317,6 +347,7 @@ export default function ExpenseAmountField({
     inputCurrency,
     displayCurrency,
     previewManualRateDisabled,
+    previewTimeCapsule,
   ]);
 
   const amountInputSize = useMemo(() => getAmountInputWidth(amount), [amount]);
