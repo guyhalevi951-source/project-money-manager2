@@ -1376,36 +1376,62 @@ export function resolveStoredExpenseLedgerIls(expense: StoredExpenseDisplayField
   return expense.amount;
 }
 
-/**
- * Display-only ILS amount for expense history cards.
- * Recomputes from stored unit rates with roundMoney (never smartRoundMoney) so the
- * card matches the Edit Modal preview precision (e.g. 499.96 vs integer-snapped 500).
- */
-export function resolveExpenseIlsDisplayAmount(expense: StoredExpenseDisplayFields): number {
+/** Recompute ILS display from originalAmount × active-path unit rate (roundMoney only). */
+function recomputeIlsDisplayFromActivePath(
+  expense: StoredExpenseDisplayFields,
+  manualRateSelected: boolean,
+): number | null {
   const hasOriginal =
     expense.originalAmount != null &&
     expense.originalAmount > 0 &&
     Boolean(expense.originalCurrency?.trim());
+  if (!hasOriginal) return null;
 
-  if (hasOriginal) {
-    const manualRateSelected = expense.manualRateUsed !== false;
-    let unitRate: number | null = null;
-    if (manualRateSelected && expense.savedManualRate != null && expense.savedManualRate > 0) {
+  let unitRate: number | null = null;
+  if (manualRateSelected) {
+    if (expense.savedManualRate != null && expense.savedManualRate > 0) {
       unitRate = expense.savedManualRate;
-    } else if (expense.savedSpotRate != null && expense.savedSpotRate > 0) {
-      unitRate = expense.savedSpotRate;
+    } else if (expense.amountInManual != null) {
+      return roundMoney(expense.amountInManual);
     }
-
-    if (unitRate != null) {
-      let raw = expense.originalAmount! * unitRate;
-      const feePercent =
-        expense.feeApplied === true ? (expense.appliedFeePercent ?? 0) : 0;
-      if (feePercent > 0) {
-        raw *= 1 + feePercent / 100;
-      }
-      return roundMoney(raw);
+  } else {
+    if (expense.savedSpotRate != null && expense.savedSpotRate > 0) {
+      unitRate = expense.savedSpotRate;
+    } else if (expense.amountInSpot != null) {
+      return roundMoney(expense.amountInSpot);
     }
   }
+
+  if (unitRate == null) return null;
+
+  let raw = expense.originalAmount! * unitRate;
+  const feePercent = expense.feeApplied === true ? (expense.appliedFeePercent ?? 0) : 0;
+  if (feePercent > 0) {
+    raw *= 1 + feePercent / 100;
+  }
+  return roundMoney(raw);
+}
+
+/**
+ * Display-only ILS amount for expense history cards.
+ * Snapshot-path-first (manual vs spot) — mirrors Edit Modal — with roundMoney precision.
+ */
+export function resolveExpenseIlsDisplayAmount(expense: StoredExpenseDisplayFields): number {
+  const manualRateSelected = expense.manualRateUsed !== false;
+  const hasDualSnapshot = expense.amountInManual != null && expense.amountInSpot != null;
+
+  if (hasDualSnapshot) {
+    const pathAmount = resolveExpenseAmountFromSnapshot(
+      { amountInManual: expense.amountInManual, amountInSpot: expense.amountInSpot },
+      { manualRateUsed: manualRateSelected },
+    );
+    const recomputed = recomputeIlsDisplayFromActivePath(expense, manualRateSelected);
+    if (recomputed != null) return recomputed;
+    return roundMoney(pathAmount);
+  }
+
+  const recomputed = recomputeIlsDisplayFromActivePath(expense, manualRateSelected);
+  if (recomputed != null) return recomputed;
 
   return roundMoney(resolveStoredExpenseLedgerIls(expense));
 }
@@ -1472,8 +1498,10 @@ export function formatStoredExpenseDisplayView(
   displayCurrency: ExpenseCurrency,
   rates: ExchangeRates | null,
 ): ExpenseDisplayAmount {
+  const ilsAmountForSecondary =
+    displayCurrency === 'ILS' ? view.primaryDisplayAmount : view.ledgerIlsAmount;
   const formatted = resolveExpenseDisplayAmount(
-    view.ledgerIlsAmount,
+    ilsAmountForSecondary,
     displayCurrency,
     rates,
     expense.originalAmount,
