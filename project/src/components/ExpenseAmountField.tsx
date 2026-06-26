@@ -9,7 +9,10 @@ import {
   resolveCapsuleForeignDisplayAmount,
   resolveLiveForeignDisplayAmount,
   resolveManualRateFromCapsule,
+  editDisplayPathsMatchSavedFeeState,
+  resolvePersistedEditDisplayAmount,
   type ExpenseCreationTimeCapsule,
+  type SavedExpenseDualSnapshotOverlay,
 } from '../services/expenseConversionService';
 import {
   listActiveCurrencyCommissions,
@@ -81,6 +84,8 @@ interface ExpenseAmountFieldProps {
    * frozen creation-time capsule instead of live global settings (sandbox isolation).
    */
   previewTimeCapsule?: ExpenseCreationTimeCapsule;
+  /** Edit modal: frozen expense snapshot — restores saved display paths when amount/fee unchanged. */
+  previewSavedDisplaySnapshot?: SavedExpenseDualSnapshotOverlay | null;
 }
 
 export default function ExpenseAmountField({
@@ -96,6 +101,7 @@ export default function ExpenseAmountField({
   previewManualRateDisabled = false,
   previewFeeDisabled = false,
   previewTimeCapsule,
+  previewSavedDisplaySnapshot,
 }: ExpenseAmountFieldProps) {
   const { tr, displayCurrency } = useLanguage();
   const displayMeta = getCurrencyMeta(displayCurrency);
@@ -274,6 +280,17 @@ export default function ExpenseAmountField({
       return null;
     }
 
+    if (
+      previewSavedDisplaySnapshot &&
+      editDisplayPathsMatchSavedFeeState(parsedAmount, previewFeeDisabled, previewSavedDisplaySnapshot)
+    ) {
+      const persisted = resolvePersistedEditDisplayAmount(
+        previewSavedDisplaySnapshot,
+        previewManualRateDisabled,
+      );
+      if (persisted != null) return persisted;
+    }
+
     if (previewTimeCapsule != null) {
       return resolveCapsuleForeignDisplayAmount(
         parsedAmount,
@@ -309,6 +326,7 @@ export default function ExpenseAmountField({
     previewManualRateDisabled,
     previewFeeDisabled,
     previewTimeCapsule,
+    previewSavedDisplaySnapshot,
   ]);
 
   const activeCommissionPercent = useMemo(() => {

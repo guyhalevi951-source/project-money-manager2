@@ -868,7 +868,17 @@ export function resolveExpensePrimaryDisplayAmount(
       );
       if (live != null) return live;
     }
-    return typedAmount;
+
+    if (rates) {
+      return projectExpensePrimaryDisplayAmount(
+        typedAmount,
+        expenseCurrency,
+        ledgerIlsAmount,
+        displayCurrency,
+        rates,
+      );
+    }
+    return ledgerIlsAmount;
   }
 
   if (!rates) return ledgerIlsAmount;
@@ -1026,6 +1036,26 @@ export type SavedExpenseDualSnapshotOverlay = {
   feeApplied?: boolean;
 };
 
+/** True when edit draft amount matches the saved original amount (within rounding). */
+export function editAmountMatchesSavedExpense(
+  typedAmount: number,
+  existing: SavedExpenseDualSnapshotOverlay | null | undefined,
+): boolean {
+  if (existing?.originalAmount == null || !(typedAmount > 0)) return false;
+  return Math.abs(roundMoney(typedAmount) - roundMoney(existing.originalAmount)) < 0.005;
+}
+
+/** True when edit draft matches saved amount + fee toggle — manual path may differ. */
+export function editDisplayPathsMatchSavedFeeState(
+  typedAmount: number,
+  feeDisabled: boolean,
+  existing: SavedExpenseDualSnapshotOverlay | null | undefined,
+): boolean {
+  if (!editAmountMatchesSavedExpense(typedAmount, existing)) return false;
+  const savedFee = existing!.feeApplied === true;
+  return feeDisabled === !savedFee;
+}
+
 /** True when edit draft matches saved amount + modifier toggles — use persisted display paths 1:1. */
 export function editHydrationMatchesSavedExpense(
   typedAmount: number,
@@ -1066,9 +1096,8 @@ export function overlaySavedExpenseDualSnapshot(
 
   const hydrationMatch =
     options != null &&
-    editHydrationMatchesSavedExpense(
+    editDisplayPathsMatchSavedFeeState(
       typedAmount,
-      options.manualRateDisabled ?? false,
       options.feeDisabled ?? false,
       existing,
     );
@@ -1632,12 +1661,7 @@ export async function previewExpenseDisplayAmountFromTimeCapsule(
 
   if (
     options.existingSnapshot &&
-    editHydrationMatchesSavedExpense(
-      amount,
-      options.manualRateDisabled,
-      feeDisabled,
-      options.existingSnapshot,
-    )
+    editDisplayPathsMatchSavedFeeState(amount, feeDisabled, options.existingSnapshot)
   ) {
     const displayAmount = resolvePersistedEditDisplayAmount(
       options.existingSnapshot,
@@ -1647,7 +1671,7 @@ export async function previewExpenseDisplayAmountFromTimeCapsule(
       const manualRateUsed = !options.manualRateDisabled;
       const ilsAmount = resolveStoredExpenseLedgerIls(options.existingSnapshot);
       // #region agent log
-      fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28e551'},body:JSON.stringify({sessionId:'28e551',location:'expenseConversionService:previewTimeCapsule',message:'hydration 1:1 display',data:{amount,currency,displayAmount,displayAmountInManual:options.existingSnapshot.displayAmountInManual,displayAmountInSpot:options.existingSnapshot.displayAmountInSpot,manualRateDisabled:options.manualRateDisabled,feeDisabled},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
+      fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28e551'},body:JSON.stringify({sessionId:'28e551',location:'expenseConversionService:previewTimeCapsule',message:'hydration 1:1 display',data:{amount,currency,displayAmount,displayAmountInManual:options.existingSnapshot.displayAmountInManual,displayAmountInSpot:options.existingSnapshot.displayAmountInSpot,manualRateDisabled:options.manualRateDisabled,feeDisabled,path:'saved-fee-match'},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
       // #endregion
       return {
         ilsAmount,
@@ -1676,12 +1700,7 @@ export async function previewExpenseDisplayAmountFromTimeCapsule(
 
   const usePersistedDisplay =
     options.existingSnapshot != null &&
-    editHydrationMatchesSavedExpense(
-      amount,
-      options.manualRateDisabled,
-      feeDisabled,
-      options.existingSnapshot,
-    );
+    editDisplayPathsMatchSavedFeeState(amount, feeDisabled, options.existingSnapshot);
 
   const displayAmount = resolveExpensePrimaryDisplayAmount(
     amount,
@@ -1690,7 +1709,7 @@ export async function previewExpenseDisplayAmountFromTimeCapsule(
     options.displayCurrency,
     liveRates,
     {
-      manualRateUsed,
+      manualRateUsed: !options.manualRateDisabled,
       manualRateDisabled: options.manualRateDisabled,
       feeDisabled,
       storedSnapshot: usePersistedDisplay ? options.existingSnapshot! : snapshot,
@@ -1721,12 +1740,7 @@ export async function previewExpenseDisplayAmountFromSnapshot(
 
   if (
     options.existingSnapshot &&
-    editHydrationMatchesSavedExpense(
-      amount,
-      options.manualRateDisabled,
-      feeDisabled,
-      options.existingSnapshot,
-    )
+    editDisplayPathsMatchSavedFeeState(amount, feeDisabled, options.existingSnapshot)
   ) {
     const displayAmount = resolvePersistedEditDisplayAmount(
       options.existingSnapshot,
@@ -1760,12 +1774,7 @@ export async function previewExpenseDisplayAmountFromSnapshot(
 
   const usePersistedDisplay =
     options.existingSnapshot != null &&
-    editHydrationMatchesSavedExpense(
-      amount,
-      options.manualRateDisabled,
-      feeDisabled,
-      options.existingSnapshot,
-    );
+    editDisplayPathsMatchSavedFeeState(amount, feeDisabled, options.existingSnapshot);
 
   const displayAmount = resolveExpensePrimaryDisplayAmount(
     amount,
@@ -1774,7 +1783,7 @@ export async function previewExpenseDisplayAmountFromSnapshot(
     options.displayCurrency,
     liveRates,
     {
-      manualRateUsed,
+      manualRateUsed: !options.manualRateDisabled,
       manualRateDisabled: options.manualRateDisabled,
       feeDisabled,
       storedSnapshot: usePersistedDisplay ? options.existingSnapshot! : snapshot,

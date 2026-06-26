@@ -104,7 +104,7 @@ import {
   captureExpenseTimeCapsule,
   expenseEditShowsFeeToggle,
   expenseEditShowsManualRateToggle,
-  editHydrationMatchesSavedExpense,
+  editDisplayPathsMatchSavedFeeState,
   previewExpenseDisplayAmountFromSnapshot,
   previewExpenseDisplayAmountFromTimeCapsule,
   recordDualExpenseConversion,
@@ -5588,9 +5588,8 @@ function App() {
 
       const preserveDisplaySnapshots =
         editExpenseSnapshot != null &&
-        editHydrationMatchesSavedExpense(
+        editDisplayPathsMatchSavedFeeState(
           typedAmount,
-          !editApplyManualRate,
           feeDisabled,
           editExpenseSnapshot,
         );
@@ -6786,6 +6785,7 @@ function App() {
                   previewManualRateDisabled={editPreviewManualRateDisabled}
                   previewFeeDisabled={editPreviewFeeDisabled}
                   previewTimeCapsule={editCapsule}
+                  previewSavedDisplaySnapshot={editExpenseSnapshot}
                 />
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col gap-4 sm:flex-row sm:items-end">
