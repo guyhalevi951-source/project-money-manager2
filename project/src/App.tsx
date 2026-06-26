@@ -5398,7 +5398,7 @@ function App() {
   /** Manual/Market segmented toggle — history cards only; hidden while edit modal is open. */
   const resolveHistoryDualRateMode = useCallback(
     (expense: Expense): DualRateMode | undefined => {
-      if (editingExpenseId === expense.id) return undefined;
+      if (editingExpenseId != null) return undefined;
       if (!expenseHasDualRateSnapshot(expense)) return undefined;
       return {
         manualSelected: expense.manualRateUsed !== false,
