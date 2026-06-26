@@ -1670,9 +1670,6 @@ export async function previewExpenseDisplayAmountFromTimeCapsule(
     if (displayAmount != null) {
       const manualRateUsed = !options.manualRateDisabled;
       const ilsAmount = resolveStoredExpenseLedgerIls(options.existingSnapshot);
-      // #region agent log
-      fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28e551'},body:JSON.stringify({sessionId:'28e551',location:'expenseConversionService:previewTimeCapsule',message:'hydration 1:1 display',data:{amount,currency,displayAmount,displayAmountInManual:options.existingSnapshot.displayAmountInManual,displayAmountInSpot:options.existingSnapshot.displayAmountInSpot,manualRateDisabled:options.manualRateDisabled,feeDisabled,path:'saved-fee-match'},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
       return {
         ilsAmount,
         appliedFeePercent: options.existingSnapshot.appliedFeePercent ?? 0,
@@ -1715,10 +1712,6 @@ export async function previewExpenseDisplayAmountFromTimeCapsule(
       storedSnapshot: usePersistedDisplay ? options.existingSnapshot! : snapshot,
     },
   );
-
-  // #region agent log
-  fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28e551'},body:JSON.stringify({sessionId:'28e551',location:'expenseConversionService:previewTimeCapsule',message:'recomputed display',data:{amount,currency,displayAmount,recomputedManual:snapshot.displayAmountInManual,recomputedSpot:snapshot.displayAmountInSpot,usePersistedDisplay,manualRateDisabled:options.manualRateDisabled,feeDisabled},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
-  // #endregion
 
   return { ilsAmount, appliedFeePercent: snapshot.appliedFeePercent, manualRateUsed, displayAmount };
 }
