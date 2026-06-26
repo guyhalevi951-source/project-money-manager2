@@ -69,7 +69,7 @@ import {
 } from './services/settingsPersistenceEngine';
 import ExpenseAmountField from './components/ExpenseAmountField';
 import SelectedDaySummary from './components/SelectedDaySummary';
-import ExpenseAmountDisplay, { type DualRateMode } from './components/ExpenseAmountDisplay';
+import ExpenseAmountDisplay from './components/ExpenseAmountDisplay';
 import DisplayMoney, { DisplayCurrencyAmount } from './components/DisplayMoney';
 import { useDisplayProjection } from './hooks/useDisplayProjection';
 import { useRateCacheSync } from './hooks/useRateCacheSync';
@@ -104,7 +104,6 @@ import {
   captureExpenseTimeCapsule,
   expenseEditShowsFeeToggle,
   expenseEditShowsManualRateToggle,
-  expenseHasDualRateSnapshot,
   previewExpenseDisplayAmountFromSnapshot,
   previewExpenseDisplayAmountFromTimeCapsule,
   recordDualExpenseConversion,
@@ -3322,6 +3321,8 @@ function App() {
   // Active manual-rate / fee apply toggles — edit expense modal only
   const [editApplyManualRate, setEditApplyManualRate] = useState(true);
   const [editApplyFee, setEditApplyFee] = useState(true);
+  /** Tracks draft currency for edit-modal checkbox re-default on currency change only. */
+  const editCurrencyResetRef = useRef<ExpenseCurrency | null>(null);
   const [showBudgetSaved, setShowBudgetSaved] = useState(false);
   const [autoTransferByMonth, setAutoTransferByMonth] = useState<Record<string, boolean>>({});
 
@@ -5382,47 +5383,6 @@ function App() {
     setExpenses(expenses.filter(expense => expense.id !== id));
   };
 
-  /**
-   * Toggle the displayed rate on a history card between manual and spot.
-   * Updates the expense's `amount` and `manualRateUsed` and persists.
-   */
-  const handleToggleExpenseRate = useCallback(
-    (expenseId: string, useManual: boolean) => {
-      setExpenses((prev) => {
-        const nextExpenses = prev.map((expense) => {
-          if (expense.id !== expenseId) return expense;
-          if (useManual) {
-            // Prefer amountInManual; fall back to current amount if undefined (legacy)
-            const manual = expense.amountInManual ?? expense.amount;
-            return { ...expense, amount: manual, manualRateUsed: true };
-          } else {
-            // Prefer amountInSpot; fall back to current amount if undefined (legacy)
-            const spot = expense.amountInSpot ?? expense.amount;
-            return { ...expense, amount: spot, manualRateUsed: false };
-          }
-        });
-        const payload = buildCurrentFinancialPayload(nextExpenses);
-        commitFinancialPayloadRef.current(payload, { cloud: true });
-        return nextExpenses;
-      });
-    },
-    [buildCurrentFinancialPayload],
-  );
-
-  /** Manual/Market segmented toggle — history cards only; hidden while edit modal is open. */
-  const resolveHistoryDualRateMode = useCallback(
-    (expense: Expense): DualRateMode | undefined => {
-      if (editingExpenseId != null) return undefined;
-      if (!expenseHasDualRateSnapshot(expense)) return undefined;
-      return {
-        manualSelected: expense.manualRateUsed !== false,
-        onSelectManual: () => handleToggleExpenseRate(expense.id, true),
-        onSelectSpot: () => handleToggleExpenseRate(expense.id, false),
-      };
-    },
-    [displayCurrency, editingExpenseId, handleToggleExpenseRate],
-  );
-
   const getExpenseEditCurrency = useCallback(
     (expense: Expense): ExpenseCurrency => {
       if (expense.originalCurrency) {
@@ -5439,6 +5399,7 @@ function App() {
       expense.originalAmount != null && expense.originalAmount > 0
         ? expense.originalAmount
         : roundMoneyAmount(expense.amount);
+    editCurrencyResetRef.current = null;
     setEditingExpenseId(expense.id);
     setEditExpenseRatesReady(true);
     setEditExpenseSnapshot(expense);
@@ -5452,9 +5413,13 @@ function App() {
     // Default toggles from saved state
     setEditApplyManualRate(expense.manualRateUsed !== false);
     setEditApplyFee(expense.feeApplied === true);
+    // #region agent log
+    fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28e551'},body:JSON.stringify({sessionId:'28e551',location:'App.tsx:handleEditExpenseStart',message:'edit modal open',data:{expenseId:expense.id,editCurrency,editAmount,manualRateUsed:expense.manualRateUsed,feeApplied:expense.feeApplied,displayAmountInManual:expense.displayAmountInManual,displayAmountInSpot:expense.displayAmountInSpot,hasCapsule:expense.creationTimeCapsule!=null,displayCurrency},timestamp:Date.now(),hypothesisId:'A,B'})}).catch(()=>{});
+    // #endregion
   };
 
   const handleEditExpenseCancel = () => {
+    editCurrencyResetRef.current = null;
     setEditingExpenseId(null);
     setEditExpenseDraft(null);
     setEditExpenseSnapshot(null);
@@ -5474,20 +5439,28 @@ function App() {
   // Legacy rows without a capsule fall back to the persisted creation flags.
   const editCapsule = editExpenseSnapshot?.creationTimeCapsule;
   const editShowsManualRate =
-    editCapsule != null && editDraftCurrency != null
-      ? capsuleHasManualRateForConversion(editCapsule, editDraftCurrency, displayCurrency)
-      : editExpenseSnapshot != null && expenseEditShowsManualRateToggle(editExpenseSnapshot);
+    editExpenseSnapshot != null &&
+    ((editCapsule != null && editDraftCurrency != null &&
+      capsuleHasManualRateForConversion(editCapsule, editDraftCurrency, displayCurrency)) ||
+      expenseEditShowsManualRateToggle(editExpenseSnapshot));
   const editShowsFee =
-    editCapsule != null && editDraftCurrency != null
-      ? capsuleHasFeeForCurrency(editCapsule, editDraftCurrency)
-      : editExpenseSnapshot != null && expenseEditShowsFeeToggle(editExpenseSnapshot);
+    editExpenseSnapshot != null &&
+    ((editCapsule != null && editDraftCurrency != null &&
+      capsuleHasFeeForCurrency(editCapsule, editDraftCurrency)) ||
+      expenseEditShowsFeeToggle(editExpenseSnapshot));
   const editPreviewManualRateDisabled = editShowsManualRate ? editDraftManualRateDisabled : true;
   const editPreviewFeeDisabled = editShowsFee ? editDraftFeeDisabled : true;
+
+  // #region agent log
+  useEffect(() => {
+    if (editExpenseSnapshot == null) return;
+    fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28e551'},body:JSON.stringify({sessionId:'28e551',location:'App.tsx:editModalVisibility',message:'edit modal visibility state',data:{editShowsManualRate,editShowsFee,editApplyManualRate,editApplyFee,editDraftCurrency,currencyResetRef:editCurrencyResetRef.current,capsuleHasManual:editCapsule!=null&&editDraftCurrency!=null?capsuleHasManualRateForConversion(editCapsule,editDraftCurrency,displayCurrency):null,snapshotToggle:expenseEditShowsManualRateToggle(editExpenseSnapshot),editPreviewAmount},timestamp:Date.now(),hypothesisId:'A,B,C'})}).catch(()=>{});
+  }, [editExpenseSnapshot, editShowsManualRate, editShowsFee, editApplyManualRate, editApplyFee, editDraftCurrency, editCapsule, displayCurrency, editPreviewAmount]);
+  // #endregion
 
   // When the user changes the draft currency, re-default the checkboxes against the
   // capsule: a newly relevant checkbox defaults to checked, an irrelevant one to off.
   // The initial open keeps the expense's saved checkbox state (handled on edit start).
-  const editCurrencyResetRef = useRef<ExpenseCurrency | null>(null);
   useEffect(() => {
     if (editDraftCurrency == null) {
       editCurrencyResetRef.current = null;
@@ -5498,6 +5471,9 @@ function App() {
       return;
     }
     if (editCurrencyResetRef.current === editDraftCurrency) return;
+    // #region agent log
+    fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28e551'},body:JSON.stringify({sessionId:'28e551',location:'App.tsx:editCurrencyResetEffect',message:'currency change reset checkboxes',data:{prevRef:editCurrencyResetRef.current,nextCurrency:editDraftCurrency,editShowsManualRate,editShowsFee},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
     editCurrencyResetRef.current = editDraftCurrency;
     setEditApplyManualRate(editShowsManualRate);
     setEditApplyFee(editShowsFee);
@@ -5533,6 +5509,7 @@ function App() {
           manualRateDisabled: editPreviewManualRateDisabled,
           feeDisabled: editPreviewFeeDisabled,
           capsule: editCapsule,
+          existingSnapshot: editExpenseSnapshot,
         })
       : previewExpenseDisplayAmountFromSnapshot(typed, editDraftCurrency, rates, {
           displayCurrency,
@@ -5598,6 +5575,7 @@ function App() {
               feeDisabled,
               displayCurrency,
               capsule: editCapsule,
+              existingSnapshot: editExpenseSnapshot,
             },
           )
         : await recordDualExpenseConversionFromSnapshot(
@@ -6612,7 +6590,6 @@ function App() {
                           <ExpenseAmountDisplay
                             expense={expense}
                             variant="card"
-                            dualRateMode={resolveHistoryDualRateMode(expense)}
                           />
                         </div>
                         <div className="shrink-0 flex items-center gap-1">
@@ -6682,10 +6659,7 @@ function App() {
                           />
                         </div>
                         <div role="cell" className="flex items-end justify-end text-end">
-                          <ExpenseAmountDisplay
-                            expense={expense}
-                            dualRateMode={resolveHistoryDualRateMode(expense)}
-                          />
+                          <ExpenseAmountDisplay expense={expense} />
                         </div>
                         <div role="cell" className="flex justify-end">
                           <CategoryColorChip color={categoryInfo.color} icon={IconComponent}>

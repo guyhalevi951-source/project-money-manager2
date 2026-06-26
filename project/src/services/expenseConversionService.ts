@@ -937,8 +937,14 @@ export function expenseEditShowsManualRateToggle(expense: {
   creationHadActiveManualRate?: boolean;
   savedManualRate?: number | null;
   amountInManual?: number;
+  displayAmountInManual?: number | null;
+  manualRateUsed?: boolean;
 }): boolean {
-  return expenseHadCreationManualRate(expense) || expenseHasSavedManualRateSnapshot(expense);
+  return (
+    expenseHadCreationManualRate(expense) ||
+    expenseHasSavedManualRateSnapshot(expense) ||
+    expense.manualRateUsed === true
+  );
 }
 
 /** Edit modal: show fee toggle when creation had it OR fee snapshot exists. */
@@ -947,7 +953,11 @@ export function expenseEditShowsFeeToggle(expense: {
   feeApplied?: boolean;
   appliedFeePercent?: number;
 }): boolean {
-  return expenseHadCreationFee(expense) || expenseHasSavedFeeSnapshot(expense);
+  return (
+    expenseHadCreationFee(expense) ||
+    expenseHasSavedFeeSnapshot(expense) ||
+    expense.feeApplied === true
+  );
 }
 
 // ── Snapshot visibility helpers (independent of global settings) ─────────────
@@ -979,6 +989,65 @@ export function expenseHasSavedFeeSnapshot(expense: {
   return expense.feeApplied === true || (expense.appliedFeePercent ?? 0) > 0;
 }
 
+/** Persisted dual-snapshot fields used to restore edit-modal state when capsule recompute lacks them. */
+export type SavedExpenseDualSnapshotOverlay = {
+  savedManualRate?: number | null;
+  savedSpotRate?: number;
+  amountInManual?: number | null;
+  amountInSpot?: number;
+  displayAmountInManual?: number | null;
+  displayAmountInSpot?: number;
+  appliedFeePercent?: number;
+  manualRateUsed?: boolean;
+  feeApplied?: boolean;
+};
+
+/** When capsule conversion lacks manual/fee paths, restore from the expense's saved snapshot. */
+export function overlaySavedExpenseDualSnapshot(
+  snapshot: DualExpenseConversionSnapshot,
+  existing: SavedExpenseDualSnapshotOverlay | null | undefined,
+  typedAmount: number,
+): DualExpenseConversionSnapshot {
+  if (existing == null || snapshot.manualRateAvailable) return snapshot;
+
+  const hasSavedManual =
+    expenseHasSavedManualRateSnapshot(existing) || existing.manualRateUsed === true;
+  const hasSavedFee = expenseHasSavedFeeSnapshot(existing) || existing.feeApplied === true;
+  if (!hasSavedManual && !hasSavedFee) return snapshot;
+
+  const patched: DualExpenseConversionSnapshot = {
+    ...snapshot,
+    manualRateAvailable: hasSavedManual ? true : snapshot.manualRateAvailable,
+    feeAvailable: hasSavedFee ? true : snapshot.feeAvailable,
+  };
+
+  if (existing.displayAmountInManual != null && existing.displayAmountInManual > 0) {
+    patched.displayAmountInManual = existing.displayAmountInManual;
+  }
+  if (existing.displayAmountInSpot != null && existing.displayAmountInSpot > 0) {
+    patched.displayAmountInSpot = existing.displayAmountInSpot;
+  }
+  if (existing.savedManualRate != null && existing.savedManualRate > 0) {
+    patched.savedManualRate = existing.savedManualRate;
+    if (existing.amountInManual != null) {
+      patched.amountInManual = existing.amountInManual;
+    } else if (typedAmount > 0) {
+      patched.amountInManual = roundMoney(typedAmount * existing.savedManualRate);
+    }
+  }
+  if (existing.savedSpotRate != null && existing.savedSpotRate > 0) {
+    patched.savedSpotRate = existing.savedSpotRate;
+    if (existing.amountInSpot != null) {
+      patched.amountInSpot = existing.amountInSpot;
+    }
+  }
+  if ((existing.appliedFeePercent ?? 0) > 0 && !(patched.appliedFeePercent > 0)) {
+    patched.appliedFeePercent = existing.appliedFeePercent!;
+  }
+
+  return patched;
+}
+
 // ── Snapshot-aware edit conversion ────────────────────────────────────────────
 
 export interface SnapshotAwareConversionOptions {
@@ -986,11 +1055,7 @@ export interface SnapshotAwareConversionOptions {
   feeDisabled?: boolean;
   displayCurrency?: ExpenseCurrency;
   /** Frozen snapshot from the expense being edited. Used to preserve rates when global settings are archived. */
-  existingSnapshot?: {
-    savedManualRate?: number | null;
-    savedSpotRate?: number;
-    appliedFeePercent?: number;
-  } | null;
+  existingSnapshot?: SavedExpenseDualSnapshotOverlay | null;
 }
 
 /**
@@ -1305,6 +1370,8 @@ export interface TimeCapsuleConversionOptions {
   displayCurrency?: ExpenseCurrency;
   /** Immutable creation-time capsule of the edited expense — the sole rate/fee source. */
   capsule: ExpenseCreationTimeCapsule;
+  /** Saved expense fields — restores manual/display paths the capsule recompute may omit. */
+  existingSnapshot?: SavedExpenseDualSnapshotOverlay | null;
 }
 
 /**
@@ -1362,11 +1429,15 @@ export async function recordDualExpenseConversionFromTimeCapsule(
         const mergedFeeAvailable =
           feeAvailable ||
           (!feeDisabled && (displayPath.appliedFeePercent ?? 0) > 0);
-        return mergeIlsOriginDisplaySnapshot(ilsPath, displayPath, mergedFeeAvailable);
+        return overlaySavedExpenseDualSnapshot(
+          mergeIlsOriginDisplaySnapshot(ilsPath, displayPath, mergedFeeAvailable),
+          options.existingSnapshot,
+          amount,
+        );
       }
     }
 
-    return ilsPath;
+    return overlaySavedExpenseDualSnapshot(ilsPath, options.existingSnapshot, amount);
   }
 
   const feePercent = resolveCapsuleLedgerFeePercent(capsule, from, feeDisabled);
@@ -1403,10 +1474,14 @@ export async function recordDualExpenseConversionFromTimeCapsule(
       feeDisabled,
       capsule,
     );
-    return mergeDualSnapshots(ilsPath, displayPath, feeAvailable);
+    return overlaySavedExpenseDualSnapshot(
+      mergeDualSnapshots(ilsPath, displayPath, feeAvailable),
+      options.existingSnapshot,
+      amount,
+    );
   }
 
-  return ilsPath;
+  return overlaySavedExpenseDualSnapshot(ilsPath, options.existingSnapshot, amount);
 }
 
 /**
@@ -1453,6 +1528,7 @@ export async function previewExpenseDisplayAmountFromTimeCapsule(
     feeDisabled?: boolean;
     transactionDate?: string;
     capsule: ExpenseCreationTimeCapsule;
+    existingSnapshot?: SavedExpenseDualSnapshotOverlay | null;
   },
 ): Promise<ExpenseDisplayPreview | null> {
   const snapshot = await recordDualExpenseConversionFromTimeCapsule(amount, currency, rates, {
@@ -1460,6 +1536,7 @@ export async function previewExpenseDisplayAmountFromTimeCapsule(
     feeDisabled: options.feeDisabled,
     displayCurrency: options.displayCurrency,
     capsule: options.capsule,
+    existingSnapshot: options.existingSnapshot,
   });
   if (!snapshot) return null;
 
