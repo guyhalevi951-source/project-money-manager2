@@ -5423,10 +5423,7 @@ function App() {
       if (editingExpenseId != null) return undefined;
       if (!expenseHasDualRateSnapshot(expense)) return undefined;
       return {
-        manualSelected:
-          displayCurrency === 'ILS'
-            ? expense.manualRateUsed === true
-            : expense.manualRateUsed !== false,
+        manualSelected: expense.manualRateUsed !== false,
         onSelectManual: () => handleToggleExpenseRate(expense.id, true),
         onSelectSpot: () => handleToggleExpenseRate(expense.id, false),
       };
@@ -5587,8 +5584,8 @@ function App() {
       const normalizedDate = normalizeDate(editExpenseDraft.date);
       const rates = getCachedExchangeRates();
 
-      // Legacy rows without a capsule keep the simple ILS 1:1 path.
-      if (editCapsule == null && editExpenseDraft.currency === 'ILS') {
+      // Legacy rows without a capsule: ILS 1:1 only when display is also ILS.
+      if (editCapsule == null && editExpenseDraft.currency === 'ILS' && displayCurrency === 'ILS') {
         const ils = roundMoneyAmount(typedAmount);
         return {
           amount: ils, savedManualRate: null as number | null, savedSpotRate: 1,

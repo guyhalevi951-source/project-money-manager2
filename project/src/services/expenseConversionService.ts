@@ -268,14 +268,7 @@ type DualConversionOptions = {
   displayCurrency?: ExpenseCurrency;
 };
 
-/** Foreign-to-foreign display path: convert via display currency then back to ILS ledger. */
-function buildDisplayPathDualLedgerSnapshot(
-  amount: number,
-  from: ExpenseCurrency,
-  displayCurrency: ExpenseCurrency,
-  liveRates: ExchangeRates,
-  feeDisabled: boolean,
-): Pick<
+type DisplayPathDualLedgerFields = Pick<
   DualExpenseConversionSnapshot,
   | 'savedManualRate'
   | 'savedSpotRate'
@@ -285,7 +278,77 @@ function buildDisplayPathDualLedgerSnapshot(
   | 'appliedFeePercent'
   | 'displayAmountInManual'
   | 'displayAmountInSpot'
-> | null {
+>;
+
+/** ILS-origin display path: project typed ILS into display currency (manual + spot). */
+function buildIlsOriginDisplayPathDualLedgerSnapshot(
+  amount: number,
+  displayCurrency: ExpenseCurrency,
+  liveRates: ExchangeRates,
+  feeDisabled: boolean,
+): DisplayPathDualLedgerFields | null {
+  if (displayCurrency === 'ILS') return null;
+
+  const activeFees = toActiveFeesFromCommissionEntries(listActiveCurrencyCommissions());
+  const manualOverrides = listActiveManualExchangeOverrides();
+  const withManual = toActiveExchangeRatesFromSnapshot(liveRates, manualOverrides);
+  const spotOnly = toActiveExchangeRatesFromSnapshot(liveRates, []);
+
+  const feesForTx = feeDisabled ? [] : activeFees;
+  const feePercent = feeDisabled
+    ? 0
+    : getAppliedCommissionPercentForPair(activeFees, 'ILS', displayCurrency, displayCurrency);
+
+  const manualTx = processTransactionWithUserRules(
+    amount,
+    'ILS',
+    displayCurrency,
+    feesForTx,
+    withManual,
+    { displayCurrency },
+  );
+  const spotTx = processTransactionWithUserRules(
+    amount,
+    'ILS',
+    displayCurrency,
+    feesForTx,
+    spotOnly,
+    { displayCurrency },
+  );
+  if (manualTx == null || spotTx == null) return null;
+
+  const ils = roundMoney(amount);
+  const hasDirectManualPair = hasActiveManualOverrideForPair('ILS', displayCurrency);
+  const manualDiffers =
+    Math.abs(manualTx.finalConvertedAmount - spotTx.finalConvertedAmount) /
+      Math.max(spotTx.finalConvertedAmount, 1e-9) >
+    1e-6;
+  const manualRateAvailable = hasDirectManualPair || manualDiffers;
+
+  const savedSpotRate = amount > 0 ? spotTx.finalConvertedAmount / amount : spotTx.finalConvertedAmount;
+  const savedManualRate =
+    manualRateAvailable && amount > 0 ? manualTx.finalConvertedAmount / amount : null;
+
+  return {
+    savedManualRate,
+    savedSpotRate,
+    amountInManual: null,
+    amountInSpot: ils,
+    manualRateAvailable,
+    appliedFeePercent: feePercent,
+    displayAmountInManual: manualRateAvailable ? roundMoney(manualTx.finalConvertedAmount) : null,
+    displayAmountInSpot: roundMoney(spotTx.finalConvertedAmount),
+  };
+}
+
+/** Foreign-to-foreign display path: convert via display currency then back to ILS ledger. */
+function buildDisplayPathDualLedgerSnapshot(
+  amount: number,
+  from: ExpenseCurrency,
+  displayCurrency: ExpenseCurrency,
+  liveRates: ExchangeRates,
+  feeDisabled: boolean,
+): DisplayPathDualLedgerFields | null {
   if (from === 'ILS' || displayCurrency === 'ILS' || from === displayCurrency) return null;
 
   const activeFees = toActiveFeesFromCommissionEntries(listActiveCurrencyCommissions());
@@ -643,6 +706,16 @@ export function isForeignToForeignDisplayCase(
   );
 }
 
+/** True when persisted display-currency snapshot paths drive the primary display line. */
+function usesStoredDisplaySnapshotPaths(
+  expenseCurrency: ExpenseCurrency,
+  displayCurrency: ExpenseCurrency,
+): boolean {
+  if (expenseCurrency === displayCurrency) return false;
+  if (isForeignToForeignDisplayCase(expenseCurrency, displayCurrency)) return true;
+  return expenseCurrency === 'ILS' && displayCurrency !== 'ILS';
+}
+
 /** Resolve display amount from persisted F2F snapshot paths. */
 function resolveStoredForeignDisplayAmount(
   snapshot: Pick<
@@ -718,7 +791,7 @@ export function resolveExpensePrimaryDisplayAmount(
   if (displayCurrency === 'ILS') return ledgerIlsAmount;
   if (expenseCurrency === displayCurrency) return typedAmount;
 
-  if (isForeignToForeignDisplayCase(expenseCurrency, displayCurrency)) {
+  if (usesStoredDisplaySnapshotPaths(expenseCurrency, displayCurrency)) {
     const manualRateUsed =
       options?.manualRateDisabled === true
         ? false
@@ -729,10 +802,24 @@ export function resolveExpensePrimaryDisplayAmount(
       : null;
     if (stored != null) return stored;
 
-    if (rates) {
+    if (rates && expenseCurrency !== 'ILS') {
       const live = resolveLiveForeignDisplayAmount(
         typedAmount,
         expenseCurrency,
+        displayCurrency,
+        rates,
+        {
+          manualRateDisabled: !manualRateUsed,
+          feeDisabled: options?.feeDisabled,
+        },
+      );
+      if (live != null) return live;
+    }
+
+    if (rates && expenseCurrency === 'ILS') {
+      const live = resolveLiveForeignDisplayAmount(
+        typedAmount,
+        'ILS',
         displayCurrency,
         rates,
         {
@@ -855,10 +942,12 @@ export function expenseEditShowsFeeToggle(expense: {
 export function expenseHasSavedManualRateSnapshot(expense: {
   savedManualRate?: number | null;
   amountInManual?: number;
+  displayAmountInManual?: number | null;
 }): boolean {
   return (
     (expense.savedManualRate != null && expense.savedManualRate > 0) ||
-    expense.amountInManual != null
+    expense.amountInManual != null ||
+    expense.displayAmountInManual != null
   );
 }
 
@@ -914,15 +1003,46 @@ export async function recordDualExpenseConversionFromSnapshot(
 
   if (from === 'ILS') {
     const ils = roundMoney(amount);
-    return {
+    const transactionDate = options?.transactionDate ?? getLocalTodayIso();
+    const feeDisabled = options?.feeDisabled ?? false;
+    const existingSnapshot = options?.existingSnapshot;
+    const displayCurrency = options?.displayCurrency;
+
+    let feePercent = resolveExpenseLedgerFeePercent('ILS', feeDisabled);
+    if (feePercent === 0 && !feeDisabled && existingSnapshot?.appliedFeePercent) {
+      feePercent = existingSnapshot.appliedFeePercent;
+    }
+    const preservedFeePercent =
+      feeDisabled && (existingSnapshot?.appliedFeePercent ?? 0) > 0
+        ? existingSnapshot!.appliedFeePercent!
+        : feePercent;
+    const feeAvailable = preservedFeePercent > 0;
+
+    const ilsPath: DualExpenseConversionSnapshot = {
       savedManualRate: null,
       savedSpotRate: 1,
       amountInManual: null,
       amountInSpot: ils,
-      appliedFeePercent: 0,
+      appliedFeePercent: preservedFeePercent,
       manualRateAvailable: false,
-      feeAvailable: false,
+      feeAvailable,
     };
+
+    if (displayCurrency && displayCurrency !== 'ILS') {
+      const displayPath = buildIlsOriginDisplayPathDualLedgerSnapshot(
+        amount,
+        displayCurrency,
+        liveRates,
+        feeDisabled,
+      );
+      if (displayPath != null) {
+        const mergedFeeAvailable =
+          feeAvailable || (!feeDisabled && (displayPath.appliedFeePercent ?? 0) > 0);
+        return mergeDualSnapshots(ilsPath, displayPath, mergedFeeAvailable);
+      }
+    }
+
+    return ilsPath;
   }
 
   const transactionDate = options?.transactionDate ?? getLocalTodayIso();
@@ -1032,6 +1152,71 @@ function resolveCapsuleManualOrSpotRate(
   return { rate: rateWithManual, manualRateUsed: manualUsed };
 }
 
+/** ILS-origin display path from frozen capsule rates/fees (ILS → display currency). */
+function buildIlsOriginDisplayPathFromCapsule(
+  amount: number,
+  displayCurrency: ExpenseCurrency,
+  liveRates: ExchangeRates,
+  feeDisabled: boolean,
+  capsule: ExpenseCreationTimeCapsule,
+): DisplayPathDualLedgerFields | null {
+  if (displayCurrency === 'ILS') return null;
+
+  const activeFees = feeDisabled ? [] : toActiveFeesFromCommissionEntries(capsuleFeeEntries(capsule));
+  const withManual = toActiveExchangeRatesFromSnapshot(liveRates, capsuleManualEntries(capsule));
+  const spotOnly = toActiveExchangeRatesFromSnapshot(liveRates, []);
+
+  const feesForTx = feeDisabled ? [] : activeFees;
+  const feePercent = feeDisabled
+    ? 0
+    : getAppliedCommissionPercentForPair(activeFees, 'ILS', displayCurrency, displayCurrency);
+
+  const manualTx = processTransactionWithUserRules(amount, 'ILS', displayCurrency, feesForTx, withManual, {
+    displayCurrency,
+  });
+  const spotTx = processTransactionWithUserRules(amount, 'ILS', displayCurrency, feesForTx, spotOnly, {
+    displayCurrency,
+  });
+  if (manualTx == null || spotTx == null) return null;
+
+  const ils = roundMoney(amount);
+  const hasDirectManualPair = resolveManualRateFromCapsule(capsule, 'ILS', displayCurrency) != null;
+  const manualDiffers =
+    Math.abs(manualTx.finalConvertedAmount - spotTx.finalConvertedAmount) /
+      Math.max(spotTx.finalConvertedAmount, 1e-9) >
+    1e-6;
+  const manualRateAvailable = hasDirectManualPair || manualDiffers;
+
+  const savedSpotRate = amount > 0 ? spotTx.finalConvertedAmount / amount : spotTx.finalConvertedAmount;
+  const savedManualRate =
+    manualRateAvailable && amount > 0 ? manualTx.finalConvertedAmount / amount : null;
+
+  return {
+    savedManualRate,
+    savedSpotRate,
+    amountInManual: null,
+    amountInSpot: ils,
+    manualRateAvailable,
+    appliedFeePercent: feePercent,
+    displayAmountInManual: manualRateAvailable ? roundMoney(manualTx.finalConvertedAmount) : null,
+    displayAmountInSpot: roundMoney(spotTx.finalConvertedAmount),
+  };
+}
+
+function resolveIlsOriginFeeAvailable(
+  capsule: ExpenseCreationTimeCapsule,
+  displayCurrency: ExpenseCurrency,
+  feeDisabled: boolean,
+  feePercent: number,
+): boolean {
+  if (feeDisabled) return false;
+  if (feePercent > 0) return true;
+  return (
+    (resolveFeePercentFromCapsule(capsule, 'ILS') ?? 0) > 0 ||
+    (resolveFeePercentFromCapsule(capsule, displayCurrency) ?? 0) > 0
+  );
+}
+
 /** F2F display path built strictly from frozen capsule manual rates and fees. */
 function buildDisplayPathDualLedgerSnapshotFromCapsule(
   amount: number,
@@ -1126,19 +1311,45 @@ export async function recordDualExpenseConversionFromTimeCapsule(
   const { capsule } = options;
   const transactionDate = options.transactionDate ?? getLocalTodayIso();
   const feeDisabled = options.feeDisabled ?? false;
+  const displayCurrency = options.displayCurrency;
 
-  // ILS-typed amount ledgers 1:1 (mathematically exact); capsule still governs
-  // cross-currency display projection below when display differs.
   if (from === 'ILS') {
-    return {
+    const ils = roundMoney(amount);
+    const feePercent = resolveCapsuleLedgerFeePercent(capsule, 'ILS', feeDisabled);
+    const feeAvailable = resolveIlsOriginFeeAvailable(
+      capsule,
+      displayCurrency ?? 'ILS',
+      feeDisabled,
+      feePercent,
+    );
+
+    const ilsPath: DualExpenseConversionSnapshot = {
       savedManualRate: null,
       savedSpotRate: 1,
       amountInManual: null,
-      amountInSpot: roundMoney(amount),
-      appliedFeePercent: 0,
+      amountInSpot: ils,
+      appliedFeePercent: feePercent,
       manualRateAvailable: false,
-      feeAvailable: false,
+      feeAvailable,
     };
+
+    if (displayCurrency && displayCurrency !== 'ILS') {
+      const displayPath = buildIlsOriginDisplayPathFromCapsule(
+        amount,
+        displayCurrency,
+        liveRates,
+        feeDisabled,
+        capsule,
+      );
+      if (displayPath != null) {
+        const mergedFeeAvailable =
+          feeAvailable ||
+          (!feeDisabled && (displayPath.appliedFeePercent ?? 0) > 0);
+        return mergeDualSnapshots(ilsPath, displayPath, mergedFeeAvailable);
+      }
+    }
+
+    return ilsPath;
   }
 
   const feePercent = resolveCapsuleLedgerFeePercent(capsule, from, feeDisabled);
@@ -1166,7 +1377,6 @@ export async function recordDualExpenseConversionFromTimeCapsule(
     feeAvailable,
   };
 
-  const displayCurrency = options.displayCurrency;
   if (displayCurrency && displayCurrency !== 'ILS' && displayCurrency !== from) {
     const displayPath = buildDisplayPathDualLedgerSnapshotFromCapsule(
       amount,
@@ -1336,15 +1546,23 @@ export interface StoredExpenseDisplayView {
 export function expenseHasDualRateSnapshot(expense: {
   amountInManual?: number | null;
   amountInSpot?: number;
+  displayAmountInManual?: number | null;
+  displayAmountInSpot?: number;
   savedManualRate?: number | null;
   savedSpotRate?: number;
 }): boolean {
-  return (
+  const hasIlsDual =
     expense.amountInManual != null &&
     expense.amountInSpot != null &&
     (expense.savedManualRate != null ||
-      (expense.savedSpotRate != null && expense.savedSpotRate > 0))
-  );
+      (expense.savedSpotRate != null && expense.savedSpotRate > 0));
+
+  const hasDisplayDual =
+    expense.displayAmountInManual != null &&
+    expense.displayAmountInSpot != null &&
+    Math.abs(expense.displayAmountInManual - expense.displayAmountInSpot) > 1e-6;
+
+  return hasIlsDual || hasDisplayDual;
 }
 
 function storedExpenseShowSecondaryLine(
@@ -1427,7 +1645,7 @@ function resolveStoredIlsDisplayAmount(
  * Dual-snapshot rows use stored path amounts directly — mirrors Edit Modal + F2F pattern.
  */
 export function resolveExpenseIlsDisplayAmount(expense: StoredExpenseDisplayFields): number {
-  const useManualPath = expense.manualRateUsed === true;
+  const useManualPath = expense.manualRateUsed !== false;
   const hasDualSnapshot = expense.amountInManual != null && expense.amountInSpot != null;
 
   let result: number;
@@ -1502,16 +1720,13 @@ export function resolveStoredExpenseDisplayView(
     showDualRateToggle || storedExpenseShowSecondaryLine(expense, displayCurrency);
 
   const manualBadgeActive =
-    displayCurrency === 'ILS'
-      ? expense.manualRateUsed === true
-      : manualRateSelected;
+    manualRateSelected &&
+    (expenseHadCreationManualRate(expense) || expenseHasSavedManualRateSnapshot(expense));
 
   return {
     ledgerIlsAmount,
     primaryDisplayAmount,
-    showManualBadge:
-      manualBadgeActive &&
-      (expenseHadCreationManualRate(expense) || expenseHasSavedManualRateSnapshot(expense)),
+    showManualBadge: manualBadgeActive,
     showFeeBadge: expense.feeApplied === true,
     showDualRateToggle,
     showSecondaryLine,
