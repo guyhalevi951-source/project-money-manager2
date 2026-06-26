@@ -5415,12 +5415,15 @@ function App() {
       if (editingExpenseId != null) return undefined;
       if (!expenseHasDualRateSnapshot(expense)) return undefined;
       return {
-        manualSelected: expense.manualRateUsed !== false,
+        manualSelected:
+          displayCurrency === 'ILS'
+            ? expense.manualRateUsed === true
+            : expense.manualRateUsed !== false,
         onSelectManual: () => handleToggleExpenseRate(expense.id, true),
         onSelectSpot: () => handleToggleExpenseRate(expense.id, false),
       };
     },
-    [editingExpenseId, handleToggleExpenseRate],
+    [displayCurrency, editingExpenseId, handleToggleExpenseRate],
   );
 
   const getExpenseEditCurrency = useCallback(

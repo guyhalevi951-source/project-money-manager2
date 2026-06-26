@@ -1412,21 +1412,29 @@ function recomputeIlsDisplayFromActivePath(
   return roundMoney(raw);
 }
 
+/** Resolve ILS display from persisted dual snapshot paths (mirrors F2F stored resolver). */
+function resolveStoredIlsDisplayAmount(
+  snapshot: Pick<DualExpenseConversionSnapshot, 'amountInManual' | 'amountInSpot'>,
+  manualRateUsed: boolean,
+): number {
+  return roundMoney(
+    resolveExpenseAmountFromSnapshot(snapshot, { manualRateUsed }),
+  );
+}
+
 /**
  * Display-only ILS amount for expense history cards.
- * Snapshot-path-first (manual vs spot) — mirrors Edit Modal — with roundMoney precision.
+ * Dual-snapshot rows use stored path amounts directly — mirrors Edit Modal + F2F pattern.
  */
 export function resolveExpenseIlsDisplayAmount(expense: StoredExpenseDisplayFields): number {
   const useManualPath = expense.manualRateUsed === true;
   const hasDualSnapshot = expense.amountInManual != null && expense.amountInSpot != null;
 
   if (hasDualSnapshot) {
-    const pathAmount = resolveExpenseAmountFromSnapshot(
+    return resolveStoredIlsDisplayAmount(
       { amountInManual: expense.amountInManual, amountInSpot: expense.amountInSpot },
-      { manualRateUsed: useManualPath },
+      useManualPath,
     );
-    const recomputed = recomputeIlsDisplayFromActivePath(expense, useManualPath);
-    return recomputed ?? roundMoney(pathAmount);
   }
 
   const recomputed = recomputeIlsDisplayFromActivePath(expense, useManualPath);
@@ -1477,11 +1485,16 @@ export function resolveStoredExpenseDisplayView(
   const showSecondaryLine =
     showDualRateToggle || storedExpenseShowSecondaryLine(expense, displayCurrency);
 
+  const manualBadgeActive =
+    displayCurrency === 'ILS'
+      ? expense.manualRateUsed === true
+      : manualRateSelected;
+
   return {
     ledgerIlsAmount,
     primaryDisplayAmount,
     showManualBadge:
-      manualRateSelected &&
+      manualBadgeActive &&
       (expenseHadCreationManualRate(expense) || expenseHasSavedManualRateSnapshot(expense)),
     showFeeBadge: expense.feeApplied === true,
     showDualRateToggle,
