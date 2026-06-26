@@ -444,6 +444,23 @@ function mergeDualSnapshots(
   };
 }
 
+/** Merge ILS-origin display paths without overwriting 1:1 ILS ledger rate fields. */
+function mergeIlsOriginDisplaySnapshot(
+  ilsPath: DualExpenseConversionSnapshot,
+  displayPath: DisplayPathDualLedgerFields,
+  feeAvailable: boolean,
+): DualExpenseConversionSnapshot {
+  return {
+    ...ilsPath,
+    manualRateAvailable: displayPath.manualRateAvailable || ilsPath.manualRateAvailable,
+    appliedFeePercent:
+      displayPath.appliedFeePercent > 0 ? displayPath.appliedFeePercent : ilsPath.appliedFeePercent,
+    feeAvailable: ilsPath.feeAvailable || feeAvailable,
+    displayAmountInManual: displayPath.displayAmountInManual,
+    displayAmountInSpot: displayPath.displayAmountInSpot,
+  };
+}
+
 /** Live active manual override rate or spot pivot rate (1 `from` = rate × ILS). */
 function resolveLiveManualOrSpotRate(
   from: ExpenseCurrency,
@@ -1038,7 +1055,7 @@ export async function recordDualExpenseConversionFromSnapshot(
       if (displayPath != null) {
         const mergedFeeAvailable =
           feeAvailable || (!feeDisabled && (displayPath.appliedFeePercent ?? 0) > 0);
-        return mergeDualSnapshots(ilsPath, displayPath, mergedFeeAvailable);
+        return mergeIlsOriginDisplaySnapshot(ilsPath, displayPath, mergedFeeAvailable);
       }
     }
 
@@ -1345,7 +1362,7 @@ export async function recordDualExpenseConversionFromTimeCapsule(
         const mergedFeeAvailable =
           feeAvailable ||
           (!feeDisabled && (displayPath.appliedFeePercent ?? 0) > 0);
-        return mergeDualSnapshots(ilsPath, displayPath, mergedFeeAvailable);
+        return mergeIlsOriginDisplaySnapshot(ilsPath, displayPath, mergedFeeAvailable);
       }
     }
 
@@ -1646,24 +1663,38 @@ function resolveStoredIlsDisplayAmount(
  */
 export function resolveExpenseIlsDisplayAmount(expense: StoredExpenseDisplayFields): number {
   const useManualPath = expense.manualRateUsed !== false;
-  const hasDualSnapshot = expense.amountInManual != null && expense.amountInSpot != null;
+
+  const isIlsNative =
+    expense.originalAmount != null &&
+    expense.originalAmount > 0 &&
+    Boolean(expense.originalCurrency?.trim()) &&
+    symbolToCurrency(expense.originalCurrency!, 'ILS') === 'ILS';
 
   let result: number;
   let path: string;
-  if (hasDualSnapshot) {
-    result = resolveStoredIlsDisplayAmount(
-      { amountInManual: expense.amountInManual, amountInSpot: expense.amountInSpot },
-      useManualPath,
-    );
-    path = 'dualSnapshot';
+
+  // ILS-native rows: ledger amount is the ILS display (fees apply on foreign display paths).
+  if (isIlsNative) {
+    result = roundMoney(expense.amount);
+    path = 'ilsNativeLedger';
   } else {
-    const recomputed = recomputeIlsDisplayFromActivePath(expense, useManualPath);
-    if (recomputed != null) {
-      result = recomputed;
-      path = 'recompute';
+    const hasDualSnapshot = expense.amountInManual != null && expense.amountInSpot != null;
+
+    if (hasDualSnapshot) {
+      result = resolveStoredIlsDisplayAmount(
+        { amountInManual: expense.amountInManual, amountInSpot: expense.amountInSpot },
+        useManualPath,
+      );
+      path = 'dualSnapshot';
     } else {
-      result = roundMoney(resolveStoredExpenseLedgerIls(expense));
-      path = 'ledgerFallback';
+      const recomputed = recomputeIlsDisplayFromActivePath(expense, useManualPath);
+      if (recomputed != null) {
+        result = recomputed;
+        path = 'recompute';
+      } else {
+        result = roundMoney(resolveStoredExpenseLedgerIls(expense));
+        path = 'ledgerFallback';
+      }
     }
   }
 
