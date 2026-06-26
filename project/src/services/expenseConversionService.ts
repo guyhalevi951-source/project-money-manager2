@@ -1379,7 +1379,7 @@ export function resolveStoredExpenseLedgerIls(expense: StoredExpenseDisplayField
 /** Recompute ILS display from originalAmount × active-path unit rate (roundMoney only). */
 function recomputeIlsDisplayFromActivePath(
   expense: StoredExpenseDisplayFields,
-  manualRateSelected: boolean,
+  useManualPath: boolean,
 ): number | null {
   const hasOriginal =
     expense.originalAmount != null &&
@@ -1388,7 +1388,7 @@ function recomputeIlsDisplayFromActivePath(
   if (!hasOriginal) return null;
 
   let unitRate: number | null = null;
-  if (manualRateSelected) {
+  if (useManualPath) {
     if (expense.savedManualRate != null && expense.savedManualRate > 0) {
       unitRate = expense.savedManualRate;
     } else if (expense.amountInManual != null) {
@@ -1417,20 +1417,19 @@ function recomputeIlsDisplayFromActivePath(
  * Snapshot-path-first (manual vs spot) — mirrors Edit Modal — with roundMoney precision.
  */
 export function resolveExpenseIlsDisplayAmount(expense: StoredExpenseDisplayFields): number {
-  const manualRateSelected = expense.manualRateUsed !== false;
+  const useManualPath = expense.manualRateUsed === true;
   const hasDualSnapshot = expense.amountInManual != null && expense.amountInSpot != null;
 
   if (hasDualSnapshot) {
     const pathAmount = resolveExpenseAmountFromSnapshot(
       { amountInManual: expense.amountInManual, amountInSpot: expense.amountInSpot },
-      { manualRateUsed: manualRateSelected },
+      { manualRateUsed: useManualPath },
     );
-    const recomputed = recomputeIlsDisplayFromActivePath(expense, manualRateSelected);
-    if (recomputed != null) return recomputed;
-    return roundMoney(pathAmount);
+    const recomputed = recomputeIlsDisplayFromActivePath(expense, useManualPath);
+    return recomputed ?? roundMoney(pathAmount);
   }
 
-  const recomputed = recomputeIlsDisplayFromActivePath(expense, manualRateSelected);
+  const recomputed = recomputeIlsDisplayFromActivePath(expense, useManualPath);
   if (recomputed != null) return recomputed;
 
   return roundMoney(resolveStoredExpenseLedgerIls(expense));
