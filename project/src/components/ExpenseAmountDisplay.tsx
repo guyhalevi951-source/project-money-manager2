@@ -112,6 +112,12 @@ export default function ExpenseAmountDisplay({
     rates,
   );
 
+  // #region agent log
+  if (view.showManualBadge || view.showFeeBadge || view.showDualRateToggle) {
+    fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28e551'},body:JSON.stringify({sessionId:'28e551',location:'ExpenseAmountDisplay.tsx:render',message:'history card render',data:{displayCurrency,primary,view:{primaryDisplayAmount:view.primaryDisplayAmount,ledgerIlsAmount:view.ledgerIlsAmount,manualRateSelected:view.manualRateSelected,showDualRateToggle:view.showDualRateToggle,showManualBadge:view.showManualBadge,showFeeBadge:view.showFeeBadge},expense:{amount:expense.amount,manualRateUsed:expense.manualRateUsed,feeApplied:expense.feeApplied,amountInManual:expense.amountInManual,amountInSpot:expense.amountInSpot}},timestamp:Date.now(),hypothesisId:'A-E'})}).catch(()=>{});
+  }
+  // #endregion
+
   const equivalentLine = view.showSecondaryLine ? secondary : undefined;
   const manualBadgeLabel = view.showManualBadge ? tr('expenseManualRateBadge') : undefined;
   const feeBadgeLabel = view.showFeeBadge ? tr('expenseFeeBadge') : undefined;

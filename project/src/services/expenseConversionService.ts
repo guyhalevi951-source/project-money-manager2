@@ -1430,17 +1430,30 @@ export function resolveExpenseIlsDisplayAmount(expense: StoredExpenseDisplayFiel
   const useManualPath = expense.manualRateUsed === true;
   const hasDualSnapshot = expense.amountInManual != null && expense.amountInSpot != null;
 
+  let result: number;
+  let path: string;
   if (hasDualSnapshot) {
-    return resolveStoredIlsDisplayAmount(
+    result = resolveStoredIlsDisplayAmount(
       { amountInManual: expense.amountInManual, amountInSpot: expense.amountInSpot },
       useManualPath,
     );
+    path = 'dualSnapshot';
+  } else {
+    const recomputed = recomputeIlsDisplayFromActivePath(expense, useManualPath);
+    if (recomputed != null) {
+      result = recomputed;
+      path = 'recompute';
+    } else {
+      result = roundMoney(resolveStoredExpenseLedgerIls(expense));
+      path = 'ledgerFallback';
+    }
   }
 
-  const recomputed = recomputeIlsDisplayFromActivePath(expense, useManualPath);
-  if (recomputed != null) return recomputed;
+  // #region agent log
+  fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28e551'},body:JSON.stringify({sessionId:'28e551',location:'expenseConversionService.ts:resolveExpenseIlsDisplayAmount',message:'ILS history display resolve',data:{amount:expense.amount,manualRateUsed:expense.manualRateUsed,feeApplied:expense.feeApplied,useManualPath,hasDualSnapshot,amountInManual:expense.amountInManual,amountInSpot:expense.amountInSpot,savedManualRate:expense.savedManualRate,savedSpotRate:expense.savedSpotRate,originalAmount:expense.originalAmount,originalCurrency:expense.originalCurrency,path,result},timestamp:Date.now(),hypothesisId:'A-E'})}).catch(()=>{});
+  // #endregion
 
-  return roundMoney(resolveStoredExpenseLedgerIls(expense));
+  return result;
 }
 
 /**
@@ -1479,6 +1492,9 @@ export function resolveStoredExpenseDisplayView(
         storedSnapshot: expense,
       },
     );
+    // #region agent log
+    fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28e551'},body:JSON.stringify({sessionId:'28e551',location:'expenseConversionService.ts:resolveStoredExpenseDisplayView',message:'F2F history display resolve',data:{displayCurrency,expenseCurrency,manualRateSelected,manualRateUsed:expense.manualRateUsed,feeApplied:expense.feeApplied,ledgerIlsAmount,primaryDisplayAmount,displayAmountInManual:expense.displayAmountInManual,displayAmountInSpot:expense.displayAmountInSpot,amountInManual:expense.amountInManual,amountInSpot:expense.amountInSpot},timestamp:Date.now(),hypothesisId:'compare'})}).catch(()=>{});
+    // #endregion
   }
 
   const showDualRateToggle = expenseHasDualRateSnapshot(expense);
