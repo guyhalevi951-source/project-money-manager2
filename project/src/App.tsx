@@ -3904,18 +3904,10 @@ function App() {
       writeFinancialToCache(budgetId, snapshot);
     }
     setExpenses(
-      data.expenses.map((e) => {
-        const normalized = {
-          ...normalizeStoredExpense(e),
-          date: normalizeDate(e.date),
-        };
-        // #region agent log
-        if (e.manualRateUsed != null || e.feeApplied != null || e.amountInManual != null) {
-          fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28e551'},body:JSON.stringify({sessionId:'28e551',location:'App.tsx:applyAppData',message:'expense normalized on hydrate',data:{source,expenseId:e.id,before:{manualRateUsed:e.manualRateUsed,feeApplied:e.feeApplied,amountInManual:e.amountInManual,amountInSpot:e.amountInSpot,amount:e.amount},after:{manualRateUsed:normalized.manualRateUsed,feeApplied:normalized.feeApplied,amountInManual:normalized.amountInManual,amountInSpot:normalized.amountInSpot,amount:normalized.amount}},timestamp:Date.now(),hypothesisId:'D'})}).catch(()=>{});
-        }
-        // #endregion
-        return normalized;
-      }),
+      data.expenses.map((e) => ({
+        ...normalizeStoredExpense(e),
+        date: normalizeDate(e.date),
+      })),
     );
     setCustomCategories(data.customCategories);
     setBudgetsByMonth(data.budgetsByMonth);
@@ -5682,11 +5674,6 @@ function App() {
             }
           : expense,
       );
-
-      // #region agent log
-      const savedExpense = nextExpenses.find((e) => e.id === editingExpenseId);
-      fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28e551'},body:JSON.stringify({sessionId:'28e551',location:'App.tsx:handleEditExpenseSave',message:'post-save expense payload',data:{expenseId:editingExpenseId,displayCurrency,draftCurrency:editExpenseDraft.currency,editApplyManualRate,editApplyFee,editShowsManualRate,editShowsFee,editPreviewAmount,conversion:{amount:conversion.amount,manualRateUsed:conversion.manualRateUsed,feeApplied:conversion.feeApplied,amountInManual:conversion.amountInManual,amountInSpot:conversion.amountInSpot,displayAmountInManual:conversion.displayAmountInManual,displayAmountInSpot:conversion.displayAmountInSpot,savedManualRate:conversion.savedManualRate,savedSpotRate:conversion.savedSpotRate},savedExpense:savedExpense?{amount:savedExpense.amount,manualRateUsed:savedExpense.manualRateUsed,feeApplied:savedExpense.feeApplied,amountInManual:savedExpense.amountInManual,amountInSpot:savedExpense.amountInSpot,displayAmountInManual:savedExpense.displayAmountInManual,displayAmountInSpot:savedExpense.displayAmountInSpot}:null},timestamp:Date.now(),hypothesisId:'B-C'})}).catch(()=>{});
-      // #endregion
 
       const payload = buildCurrentFinancialPayload(nextExpenses);
       setExpenses(nextExpenses);
