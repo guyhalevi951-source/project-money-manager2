@@ -69,7 +69,7 @@ import {
 } from './services/settingsPersistenceEngine';
 import ExpenseAmountField from './components/ExpenseAmountField';
 import SelectedDaySummary from './components/SelectedDaySummary';
-import ExpenseAmountDisplay from './components/ExpenseAmountDisplay';
+import ExpenseAmountDisplay, { type DualRateMode } from './components/ExpenseAmountDisplay';
 import DisplayMoney, { DisplayCurrencyAmount } from './components/DisplayMoney';
 import { useDisplayProjection } from './hooks/useDisplayProjection';
 import { useRateCacheSync } from './hooks/useRateCacheSync';
@@ -5395,6 +5395,20 @@ function App() {
     [buildCurrentFinancialPayload],
   );
 
+  /** Manual/Market segmented toggle — history cards only; hidden while edit modal is open. */
+  const resolveHistoryDualRateMode = useCallback(
+    (expense: Expense): DualRateMode | undefined => {
+      if (editingExpenseId === expense.id) return undefined;
+      if (!expenseHasDualRateSnapshot(expense)) return undefined;
+      return {
+        manualSelected: expense.manualRateUsed !== false,
+        onSelectManual: () => handleToggleExpenseRate(expense.id, true),
+        onSelectSpot: () => handleToggleExpenseRate(expense.id, false),
+      };
+    },
+    [editingExpenseId, handleToggleExpenseRate],
+  );
+
   const getExpenseEditCurrency = useCallback(
     (expense: Expense): ExpenseCurrency => {
       if (expense.originalCurrency) {
@@ -6529,15 +6543,7 @@ function App() {
                           <ExpenseAmountDisplay
                             expense={expense}
                             variant="card"
-                            dualRateMode={
-                              expenseHasDualRateSnapshot(expense)
-                                ? {
-                                    manualSelected: expense.manualRateUsed !== false,
-                                    onSelectManual: () => handleToggleExpenseRate(expense.id, true),
-                                    onSelectSpot: () => handleToggleExpenseRate(expense.id, false),
-                                  }
-                                : undefined
-                            }
+                            dualRateMode={resolveHistoryDualRateMode(expense)}
                           />
                         </div>
                         <div className="shrink-0 flex items-center gap-1">
@@ -6609,15 +6615,7 @@ function App() {
                         <div role="cell" className="flex items-end justify-end text-end">
                           <ExpenseAmountDisplay
                             expense={expense}
-                            dualRateMode={
-                              expenseHasDualRateSnapshot(expense)
-                                ? {
-                                    manualSelected: expense.manualRateUsed !== false,
-                                    onSelectManual: () => handleToggleExpenseRate(expense.id, true),
-                                    onSelectSpot: () => handleToggleExpenseRate(expense.id, false),
-                                  }
-                                : undefined
-                            }
+                            dualRateMode={resolveHistoryDualRateMode(expense)}
                           />
                         </div>
                         <div role="cell" className="flex justify-end">
