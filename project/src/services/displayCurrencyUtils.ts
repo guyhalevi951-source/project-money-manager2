@@ -57,6 +57,20 @@ export function formatAmountWithSymbol(
 }
 
 /**
+ * Shared formatter for expense history cards and edit-modal previews.
+ * Uses roundMoney only (via formatNumeric) — never smartRoundMoney.
+ * ILS: 0–2 decimal places; foreign: always 2 decimal places.
+ */
+export function formatExpenseDisplayAmount(
+  amount: number,
+  currency: ExpenseCurrency,
+): string {
+  return formatAmountWithSymbol(amount, currency, {
+    forceTwoDecimals: currency !== 'ILS',
+  });
+}
+
+/**
  * ILS ledger → display currency.
  * Returns a standard 2dp-rounded display value; does NOT snap to integer
  * (127.38 GBP must stay 127.38, not collapse to 127).
@@ -210,7 +224,7 @@ export function resolveExpenseDisplayAmount(
 
   if (displayCurrency === 'ILS') {
     return {
-      primary: formatAmountWithSymbol(ilsAmount, 'ILS'),
+      primary: formatExpenseDisplayAmount(ilsAmount, 'ILS'),
       secondary: originalFormatted ? `(≈ ${originalFormatted})` : undefined,
       secondaryFlagCode: originalCode ?? undefined,
     };
@@ -237,13 +251,13 @@ export function resolveExpenseDisplayAmount(
   let secondaryFlagCode: ExpenseCurrency | undefined;
 
   if (hasOriginal && originalCode === displayCurrency) {
-    secondary = `(≈ ${formatAmountWithSymbol(ilsAmount, 'ILS')})`;
+    secondary = `(≈ ${formatExpenseDisplayAmount(ilsAmount, 'ILS')})`;
     secondaryFlagCode = 'ILS';
   } else if (hasOriginal && originalFormatted) {
     secondary = `(≈ ${originalFormatted})`;
     secondaryFlagCode = originalCode ?? undefined;
   } else {
-    secondary = `(≈ ${formatAmountWithSymbol(ilsAmount, 'ILS')})`;
+    secondary = `(≈ ${formatExpenseDisplayAmount(ilsAmount, 'ILS')})`;
     secondaryFlagCode = 'ILS';
   }
 

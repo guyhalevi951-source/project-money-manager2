@@ -4,7 +4,7 @@ import { ChevronDown, Loader2, Plus } from 'lucide-react';
 import { LtrNumeric, useLanguage } from '../LanguageContext';
 import { getCurrencyMeta, type CurrencyCode } from '../constants/currencies';
 import { usePinnedCurrencies } from '../hooks/usePinnedCurrencies';
-import { formatAmountWithSymbol } from '../services/displayCurrencyUtils';
+import { formatAmountWithSymbol, formatExpenseDisplayAmount } from '../services/displayCurrencyUtils';
 import {
   resolveCapsuleForeignDisplayAmount,
   resolveLiveForeignDisplayAmount,
@@ -327,8 +327,11 @@ export default function ExpenseAmountField({
 
   const convertedAmountFormatted = useMemo(() => {
     if (convertedDisplayAmount == null) return null;
+    if (previewTimeCapsule != null) {
+      return formatExpenseDisplayAmount(convertedDisplayAmount, displayCurrency);
+    }
     return formatAmountWithSymbol(convertedDisplayAmount, displayCurrency);
-  }, [convertedDisplayAmount, displayCurrency]);
+  }, [convertedDisplayAmount, displayCurrency, previewTimeCapsule]);
 
   /**
    * True only when a manual rate is genuinely active for the CURRENT pair

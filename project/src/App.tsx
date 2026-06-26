@@ -79,6 +79,7 @@ import { formatTranslation, localizeCategoryLabel } from './translations';
 import {
   formatAmountParts,
   formatAmountWithSymbol,
+  formatExpenseDisplayAmount,
   symbolToCurrency,
   type AmountDisplayParts,
 } from './services/displayCurrencyUtils';
@@ -6900,9 +6901,7 @@ function App() {
                       <p className="text-sm font-medium leading-snug text-amber-100/90">
                         <LtrNumeric>
                           {formatTranslation(lang, 'expenseCurrentChoicePreview', {
-                            amount: formatAmountWithSymbol(editPreviewAmount, displayCurrency, {
-                              forceTwoDecimals: displayCurrency !== 'ILS',
-                            }),
+                            amount: formatExpenseDisplayAmount(editPreviewAmount, displayCurrency),
                           })}
                         </LtrNumeric>
                       </p>

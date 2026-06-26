@@ -43,7 +43,7 @@ import {
 import { getApiRateForDate } from './rateCacheService';
 import { roundMoney, smartRoundMoney } from './money';
 import {
-  formatAmountWithSymbol,
+  formatExpenseDisplayAmount,
   resolveExpenseDisplayAmount,
   symbolToCurrency,
   type ExpenseDisplayAmount,
@@ -1318,6 +1318,7 @@ export interface StoredExpenseDisplayFields {
   displayAmountInSpot?: number;
   manualRateUsed?: boolean;
   feeApplied?: boolean;
+  appliedFeePercent?: number;
   creationHadActiveManualRate?: boolean;
 }
 
@@ -1376,6 +1377,40 @@ export function resolveStoredExpenseLedgerIls(expense: StoredExpenseDisplayField
 }
 
 /**
+ * Display-only ILS amount for expense history cards.
+ * Recomputes from stored unit rates with roundMoney (never smartRoundMoney) so the
+ * card matches the Edit Modal preview precision (e.g. 499.96 vs integer-snapped 500).
+ */
+export function resolveExpenseIlsDisplayAmount(expense: StoredExpenseDisplayFields): number {
+  const hasOriginal =
+    expense.originalAmount != null &&
+    expense.originalAmount > 0 &&
+    Boolean(expense.originalCurrency?.trim());
+
+  if (hasOriginal) {
+    const manualRateSelected = expense.manualRateUsed !== false;
+    let unitRate: number | null = null;
+    if (manualRateSelected && expense.savedManualRate != null && expense.savedManualRate > 0) {
+      unitRate = expense.savedManualRate;
+    } else if (expense.savedSpotRate != null && expense.savedSpotRate > 0) {
+      unitRate = expense.savedSpotRate;
+    }
+
+    if (unitRate != null) {
+      let raw = expense.originalAmount! * unitRate;
+      const feePercent =
+        expense.feeApplied === true ? (expense.appliedFeePercent ?? 0) : 0;
+      if (feePercent > 0) {
+        raw *= 1 + feePercent / 100;
+      }
+      return roundMoney(raw);
+    }
+  }
+
+  return roundMoney(resolveStoredExpenseLedgerIls(expense));
+}
+
+/**
  * Sync resolver for history cards — mirrors `previewExpenseDisplayAmountFromSnapshot`
  * using persisted snapshot fields only (no async re-conversion).
  */
@@ -1398,7 +1433,7 @@ export function resolveStoredExpenseDisplayView(
 
   let primaryDisplayAmount: number;
   if (displayCurrency === 'ILS') {
-    primaryDisplayAmount = ledgerIlsAmount;
+    primaryDisplayAmount = resolveExpenseIlsDisplayAmount(expense);
   } else {
     primaryDisplayAmount = resolveExpensePrimaryDisplayAmount(
       typedAmount,
@@ -1445,9 +1480,7 @@ export function formatStoredExpenseDisplayView(
     expense.originalCurrency,
   );
 
-  const primary = formatAmountWithSymbol(view.primaryDisplayAmount, displayCurrency, {
-    forceTwoDecimals: displayCurrency !== 'ILS',
-  });
+  const primary = formatExpenseDisplayAmount(view.primaryDisplayAmount, displayCurrency);
 
   if (primary === formatted.primary) {
     return formatted;
