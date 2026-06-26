@@ -104,6 +104,7 @@ import {
   captureExpenseTimeCapsule,
   expenseEditShowsFeeToggle,
   expenseEditShowsManualRateToggle,
+  editHydrationMatchesSavedExpense,
   previewExpenseDisplayAmountFromSnapshot,
   previewExpenseDisplayAmountFromTimeCapsule,
   recordDualExpenseConversion,
@@ -5246,16 +5247,6 @@ function App() {
       const rates = getCachedExchangeRates();
       const isoDate = normalizeDate(newExpense.date);
 
-      if (inputCurrency === 'ILS') {
-        const ils = roundMoneyAmount(enteredAmount);
-        return {
-          amount: ils, savedManualRate: null, savedSpotRate: 1,
-          amountInManual: null, amountInSpot: ils, appliedFeePercent: 0,
-          manualRateUsed: false, feeApplied: false,
-          creationHadActiveManualRate: false, creationHadActiveFee: false,
-        };
-      }
-
       const snapshot = await recordDualExpenseConversion(enteredAmount, inputCurrency, rates, {
         transactionDate: isoDate,
         feeDisabled: false,
@@ -5263,10 +5254,16 @@ function App() {
       });
       if (snapshot == null) return null;
 
-      const manualRateUsed = snapshot.manualRateAvailable;
-      const amount = manualRateUsed && snapshot.amountInManual != null
-        ? roundMoneyAmount(snapshot.amountInManual)
-        : roundMoneyAmount(snapshot.amountInSpot);
+      const manualRateUsed =
+        displayCurrency === 'ILS'
+          ? false
+          : snapshot.manualRateAvailable;
+      const amount =
+        inputCurrency === 'ILS'
+          ? roundMoneyAmount(snapshot.amountInSpot)
+          : manualRateUsed && snapshot.amountInManual != null
+            ? roundMoneyAmount(snapshot.amountInManual)
+            : roundMoneyAmount(snapshot.amountInSpot);
 
       return {
         amount,
@@ -5560,6 +5557,7 @@ function App() {
             {
               transactionDate: normalizedDate,
               feeDisabled,
+              manualRateDisabled: !editApplyManualRate,
               displayCurrency,
               capsule: editCapsule,
               existingSnapshot: editExpenseSnapshot,
@@ -5588,6 +5586,15 @@ function App() {
         ? snapshot.appliedFeePercent
         : (editExpenseSnapshot?.appliedFeePercent ?? snapshot.appliedFeePercent ?? 0);
 
+      const preserveDisplaySnapshots =
+        editExpenseSnapshot != null &&
+        editHydrationMatchesSavedExpense(
+          typedAmount,
+          !editApplyManualRate,
+          feeDisabled,
+          editExpenseSnapshot,
+        );
+
       return {
         amount,
         savedManualRate: snapshot.savedManualRate,
@@ -5595,13 +5602,17 @@ function App() {
         amountInManual: snapshot.amountInManual != null ? roundMoneyAmount(snapshot.amountInManual) : undefined,
         amountInSpot: roundMoneyAmount(snapshot.amountInSpot),
         displayAmountInManual:
-          snapshot.displayAmountInManual != null
-            ? roundMoneyAmount(snapshot.displayAmountInManual)
-            : undefined,
+          preserveDisplaySnapshots && editExpenseSnapshot?.displayAmountInManual != null
+            ? roundMoneyAmount(editExpenseSnapshot.displayAmountInManual)
+            : snapshot.displayAmountInManual != null
+              ? roundMoneyAmount(snapshot.displayAmountInManual)
+              : undefined,
         displayAmountInSpot:
-          snapshot.displayAmountInSpot != null
-            ? roundMoneyAmount(snapshot.displayAmountInSpot)
-            : undefined,
+          preserveDisplaySnapshots && editExpenseSnapshot?.displayAmountInSpot != null
+            ? roundMoneyAmount(editExpenseSnapshot.displayAmountInSpot)
+            : snapshot.displayAmountInSpot != null
+              ? roundMoneyAmount(snapshot.displayAmountInSpot)
+              : undefined,
         appliedFeePercent,
         manualRateUsed,
         feeApplied,
