@@ -14,6 +14,7 @@ import {
   type ExpenseCreationTimeCapsule,
   type SavedExpenseDualSnapshotOverlay,
 } from '../services/expenseConversionService';
+import { isCapsuleV2, resolveAutonomousExpenseDisplay } from '../services/expenseTimeCapsuleEngine';
 import {
   listActiveCurrencyCommissions,
   subscribeCurrencyCommissionsUpdated,
@@ -273,6 +274,32 @@ export default function ExpenseAmountField({
   const convertedDisplayAmount = useMemo(() => {
     if (!showDisplayPreview || !rates) return null;
 
+    // 1. v2 capsule: use the autonomous engine — no live rate calls.
+    if (previewTimeCapsule != null && isCapsuleV2(previewTimeCapsule)) {
+      const engineResult = resolveAutonomousExpenseDisplay(
+        {
+          amount: parsedAmount,
+          originalAmount: parsedAmount,
+          originalCurrency: inputCurrency,
+          manualRateUsed: !previewManualRateDisabled,
+          feeApplied: !previewFeeDisabled,
+          displayAmountInManual: previewSavedDisplaySnapshot?.displayAmountInManual,
+          displayAmountInSpot: previewSavedDisplaySnapshot?.displayAmountInSpot,
+          amountInManual: previewSavedDisplaySnapshot?.amountInManual ?? undefined,
+          amountInSpot: previewSavedDisplaySnapshot?.amountInSpot,
+          appliedFeePercent: previewSavedDisplaySnapshot?.appliedFeePercent,
+          creationTimeCapsule: previewTimeCapsule,
+        },
+        displayCurrency,
+        previewTimeCapsule,
+        {
+          manualRateUsed: !previewManualRateDisabled,
+          feeApplied: !previewFeeDisabled,
+        },
+      );
+      return engineResult.primaryAmount > 0 ? engineResult.primaryAmount : null;
+    }
+
     if (
       !hasExchangeRate(inputCurrency, rates) ||
       !hasExchangeRate(displayCurrency, rates)
@@ -280,6 +307,7 @@ export default function ExpenseAmountField({
       return null;
     }
 
+    // 2. Persisted display snapshot 1:1 hydration (v1 capsule path)
     if (
       previewSavedDisplaySnapshot &&
       editDisplayPathsMatchSavedFeeState(parsedAmount, previewFeeDisabled, previewSavedDisplaySnapshot)
@@ -291,6 +319,7 @@ export default function ExpenseAmountField({
       if (persisted != null) return persisted;
     }
 
+    // 3. v1 capsule: use frozen capsule manual rates with live spot
     if (previewTimeCapsule != null) {
       return resolveCapsuleForeignDisplayAmount(
         parsedAmount,
@@ -305,6 +334,7 @@ export default function ExpenseAmountField({
       );
     }
 
+    // 4. No capsule: fully live conversion (new expense form)
     return resolveLiveForeignDisplayAmount(
       parsedAmount,
       inputCurrency,

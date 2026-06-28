@@ -5,7 +5,13 @@ import {
   formatStoredExpenseDisplayView,
   resolveStoredExpenseDisplayView,
   type StoredExpenseDisplayFields,
+  type StoredExpenseDisplayView,
 } from '../services/expenseConversionService';
+import {
+  formatExpenseDisplayAmount,
+  resolveExpenseDisplayAmount,
+} from '../services/displayCurrencyUtils';
+import { isCapsuleV2, resolveAutonomousExpenseDisplay } from '../services/expenseTimeCapsuleEngine';
 import { typographyBodyClass, typographyMutedClass } from '../styles/themeSurfaceStyles';
 import CurrencyFlag from './CurrencyFlag';
 
@@ -57,6 +63,33 @@ function ModifierBadge({ label }: { label: string }) {
   );
 }
 
+/**
+ * Convert an `AutonomousDisplayResult` to the `StoredExpenseDisplayView` shape so
+ * both v1 and v2 expenses render through the same JSX branch.
+ */
+function autonomousResultToView(
+  result: ReturnType<typeof resolveAutonomousExpenseDisplay>,
+  expense: StoredExpenseDisplayFields,
+  displayCurrency: ExpenseCurrency,
+): StoredExpenseDisplayView {
+  const hasOriginal =
+    expense.originalAmount != null &&
+    expense.originalAmount > 0 &&
+    Boolean(expense.originalCurrency?.trim());
+  const showSecondaryLine =
+    hasOriginal && expense.originalCurrency?.trim().toUpperCase() !== displayCurrency;
+
+  return {
+    ledgerIlsAmount: result.ledgerIlsAmount,
+    primaryDisplayAmount: result.primaryAmount,
+    showManualBadge: result.manualActive,
+    showFeeBadge: result.feeActive,
+    showDualRateToggle: false,
+    showSecondaryLine: showSecondaryLine || displayCurrency !== 'ILS',
+    manualRateSelected: result.manualActive,
+  };
+}
+
 export default function ExpenseAmountDisplay({
   expense,
   variant = 'table',
@@ -64,13 +97,42 @@ export default function ExpenseAmountDisplay({
   const { displayCurrency, exchangeRates, tr } = useLanguage();
   const rates = exchangeRates ?? getCachedExchangeRates();
 
-  const view = resolveStoredExpenseDisplayView(expense, displayCurrency, rates);
-  const { primary, secondary, secondaryFlagCode } = formatStoredExpenseDisplayView(
-    view,
-    expense,
-    displayCurrency,
-    rates,
-  );
+  // Route v2 capsule expenses through the autonomous engine (no live rate calls).
+  // v1 expenses continue to use the existing snapshot resolver as a fallback.
+  const capsule = expense.creationTimeCapsule;
+  const useEngine = isCapsuleV2(capsule);
+
+  const view: StoredExpenseDisplayView = useEngine
+    ? autonomousResultToView(
+        resolveAutonomousExpenseDisplay(expense, displayCurrency, capsule),
+        expense,
+        displayCurrency,
+      )
+    : resolveStoredExpenseDisplayView(expense, displayCurrency, rates);
+
+  let primary: string;
+  let secondary: string;
+  let secondaryFlagCode: ExpenseCurrency | undefined;
+
+  if (useEngine) {
+    primary = formatExpenseDisplayAmount(view.primaryDisplayAmount, displayCurrency);
+    const ilsAmountForSecondary =
+      displayCurrency === 'ILS' ? view.primaryDisplayAmount : view.ledgerIlsAmount;
+    const formatted = resolveExpenseDisplayAmount(
+      ilsAmountForSecondary,
+      displayCurrency,
+      rates,
+      expense.originalAmount,
+      expense.originalCurrency,
+    );
+    secondary = formatted.secondary;
+    secondaryFlagCode = formatted.secondaryFlagCode;
+  } else {
+    const formatted = formatStoredExpenseDisplayView(view, expense, displayCurrency, rates);
+    primary = formatted.primary;
+    secondary = formatted.secondary;
+    secondaryFlagCode = formatted.secondaryFlagCode;
+  }
 
   const equivalentLine = view.showSecondaryLine ? secondary : undefined;
   const manualBadgeLabel = view.showManualBadge ? tr('expenseManualRateBadge') : undefined;

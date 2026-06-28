@@ -128,6 +128,63 @@ export interface ExpenseCreationTimeCapsule {
   }>;
 }
 
+// ── Time Capsule v2 — full market-matrix freeze ───────────────────────────────
+
+/**
+ * Frozen API rate matrix for a single transaction date.
+ * Contains only `apiRate` / `lastFetched` — manual rates are never stored here
+ * (they live immutably in `ExpenseCreationTimeCapsuleV2.manualRates`).
+ */
+export interface ExpenseMarketRateMatrix {
+  /** ISO date of the expense at capture (matches `expense.date`). */
+  transactionDate: string;
+  /** ms-since-epoch timestamp when this slice was captured. */
+  capturedAt: number;
+  /** All `${transactionDate}_FROM_TO` entries from the unified rate cache (API rates only). */
+  entries: import('./rateCacheService').RateCacheStore;
+}
+
+/**
+ * Per-pair modifier state persisted for Rule 4 (multi-manual-rate priority) and
+ * Rule 1 (background form state preservation across currency switches in edit modal).
+ */
+export interface ExpensePairModifierState {
+  from: ExpenseCurrency;
+  displayCurrency: ExpenseCurrency;
+  manualRateUsed: boolean;
+  feeApplied: boolean;
+  /** Display-currency amount via manual rate path for this pair. */
+  displayAmountInManual?: number | null;
+  /** Display-currency amount via spot rate path for this pair. */
+  displayAmountInSpot?: number;
+  /** ms-since-epoch of last user modification — Rule 4 Priority 2 tiebreaker. */
+  lastModifiedAt: number;
+}
+
+/**
+ * v2 Time Capsule — extends v1 with a frozen API-rate matrix and per-pair
+ * modifier history. All v1 fields (`manualRates`, `fees`, `capturedAt`) remain
+ * immutable after first capture and are NEVER auto-modified on edit save.
+ *
+ * Only `marketMatrix` is refreshed — and only when the transaction date changes.
+ */
+export interface ExpenseCreationTimeCapsuleV2 extends ExpenseCreationTimeCapsule {
+  version: 2;
+  /** ISO date of the expense when first captured. */
+  transactionDate: string;
+  /** Frozen API-rate matrix for `transactionDate`. */
+  marketMatrix: ExpenseMarketRateMatrix;
+  /** Per-pair modifier state history (Rule 1 session preservation + Rule 4 priority). */
+  pairStates: ExpensePairModifierState[];
+}
+
+/** Type guard: true when capsule is a v2 capsule with a frozen market matrix. */
+export function isCapsuleV2(
+  capsule: ExpenseCreationTimeCapsule | null | undefined,
+): capsule is ExpenseCreationTimeCapsuleV2 {
+  return capsule != null && (capsule as ExpenseCreationTimeCapsuleV2).version === 2;
+}
+
 /** Snapshot every active manual override + commission fee at expense-save time. */
 export function captureExpenseTimeCapsule(): ExpenseCreationTimeCapsule {
   const manualRates = listActiveManualExchangeOverrides().map((entry) => ({
@@ -1803,6 +1860,8 @@ export interface StoredExpenseDisplayFields {
   feeApplied?: boolean;
   appliedFeePercent?: number;
   creationHadActiveManualRate?: boolean;
+  /** Creation-time capsule — present for v1 and v2 (v2 includes frozen market matrix). */
+  creationTimeCapsule?: ExpenseCreationTimeCapsule;
 }
 
 export interface StoredExpenseDisplayView {

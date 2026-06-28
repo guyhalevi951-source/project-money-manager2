@@ -12,6 +12,7 @@ import {
   resolveCurrencyCode,
   type ImmutableMoney,
 } from '../services/immutableMoney';
+import { isCapsuleV2, resolveAutonomousExpenseDisplay } from '../services/expenseTimeCapsuleEngine';
 
 /** A baseline-aware money record ({ amount, currency } as typed). */
 export interface OriginalMoneyLike {
@@ -24,6 +25,15 @@ export interface ExpenseLike {
   amount: number;
   originalAmount?: number;
   originalCurrency?: string;
+  /** Allows v2 capsule routing for expenses that carry a frozen market matrix. */
+  creationTimeCapsule?: import('../services/expenseConversionService').ExpenseCreationTimeCapsule;
+  amountInManual?: number | null;
+  amountInSpot?: number;
+  displayAmountInManual?: number | null;
+  displayAmountInSpot?: number;
+  manualRateUsed?: boolean;
+  feeApplied?: boolean;
+  appliedFeePercent?: number;
 }
 
 /**
@@ -73,8 +83,15 @@ export function useDisplayProjection(): DisplayProjection {
     const project = (base: ImmutableMoney): number =>
       projectMoneyOrBaseline(base, displayCurrency, ctx);
 
-    const projectExpense = (expense: ExpenseLike): number =>
-      project(immutableFromExpense(expense));
+    const projectExpense = (expense: ExpenseLike): number => {
+      // v2 capsule expenses are resolved autonomously from the frozen market matrix —
+      // no live rate lookups, consistent with the history-row and edit-modal display.
+      const capsule = expense.creationTimeCapsule;
+      if (isCapsuleV2(capsule)) {
+        return resolveAutonomousExpenseDisplay(expense, displayCurrency, capsule).primaryAmount;
+      }
+      return project(immutableFromExpense(expense));
+    };
 
     const projectOriginalOrIls = (
       original: OriginalMoneyLike | null | undefined,

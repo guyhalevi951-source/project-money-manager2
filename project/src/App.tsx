@@ -101,10 +101,10 @@ import {
 import {
   capsuleHasFeeForCurrency,
   capsuleHasManualRateForConversion,
-  captureExpenseTimeCapsule,
   expenseEditShowsFeeToggle,
   expenseEditShowsManualRateToggle,
   editDisplayPathsMatchSavedFeeState,
+  isCapsuleV2,
   previewExpenseDisplayAmountFromSnapshot,
   previewExpenseDisplayAmountFromTimeCapsule,
   recordDualExpenseConversion,
@@ -112,7 +112,13 @@ import {
   recordDualExpenseConversionFromTimeCapsule,
   resolveStoredExpenseDisplayView,
   type ExpenseCreationTimeCapsule,
+  type ExpenseCreationTimeCapsuleV2,
 } from './services/expenseConversionService';
+import {
+  buildPairState,
+  captureExpenseTimeCapsuleV2,
+  refreshMarketMatrixOnly,
+} from './services/expenseTimeCapsuleEngine';
 import {
   currencySymbolTriggerClass,
   currencyUtilityButtonClass,
@@ -3324,6 +3330,13 @@ function App() {
   const [editApplyFee, setEditApplyFee] = useState(true);
   /** Tracks draft currency for edit-modal checkbox re-default on currency change only. */
   const editCurrencyResetRef = useRef<ExpenseCurrency | null>(null);
+  /**
+   * Rule 1: per-pair session map — stores toggle state keyed by
+   * `${transactionCurrency}|${displayCurrency}` so that switching currencies
+   * during editing preserves custom checkbox choices and restores them when
+   * the user switches back to a previously configured pair.
+   */
+  const editPairSessionRef = useRef<Map<string, { applyManual: boolean; applyFee: boolean }>>(new Map());
   const [showBudgetSaved, setShowBudgetSaved] = useState(false);
   const [autoTransferByMonth, setAutoTransferByMonth] = useState<Record<string, boolean>>({});
 
@@ -5239,10 +5252,6 @@ function App() {
 
     if (isNaN(enteredAmount) || !(enteredAmount > 0)) return;
 
-    // Time Capsule: freeze every active manual rate + fee at the exact save moment,
-    // so later currency edits resolve historical pairs from the expense itself.
-    const creationTimeCapsule = captureExpenseTimeCapsule();
-
     const resolveConversion = async () => {
       const rates = getCachedExchangeRates();
       const isoDate = normalizeDate(newExpense.date);
@@ -5265,6 +5274,18 @@ function App() {
             ? roundMoneyAmount(snapshot.amountInManual)
             : roundMoneyAmount(snapshot.amountInSpot);
 
+      // Time Capsule v2: freeze full API-rate matrix for the transaction date +
+      // capture the initial pairState from this save's computed snapshot.
+      const initialPairState = buildPairState(
+        inputCurrency,
+        displayCurrency,
+        manualRateUsed,
+        snapshot.feeAvailable,
+        snapshot.displayAmountInManual != null ? roundMoneyAmount(snapshot.displayAmountInManual) : null,
+        snapshot.displayAmountInSpot != null ? roundMoneyAmount(snapshot.displayAmountInSpot) : undefined,
+      );
+      const creationTimeCapsule = captureExpenseTimeCapsuleV2(isoDate, [initialPairState]);
+
       return {
         amount,
         savedManualRate: snapshot.savedManualRate,
@@ -5284,6 +5305,7 @@ function App() {
         feeApplied: snapshot.feeAvailable,
         creationHadActiveManualRate: snapshot.manualRateAvailable,
         creationHadActiveFee: snapshot.feeAvailable,
+        creationTimeCapsule,
       };
     };
 
@@ -5312,7 +5334,7 @@ function App() {
           feeDisabled: !conversion.feeApplied,
           creationHadActiveManualRate: conversion.creationHadActiveManualRate,
           creationHadActiveFee: conversion.creationHadActiveFee,
-          creationTimeCapsule,
+          creationTimeCapsule: conversion.creationTimeCapsule,
         };
 
         const nextExpenses = [expense, ...expenses];
@@ -5397,6 +5419,7 @@ function App() {
         ? expense.originalAmount
         : roundMoneyAmount(expense.amount);
     editCurrencyResetRef.current = null;
+    editPairSessionRef.current = new Map(); // Rule 1: fresh session per edit open
     setEditingExpenseId(expense.id);
     setEditExpenseRatesReady(true);
     setEditExpenseSnapshot(expense);
@@ -5414,6 +5437,7 @@ function App() {
 
   const handleEditExpenseCancel = () => {
     editCurrencyResetRef.current = null;
+    editPairSessionRef.current = new Map(); // Rule 1: clear session on cancel
     setEditingExpenseId(null);
     setEditExpenseDraft(null);
     setEditExpenseSnapshot(null);
@@ -5431,13 +5455,18 @@ function App() {
   // Checkbox visibility is driven by the expense's own immutable Time Capsule,
   // evaluated against the currently selected draft currency (ignores live globals).
   // Legacy rows without a capsule fall back to the persisted creation flags.
+  // Rule 3: when editDraftCurrency === displayCurrency, conversion is a no-op so
+  // manual/fee toggles are hidden (identical-currency safeguard).
   const editCapsule = editExpenseSnapshot?.creationTimeCapsule;
+  const editDraftMatchesDisplay = editDraftCurrency != null && editDraftCurrency === displayCurrency;
   const editShowsManualRate =
+    !editDraftMatchesDisplay &&
     editExpenseSnapshot != null &&
     ((editCapsule != null && editDraftCurrency != null &&
       capsuleHasManualRateForConversion(editCapsule, editDraftCurrency, displayCurrency)) ||
       expenseEditShowsManualRateToggle(editExpenseSnapshot));
   const editShowsFee =
+    !editDraftMatchesDisplay &&
     editExpenseSnapshot != null &&
     ((editCapsule != null && editDraftCurrency != null &&
       capsuleHasFeeForCurrency(editCapsule, editDraftCurrency)) ||
@@ -5445,8 +5474,9 @@ function App() {
   const editPreviewManualRateDisabled = editShowsManualRate ? editDraftManualRateDisabled : true;
   const editPreviewFeeDisabled = editShowsFee ? editDraftFeeDisabled : true;
 
-  // When the user changes the draft currency, re-default the checkboxes against the
-  // capsule: a newly relevant checkbox defaults to checked, an irrelevant one to off.
+  // Rule 1: When the user changes the draft currency, save the outgoing pair's
+  // toggle state to the session map, then restore the incoming pair's state from
+  // the map (or default to checked when the incoming toggle is visible).
   // The initial open keeps the expense's saved checkbox state (handled on edit start).
   useEffect(() => {
     if (editDraftCurrency == null) {
@@ -5454,14 +5484,36 @@ function App() {
       return;
     }
     if (editCurrencyResetRef.current == null) {
+      // First render of an edit session — record the starting pair without resetting.
       editCurrencyResetRef.current = editDraftCurrency;
       return;
     }
-    if (editCurrencyResetRef.current === editDraftCurrency) return;
+    const prevCurrency = editCurrencyResetRef.current;
+    if (prevCurrency === editDraftCurrency) return;
+
+    // Save outgoing pair's state to the session map
+    const outgoingKey = `${prevCurrency}|${displayCurrency}`;
+    editPairSessionRef.current.set(outgoingKey, {
+      applyManual: editApplyManualRate,
+      applyFee: editApplyFee,
+    });
+
     editCurrencyResetRef.current = editDraftCurrency;
-    setEditApplyManualRate(editShowsManualRate);
-    setEditApplyFee(editShowsFee);
-  }, [editDraftCurrency, editShowsManualRate, editShowsFee]);
+
+    // Restore incoming pair from session map if visited before; otherwise default to
+    // the expense's saved flags (if the incoming currency is the original) or
+    // capsule visibility (checked when toggle is visible, unchecked when hidden).
+    const incomingKey = `${editDraftCurrency}|${displayCurrency}`;
+    const savedSession = editPairSessionRef.current.get(incomingKey);
+    if (savedSession != null) {
+      setEditApplyManualRate(savedSession.applyManual);
+      setEditApplyFee(savedSession.applyFee);
+    } else {
+      setEditApplyManualRate(editShowsManualRate);
+      setEditApplyFee(editShowsFee);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editDraftCurrency, displayCurrency]);
 
   useEffect(() => {
     if (
@@ -5544,6 +5596,7 @@ function App() {
           amount: ils, savedManualRate: null as number | null, savedSpotRate: 1,
           amountInManual: undefined as number | undefined, amountInSpot: ils,
           appliedFeePercent: 0, manualRateUsed: false, feeApplied: false,
+          updatedCapsule: undefined as ExpenseCreationTimeCapsule | ExpenseCreationTimeCapsuleV2 | undefined,
         };
       }
 
@@ -5594,27 +5647,62 @@ function App() {
           editExpenseSnapshot,
         );
 
+      const displayAmountInManual =
+        preserveDisplaySnapshots && editExpenseSnapshot?.displayAmountInManual != null
+          ? roundMoneyAmount(editExpenseSnapshot.displayAmountInManual)
+          : snapshot.displayAmountInManual != null
+            ? roundMoneyAmount(snapshot.displayAmountInManual)
+            : undefined;
+      const displayAmountInSpot =
+        preserveDisplaySnapshots && editExpenseSnapshot?.displayAmountInSpot != null
+          ? roundMoneyAmount(editExpenseSnapshot.displayAmountInSpot)
+          : snapshot.displayAmountInSpot != null
+            ? roundMoneyAmount(snapshot.displayAmountInSpot)
+            : undefined;
+
+      // v2 capsule maintenance: refresh market matrix only when date changed;
+      // update pairStates with the current pair's toggle state and display amounts.
+      let updatedCapsule: ExpenseCreationTimeCapsule | ExpenseCreationTimeCapsuleV2 | undefined =
+        editExpenseSnapshot?.creationTimeCapsule;
+
+      if (isCapsuleV2(updatedCapsule)) {
+        const dateChanged = normalizedDate !== updatedCapsule.transactionDate;
+        let nextCapsule = dateChanged
+          ? await refreshMarketMatrixOnly(updatedCapsule, normalizedDate, [
+              { from: editExpenseDraft.currency, to: 'ILS' },
+              { from: editExpenseDraft.currency, to: displayCurrency },
+              { from: 'ILS', to: displayCurrency },
+            ])
+          : updatedCapsule;
+
+        // Upsert pairState for the current edit pair
+        const currentPairState = buildPairState(
+          editExpenseDraft.currency,
+          displayCurrency,
+          manualRateUsed,
+          feeApplied,
+          displayAmountInManual ?? null,
+          displayAmountInSpot,
+        );
+        const otherStates = nextCapsule.pairStates.filter(
+          (s) => !(s.from === editExpenseDraft.currency && s.displayCurrency === displayCurrency),
+        );
+        nextCapsule = { ...nextCapsule, pairStates: [...otherStates, currentPairState] };
+        updatedCapsule = nextCapsule;
+      }
+
       return {
         amount,
         savedManualRate: snapshot.savedManualRate,
         savedSpotRate: snapshot.savedSpotRate,
         amountInManual: snapshot.amountInManual != null ? roundMoneyAmount(snapshot.amountInManual) : undefined,
         amountInSpot: roundMoneyAmount(snapshot.amountInSpot),
-        displayAmountInManual:
-          preserveDisplaySnapshots && editExpenseSnapshot?.displayAmountInManual != null
-            ? roundMoneyAmount(editExpenseSnapshot.displayAmountInManual)
-            : snapshot.displayAmountInManual != null
-              ? roundMoneyAmount(snapshot.displayAmountInManual)
-              : undefined,
-        displayAmountInSpot:
-          preserveDisplaySnapshots && editExpenseSnapshot?.displayAmountInSpot != null
-            ? roundMoneyAmount(editExpenseSnapshot.displayAmountInSpot)
-            : snapshot.displayAmountInSpot != null
-              ? roundMoneyAmount(snapshot.displayAmountInSpot)
-              : undefined,
+        displayAmountInManual,
+        displayAmountInSpot,
         appliedFeePercent,
         manualRateUsed,
         feeApplied,
+        updatedCapsule,
       };
     };
 
@@ -5646,6 +5734,7 @@ function App() {
               displayAmountInSpot: conversion.displayAmountInSpot,
               manualRateDisabled: !conversion.manualRateUsed,
               feeDisabled: !conversion.feeApplied,
+              ...(conversion.updatedCapsule != null && { creationTimeCapsule: conversion.updatedCapsule }),
             }
           : expense,
       );

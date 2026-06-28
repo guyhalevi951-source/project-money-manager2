@@ -2,7 +2,11 @@ import { type User } from 'firebase/auth';
 import { roundMoney } from './services/money';
 import { normalizeStoredOriginalCurrency } from './services/displayCurrencyUtils';
 import { isSupportedCurrency, type ExpenseCurrency } from './constants/currencies';
-import type { ExpenseCreationTimeCapsule } from './services/expenseConversionService';
+import {
+  isCapsuleV2,
+  type ExpenseCreationTimeCapsule,
+  type ExpenseCreationTimeCapsuleV2,
+} from './services/expenseConversionService';
 import type { CommissionCurrency } from './services/currencyCommissionService';
 
 export interface StoredExpense {
@@ -39,8 +43,8 @@ export interface StoredExpense {
   creationHadActiveManualRate?: boolean;
   /** Immutable: global commission fee was active for this currency at creation time. */
   creationHadActiveFee?: boolean;
-  /** Immutable snapshot of all active manual rates + fees at creation (Time Capsule). */
-  creationTimeCapsule?: ExpenseCreationTimeCapsule;
+  /** Immutable snapshot of all active manual rates + fees at creation (Time Capsule). v2 additionally carries a frozen market-rate matrix. */
+  creationTimeCapsule?: ExpenseCreationTimeCapsule | ExpenseCreationTimeCapsuleV2;
 }
 
 /**
@@ -107,14 +111,30 @@ export function normalizeStoredExpense(expense: StoredExpense): StoredExpense {
       ? normalizeStoredOriginalCurrency(expense.originalCurrency)
       : undefined;
 
+  // v2 capsule: validate that the stored object has the expected shape.
+  // If `marketMatrix.entries` is missing or malformed (e.g. migrated from an older
+  // snapshot without matrix support), treat as degraded v1 so the expense still
+  // renders via the existing snapshot fallback path.
+  let normalizedCapsule = expense.creationTimeCapsule ?? synthesizeLegacyTimeCapsule(expense, normalizedCurrency);
+  if (isCapsuleV2(normalizedCapsule)) {
+    const v2 = normalizedCapsule as ExpenseCreationTimeCapsuleV2;
+    if (!v2.marketMatrix || typeof v2.marketMatrix.entries !== 'object') {
+      // Degrade to v1 shape so legacy fallbacks still work
+      const { version: _v, marketMatrix: _m, pairStates: _p, transactionDate: _td, ...v1Base } = v2;
+      normalizedCapsule = v1Base as ExpenseCreationTimeCapsule;
+    } else {
+      // Ensure pairStates is always an array
+      normalizedCapsule = { ...v2, pairStates: v2.pairStates ?? [] };
+    }
+  }
+
   return {
     ...expense,
     amount,
     originalAmount:
       expense.originalAmount != null ? roundMoney(Number(expense.originalAmount)) : undefined,
     originalCurrency: normalizedCurrency,
-    creationTimeCapsule:
-      expense.creationTimeCapsule ?? synthesizeLegacyTimeCapsule(expense, normalizedCurrency),
+    creationTimeCapsule: normalizedCapsule,
     manualRateDisabled: Boolean(legacy.manualRateDisabled ?? legacy.disableManualRate),
     feeDisabled: Boolean(legacy.feeDisabled ?? legacy.disableFee),
     manualRateUsed,

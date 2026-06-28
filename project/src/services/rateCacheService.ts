@@ -474,3 +474,39 @@ export function mergeRemoteRateCache(remote: RateCacheStore): void {
 export function resetRateCacheMemory(): void {
   memoryStore = null;
 }
+
+// ───────────────────────── Time Capsule v2 helpers ─────────────────────────
+
+/**
+ * Slice the unified store to every entry whose key starts with `${dateIso}_`.
+ * Returns a new store containing only API-rate history (manualRate stripped to
+ * null so live manual overrides never leak into a frozen expense snapshot).
+ */
+export function sliceRateCacheForDate(dateIso: string): RateCacheStore {
+  const store = readStore();
+  const prefix = `${dateIso}_`;
+  const slice: RateCacheStore = {};
+  for (const [key, entry] of Object.entries(store)) {
+    if (!key.startsWith(prefix)) continue;
+    // Strip any live-mirrored manual rate — capsule.manualRates is the sole source
+    // of truth for manual overrides; the matrix only carries historical API rates.
+    slice[key] = { apiRate: entry.apiRate, lastFetched: entry.lastFetched, manualRate: null };
+  }
+  return slice;
+}
+
+/**
+ * For a transaction-date refresh (expense edit, date field changed): ensure that
+ * every requested pair has an API rate in the global cache for `dateIso`, then
+ * re-slice and return the updated matrix entries.
+ *
+ * Does NOT touch manual rates, fees, or any other capsule field — only the
+ * historical API rate matrix is updated.
+ */
+export async function ensureHistoricalRatesForDate(
+  dateIso: string,
+  pairs: ReadonlyArray<{ from: ExpenseCurrency; to: ExpenseCurrency }>,
+): Promise<RateCacheStore> {
+  await Promise.allSettled(pairs.map(({ from, to }) => ensureRate(dateIso, from, to)));
+  return sliceRateCacheForDate(dateIso);
+}
