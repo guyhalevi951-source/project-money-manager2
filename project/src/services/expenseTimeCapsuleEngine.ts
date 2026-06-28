@@ -123,29 +123,14 @@ export function projectExpenseDisplayAmount(
   legacyProject?: (expense: StoredExpenseDisplayFields) => number,
 ): number {
   const rule3 = rule3DirectDisplayAmount(expense, targetDisplay);
-  if (rule3 != null) {
-    // #region agent log
-    fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28e551'},body:JSON.stringify({sessionId:'28e551',location:'expenseTimeCapsuleEngine.ts:rule3',message:'Rule 3 direct amount',data:{targetDisplay,txn:resolveExpenseTransactionCurrency(expense,targetDisplay),originalAmount:expense.originalAmount,result:rule3},timestamp:Date.now(),hypothesisId:'H-R3',runId:'post-fix'})}).catch(()=>{});
-    // #endregion
-    return rule3;
-  }
+  if (rule3 != null) return rule3;
 
   const capsule = expense.creationTimeCapsule;
   if (isCapsuleV2(capsule)) {
-    const result = resolveAutonomousExpenseDisplay(expense, targetDisplay, capsule).primaryAmount;
-    // #region agent log
-    fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28e551'},body:JSON.stringify({sessionId:'28e551',location:'expenseTimeCapsuleEngine.ts:engine',message:'v2 engine projection',data:{targetDisplay,originalCurrency:expense.originalCurrency,result,ledgerIls:expense.amount},timestamp:Date.now(),hypothesisId:'H-ILS-FALLBACK',runId:'post-fix'})}).catch(()=>{});
-    // #endregion
-    return result;
+    return resolveAutonomousExpenseDisplay(expense, targetDisplay, capsule).primaryAmount;
   }
 
-  if (legacyProject) {
-    const result = legacyProject(expense);
-    // #region agent log
-    fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28e551'},body:JSON.stringify({sessionId:'28e551',location:'expenseTimeCapsuleEngine.ts:legacy',message:'legacy projection path',data:{targetDisplay,originalCurrency:expense.originalCurrency,originalAmount:expense.originalAmount,ledgerIls:expense.amount,result},timestamp:Date.now(),hypothesisId:'H-LEGACY-ILS',runId:'post-fix'})}).catch(()=>{});
-    // #endregion
-    return result;
-  }
+  if (legacyProject) return legacyProject(expense);
   const typed =
     expense.originalAmount != null && expense.originalAmount > 0
       ? expense.originalAmount
