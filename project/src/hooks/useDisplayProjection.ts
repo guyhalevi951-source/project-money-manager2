@@ -12,7 +12,7 @@ import {
   resolveCurrencyCode,
   type ImmutableMoney,
 } from '../services/immutableMoney';
-import { isCapsuleV2, resolveAutonomousExpenseDisplay } from '../services/expenseTimeCapsuleEngine';
+import { projectExpenseDisplayAmount } from '../services/expenseTimeCapsuleEngine';
 
 /** A baseline-aware money record ({ amount, currency } as typed). */
 export interface OriginalMoneyLike {
@@ -83,15 +83,10 @@ export function useDisplayProjection(): DisplayProjection {
     const project = (base: ImmutableMoney): number =>
       projectMoneyOrBaseline(base, displayCurrency, ctx);
 
-    const projectExpense = (expense: ExpenseLike): number => {
-      // v2 capsule expenses are resolved autonomously from the frozen market matrix —
-      // no live rate lookups, consistent with the history-row and edit-modal display.
-      const capsule = expense.creationTimeCapsule;
-      if (isCapsuleV2(capsule)) {
-        return resolveAutonomousExpenseDisplay(expense, displayCurrency, capsule).primaryAmount;
-      }
-      return project(immutableFromExpense(expense));
-    };
+    const projectExpense = (expense: ExpenseLike): number =>
+      projectExpenseDisplayAmount(expense, displayCurrency, (legacy) =>
+        project(immutableFromExpense(legacy)),
+      );
 
     const projectOriginalOrIls = (
       original: OriginalMoneyLike | null | undefined,

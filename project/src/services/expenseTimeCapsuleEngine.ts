@@ -25,6 +25,8 @@
  */
 
 import { roundMoney } from './money';
+import { symbolToCurrency } from './displayCurrencyUtils';
+import { resolveCurrencyCode } from './immutableMoney';
 import {
   captureExpenseTimeCapsule,
   isCapsuleV2,
@@ -45,6 +47,111 @@ import type { ExpenseCurrency } from '../constants/currencies';
 
 // Re-export the type guard so callers only need one import.
 export { isCapsuleV2 };
+
+// ── Rule 3 helpers (shared by engine + aggregation hooks) ─────────────────────
+
+/** Normalize persisted `originalCurrency` (ISO code or legacy symbol) for comparisons. */
+export function resolveExpenseTransactionCurrency(
+  expense: Pick<StoredExpenseDisplayFields, 'originalCurrency'>,
+  preferredDisplay?: ExpenseCurrency,
+): ExpenseCurrency {
+  if (!expense.originalCurrency?.trim()) return 'ILS';
+  return (
+    symbolToCurrency(expense.originalCurrency.trim(), preferredDisplay) ??
+    resolveCurrencyCode(expense.originalCurrency)
+  );
+}
+
+/**
+ * Rule 3 — Identical-currency safeguard.
+ * When transaction currency equals the target display currency, return the typed
+ * `originalAmount` with zero conversion. Returns `null` when conversion is required.
+ */
+export function rule3DirectDisplayAmount(
+  expense: StoredExpenseDisplayFields,
+  targetDisplay: ExpenseCurrency,
+): number | null {
+  const txnCurrency = resolveExpenseTransactionCurrency(expense, targetDisplay);
+  if (txnCurrency !== targetDisplay) return null;
+  const typed =
+    expense.originalAmount != null && expense.originalAmount > 0
+      ? expense.originalAmount
+      : expense.amount;
+  return roundMoney(typed);
+}
+
+/** Persisted display snapshot only when captured for this exact target currency. */
+function findPairStateForTarget(
+  capsule: ExpenseCreationTimeCapsuleV2,
+  from: ExpenseCurrency,
+  targetDisplay: ExpenseCurrency,
+): ExpensePairModifierState | undefined {
+  return capsule.pairStates.find(
+    (s) => s.from === from && s.displayCurrency === targetDisplay,
+  );
+}
+
+function resolvePersistedDisplayForTarget(
+  capsule: ExpenseCreationTimeCapsuleV2,
+  originalCurrency: ExpenseCurrency,
+  targetDisplay: ExpenseCurrency,
+  expense: StoredExpenseDisplayFields,
+  path: 'manual' | 'spot',
+): number | null {
+  const pair = findPairStateForTarget(capsule, originalCurrency, targetDisplay);
+  if (pair) {
+    const fromPair = path === 'manual' ? pair.displayAmountInManual : pair.displayAmountInSpot;
+    if (fromPair != null && fromPair > 0) return fromPair;
+  }
+  const saveDisplay = capsule.pairStates.find((s) => s.from === originalCurrency)?.displayCurrency;
+  if (saveDisplay === targetDisplay) {
+    const legacy =
+      path === 'manual' ? expense.displayAmountInManual : expense.displayAmountInSpot;
+    if (legacy != null && legacy > 0) return legacy;
+  }
+  return null;
+}
+
+/**
+ * Single entry point for ALL expense display projection (history, categories,
+ * dashboard, charts). Applies Rule 3 first, then v2 capsule engine, then optional
+ * legacy fallback projector.
+ */
+export function projectExpenseDisplayAmount(
+  expense: StoredExpenseDisplayFields,
+  targetDisplay: ExpenseCurrency,
+  legacyProject?: (expense: StoredExpenseDisplayFields) => number,
+): number {
+  const rule3 = rule3DirectDisplayAmount(expense, targetDisplay);
+  if (rule3 != null) {
+    // #region agent log
+    fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28e551'},body:JSON.stringify({sessionId:'28e551',location:'expenseTimeCapsuleEngine.ts:rule3',message:'Rule 3 direct amount',data:{targetDisplay,txn:resolveExpenseTransactionCurrency(expense,targetDisplay),originalAmount:expense.originalAmount,result:rule3},timestamp:Date.now(),hypothesisId:'H-R3',runId:'post-fix'})}).catch(()=>{});
+    // #endregion
+    return rule3;
+  }
+
+  const capsule = expense.creationTimeCapsule;
+  if (isCapsuleV2(capsule)) {
+    const result = resolveAutonomousExpenseDisplay(expense, targetDisplay, capsule).primaryAmount;
+    // #region agent log
+    fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28e551'},body:JSON.stringify({sessionId:'28e551',location:'expenseTimeCapsuleEngine.ts:engine',message:'v2 engine projection',data:{targetDisplay,originalCurrency:expense.originalCurrency,result,ledgerIls:expense.amount},timestamp:Date.now(),hypothesisId:'H-ILS-FALLBACK',runId:'post-fix'})}).catch(()=>{});
+    // #endregion
+    return result;
+  }
+
+  if (legacyProject) {
+    const result = legacyProject(expense);
+    // #region agent log
+    fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'28e551'},body:JSON.stringify({sessionId:'28e551',location:'expenseTimeCapsuleEngine.ts:legacy',message:'legacy projection path',data:{targetDisplay,originalCurrency:expense.originalCurrency,originalAmount:expense.originalAmount,ledgerIls:expense.amount,result},timestamp:Date.now(),hypothesisId:'H-LEGACY-ILS',runId:'post-fix'})}).catch(()=>{});
+    // #endregion
+    return result;
+  }
+  const typed =
+    expense.originalAmount != null && expense.originalAmount > 0
+      ? expense.originalAmount
+      : expense.amount;
+  return roundMoney(typed);
+}
 
 // ── Capture ──────────────────────────────────────────────────────────────────
 
@@ -219,10 +326,7 @@ export function resolveAutonomousExpenseDisplay(
     feeApplied?: boolean;
   },
 ): AutonomousDisplayResult {
-  const originalCurrency: ExpenseCurrency =
-    expense.originalCurrency
-      ? (expense.originalCurrency.trim().toUpperCase() as ExpenseCurrency)
-      : 'ILS';
+  const originalCurrency = resolveExpenseTransactionCurrency(expense, targetDisplayCurrency);
 
   const typedAmount =
     expense.originalAmount != null && expense.originalAmount > 0
@@ -290,7 +394,7 @@ export function resolveAutonomousExpenseDisplay(
           const mRate = triangulateViaIls(matrix, M as ExpenseCurrency, targetDisplayCurrency);
           primaryAmount = mRate != null && mRate > 0
             ? roundMoney(manualAmountInM * mRate)
-            : roundMoney(ledgerIlsAmount);
+            : roundMoney(typedAmount);
         }
         return {
           primaryAmount,
@@ -303,50 +407,26 @@ export function resolveAutonomousExpenseDisplay(
       }
     }
 
-    // Fallback: try stored expense display paths (from initial save, pairStates empty)
-    if (expense.displayAmountInManual != null && expense.displayAmountInManual > 0) {
-      // Stored displayAmountInManual is in the display currency at save time.
-      // We use it as-is when targetDisplay matches; otherwise triangulate via matrix.
-      // We don't know the exact save-time displayCurrency here, but if the current
-      // target matches the snapshot, it's valid. For other targets, use the ILS path.
-      if (targetDisplayCurrency !== 'ILS') {
-        // Try: if displayAmountInManual can be directly used (same display currency context)
-        // or triangulate from ILS ledger via manual rate
-        const directManualRate = resolveManualRateFromCapsule(capsule, originalCurrency, targetDisplayCurrency);
-        if (directManualRate != null && directManualRate > 0) {
-          let rawAmount = typedAmount * directManualRate;
-          if (feePercent > 0) rawAmount *= 1 + feePercent / 100;
-          return {
-            primaryAmount: roundMoney(rawAmount),
-            ledgerIlsAmount,
-            manualActive: true,
-            feeActive,
-            triangulationPath: 'manual',
-            sourcePair: { from: originalCurrency, to: targetDisplayCurrency },
-          };
-        }
-
-        // Via ILS pivot: compute manual ILS amount, then ILS → targetDisplay via matrix
-        const manualIlsRate = resolveManualRateFromCapsule(capsule, originalCurrency, 'ILS');
-        if (manualIlsRate != null && manualIlsRate > 0) {
-          let manualIls = typedAmount * manualIlsRate;
-          if (feePercent > 0) manualIls *= 1 + feePercent / 100;
-          const ilsToTarget = triangulateViaIls(matrix, 'ILS', targetDisplayCurrency);
-          if (ilsToTarget != null && ilsToTarget > 0) {
-            return {
-              primaryAmount: roundMoney(manualIls * ilsToTarget),
-              ledgerIlsAmount,
-              manualActive: true,
-              feeActive,
-              triangulationPath: 'manual',
-              sourcePair: { from: originalCurrency, to: targetDisplayCurrency },
-            };
-          }
-        }
-      }
+    // Persisted manual display amount only when captured for this target currency
+    const persistedManual = resolvePersistedDisplayForTarget(
+      capsule,
+      originalCurrency,
+      targetDisplayCurrency,
+      expense,
+      'manual',
+    );
+    if (persistedManual != null && targetDisplayCurrency !== 'ILS') {
+      return {
+        primaryAmount: roundMoney(persistedManual),
+        ledgerIlsAmount,
+        manualActive: true,
+        feeActive,
+        triangulationPath: 'manual',
+        sourcePair: { from: originalCurrency, to: targetDisplayCurrency },
+      };
     }
 
-    // Last resort: compute manual amount directly from capsule rate
+    // Recompute manual via capsule rate + matrix triangulation
     const manualRate =
       resolveManualRateFromCapsule(capsule, originalCurrency, targetDisplayCurrency) ??
       resolveManualRateFromCapsule(capsule, originalCurrency, 'ILS');
@@ -399,10 +479,17 @@ export function resolveAutonomousExpenseDisplay(
     };
   }
 
-  // Try persisted spot display snapshot
-  if (!wantsManual && expense.displayAmountInSpot != null && expense.displayAmountInSpot > 0) {
+  // Persisted spot snapshot — only when captured for this exact target display currency
+  const persistedSpot = resolvePersistedDisplayForTarget(
+    capsule,
+    originalCurrency,
+    targetDisplayCurrency,
+    expense,
+    'spot',
+  );
+  if (!wantsManual && persistedSpot != null) {
     return {
-      primaryAmount: roundMoney(expense.displayAmountInSpot),
+      primaryAmount: roundMoney(persistedSpot),
       ledgerIlsAmount,
       manualActive: false,
       feeActive,
@@ -426,9 +513,8 @@ export function resolveAutonomousExpenseDisplay(
     };
   }
 
-  // Ultimate fallback: ILS ledger amount (matrix lacks the rate for this pair)
   return {
-    primaryAmount: ledgerIlsAmount,
+    primaryAmount: roundMoney(typedAmount),
     ledgerIlsAmount,
     manualActive: false,
     feeActive: false,

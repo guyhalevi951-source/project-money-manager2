@@ -6016,17 +6016,8 @@ function App() {
   const historyTotalIls = historyExpenses.reduce((s, e) => s + e.amount, 0);
   const historyTotal = useMemo(() => {
     if (displayCurrency === 'ILS') return roundMoneyAmount(historyTotalIls);
-    if (!statusRates) return null;
-    return roundMoneyAmount(
-      historyExpenses.reduce(
-        (sum, expense) =>
-          sum +
-          resolveStoredExpenseDisplayView(expense, displayCurrency, statusRates)
-            .primaryDisplayAmount,
-        0,
-      ),
-    );
-  }, [historyExpenses, displayCurrency, statusRates, historyTotalIls]);
+    return roundMoneyAmount(financialProjection.sumExpenses(historyExpenses));
+  }, [historyExpenses, displayCurrency, historyTotalIls, financialProjection]);
   const recentExpenseCurrencies = useMemo<ExpenseCurrency[]>(() => {
     return [...expenses]
       .sort((a, b) => {
