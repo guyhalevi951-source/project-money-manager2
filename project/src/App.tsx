@@ -5444,6 +5444,24 @@ function App() {
       expenseEditShowsFeeToggle(editExpenseSnapshot));
   const editPreviewManualRateDisabled = editShowsManualRate ? editDraftManualRateDisabled : true;
   const editPreviewFeeDisabled = editShowsFee ? editDraftFeeDisabled : true;
+  const editDraftNeedsConversion =
+    editDraftCurrency != null && editDraftCurrency !== displayCurrency;
+  const editCapsuleHasFee =
+    editCapsule != null &&
+    editDraftCurrency != null &&
+    capsuleHasFeeForCurrency(editCapsule, editDraftCurrency);
+  const editCapsuleHasManual =
+    editCapsule != null &&
+    editDraftCurrency != null &&
+    capsuleHasManualRateForConversion(editCapsule, editDraftCurrency, displayCurrency);
+  const editLegacyFeeToggle =
+    editExpenseSnapshot != null && expenseEditShowsFeeToggle(editExpenseSnapshot);
+
+  // #region agent log
+  if (editingExpenseId != null && editDraftCurrency != null) {
+    fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84f6e4'},body:JSON.stringify({sessionId:'84f6e4',location:'App.tsx:editModalVisibility',message:'edit modal modifier visibility',data:{editDraftCurrency,displayCurrency,editDraftNeedsConversion,editShowsManualRate,editShowsFee,editCapsuleHasFee,editCapsuleHasManual,editLegacyFeeToggle,editApplyFee,editApplyManualRate},timestamp:Date.now(),hypothesisId:'A,C,D',runId:'currency-switch-pre'})}).catch(()=>{});
+  }
+  // #endregion
 
   // When the user changes the draft currency, re-default the checkboxes against the
   // capsule: a newly relevant checkbox defaults to checked, an irrelevant one to off.
@@ -5459,6 +5477,9 @@ function App() {
     }
     if (editCurrencyResetRef.current === editDraftCurrency) return;
     editCurrencyResetRef.current = editDraftCurrency;
+    // #region agent log
+    fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84f6e4'},body:JSON.stringify({sessionId:'84f6e4',location:'App.tsx:editCurrencySwitch',message:'currency switch checkbox reset',data:{editDraftCurrency,displayCurrency,editShowsManualRate,editShowsFee,prevApplyFee:editApplyFee,prevApplyManual:editApplyManualRate,willSetApplyFee:editShowsFee,willSetApplyManual:editShowsManualRate},timestamp:Date.now(),hypothesisId:'B',runId:'currency-switch-pre'})}).catch(()=>{});
+    // #endregion
     setEditApplyManualRate(editShowsManualRate);
     setEditApplyFee(editShowsFee);
   }, [editDraftCurrency, editShowsManualRate, editShowsFee]);
