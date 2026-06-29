@@ -2,7 +2,6 @@ import { isSupportedCurrency, type ExpenseCurrency } from '../constants/currenci
 
 const STORAGE_KEY = 'money_manager_currency_commissions_v1';
 const COMMISSIONS_UPDATED_EVENT = 'currency-commissions-updated';
-export const COMMISSION_24H_MS = 24 * 60 * 60 * 1000;
 
 /** Applies the saved fee to every expense/conversion currency (including ILS). */
 export const GLOBAL_COMMISSION_CURRENCY = 'ALL' as const;
@@ -65,8 +64,6 @@ export interface CloudCurrencyCommission {
   percent: number;
   isActive?: boolean;
   updatedAt?: number;
-  expiresAt?: number | null;
-  cloudPersisted?: boolean;
 }
 
 function isFinitePercent(value: number): boolean {
@@ -85,12 +82,6 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-function parseExpiresAt(item: Record<string, unknown>): number | null | undefined {
-  if (item.expiresAt === null) return null;
-  if (typeof item.expiresAt === 'number' && Number.isFinite(item.expiresAt)) return item.expiresAt;
-  return undefined;
-}
-
 function dispatchCommissionsUpdated(): void {
   window.dispatchEvent(new CustomEvent(COMMISSIONS_UPDATED_EVENT));
 }
@@ -100,21 +91,18 @@ export function subscribeCurrencyCommissionsUpdated(listener: () => void): () =>
   return () => window.removeEventListener(COMMISSIONS_UPDATED_EVENT, listener);
 }
 
-/** Active and not past optional expiry timestamp. */
-export function isCommissionEntryLive(
-  entry: CurrencyCommissionEntry,
-  now = Date.now(),
-): boolean {
-  if (!entry.isActive) return false;
-  if (entry.expiresAt != null && entry.expiresAt <= now) return false;
-  return true;
+// ── 24h timer / expiration layer (UI countdown + auto-archive) ───────────
+
+export const COMMISSION_24H_MS = 24 * 60 * 60 * 1000;
+
+function parseExpiresAt(item: Record<string, unknown>): number | null | undefined {
+  if (item.expiresAt === null) return null;
+  if (typeof item.expiresAt === 'number' && Number.isFinite(item.expiresAt)) return item.expiresAt;
+  return undefined;
 }
 
-/**
- * Persistently archive entries whose 24h window has elapsed.
- * Returns true when storage was mutated.
- */
-function expireStaleCurrencyCommissions(now = Date.now()): boolean {
+/** Archive active 24h entries whose TTL has elapsed; dispatches when storage changes. */
+function expireStaleCurrencyCommissions(now = Date.now()): void {
   const entries = readEntries();
   let changed = false;
 
@@ -124,10 +112,19 @@ function expireStaleCurrencyCommissions(now = Date.now()): boolean {
     return { ...entry, isActive: false, updatedAt: now };
   });
 
-  if (!changed) return false;
+  if (!changed) return;
   writeEntries(next);
   dispatchCommissionsUpdated();
-  return true;
+}
+
+/** Run expiration sync before any active-commission read used by calculations or UI. */
+function syncExpiredCommissionsBeforeRead(): void {
+  expireStaleCurrencyCommissions();
+}
+
+export interface UpsertCurrencyCommissionOptions {
+  expiresAt?: number | null;
+  cloudPersisted?: boolean;
 }
 
 /**
@@ -203,7 +200,7 @@ function writeEntries(entries: CurrencyCommissionEntry[]): void {
   lsWrite(STORAGE_KEY, JSON.stringify(entries));
 }
 
-// ── Public read API ────────────────────────────────────────────────────────
+// ── Public read API (main-compatible calculation paths) ────────────────────
 
 export function normalizeCommissionCurrency(currency: string): CommissionCurrency | null {
   const code = currency.trim().toUpperCase();
@@ -217,19 +214,17 @@ export function listAllCurrencyCommissions(): CurrencyCommissionEntry[] {
   return readEntries().slice().sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-/** Only live (active, non-expired) entries sorted newest first. Auto-archives stale 24h saves. */
+/** Only isActive entries sorted newest first. */
 export function listActiveCurrencyCommissions(): CurrencyCommissionEntry[] {
-  expireStaleCurrencyCommissions();
-  const now = Date.now();
-  const active = readEntries()
-    .filter((e) => isCommissionEntryLive(e, now))
+  syncExpiredCommissionsBeforeRead();
+  return readEntries()
+    .filter((e) => e.isActive)
     .sort((a, b) => b.updatedAt - a.updatedAt);
-  return active;
 }
 
 /** Only archived (inactive) entries sorted newest first. */
 export function listArchivedCurrencyCommissions(): CurrencyCommissionEntry[] {
-  expireStaleCurrencyCommissions();
+  syncExpiredCommissionsBeforeRead();
   return readEntries()
     .filter((e) => !e.isActive)
     .sort((a, b) => b.updatedAt - a.updatedAt);
@@ -239,11 +234,8 @@ export function listArchivedCurrencyCommissions(): CurrencyCommissionEntry[] {
 export function getSavedCommissionPercentForCurrency(currency: CommissionCurrency): number | null {
   const normalized = normalizeCommissionCurrency(currency);
   if (!normalized) return null;
-  expireStaleCurrencyCommissions();
-  const now = Date.now();
-  const entry = readEntries().find(
-    (item) => item.currency === normalized && isCommissionEntryLive(item, now),
-  );
+  syncExpiredCommissionsBeforeRead();
+  const entry = readEntries().find((item) => item.currency === normalized && item.isActive);
   return entry?.percent ?? null;
 }
 
@@ -252,19 +244,13 @@ export function getActiveCurrencyCommissionPercent(currency: string): number | n
   const code = currency.trim().toUpperCase();
   if (!isSupportedCurrency(code)) return null;
 
-  expireStaleCurrencyCommissions();
-  const now = Date.now();
-  const entries = readEntries().filter((e) => isCommissionEntryLive(e, now));
+  syncExpiredCommissionsBeforeRead();
+  const entries = readEntries().filter((e) => e.isActive);
   const specific = entries.find((item) => item.currency === code);
   if (specific) return specific.percent;
 
   const global = entries.find((item) => item.currency === GLOBAL_COMMISSION_CURRENCY);
   return global?.percent ?? null;
-}
-
-export interface UpsertCurrencyCommissionOptions {
-  expiresAt?: number | null;
-  cloudPersisted?: boolean;
 }
 
 // ── Write API ──────────────────────────────────────────────────────────────
@@ -298,7 +284,7 @@ export function upsertCurrencyCommission(
     percent,
     isActive: true,
     updatedAt: now,
-    expiresAt: options?.expiresAt ?? null,
+    ...(options?.expiresAt !== undefined ? { expiresAt: options.expiresAt } : {}),
     ...(options?.cloudPersisted ? { cloudPersisted: true } : {}),
   };
 
@@ -357,12 +343,18 @@ export function archiveCurrencyCommission(id: string): boolean {
 export function reactivateCurrencyCommission(
   entry: CurrencyCommissionEntry,
 ): CurrencyCommissionEntry | null {
-  const options: UpsertCurrencyCommissionOptions | undefined = entry.cloudPersisted
-    ? { expiresAt: null, cloudPersisted: true }
-    : entry.expiresAt != null
-      ? { expiresAt: Date.now() + COMMISSION_24H_MS, cloudPersisted: false }
-      : undefined;
-  return upsertCurrencyCommission(entry.currency, entry.percent, options);
+  if (entry.cloudPersisted) {
+    return upsertCurrencyCommission(entry.currency, entry.percent, {
+      expiresAt: null,
+      cloudPersisted: true,
+    });
+  }
+  if (entry.expiresAt != null) {
+    return upsertCurrencyCommission(entry.currency, entry.percent, {
+      expiresAt: Date.now() + COMMISSION_24H_MS,
+    });
+  }
+  return upsertCurrencyCommission(entry.currency, entry.percent);
 }
 
 // ── Legacy compatibility wrappers ──────────────────────────────────────────
@@ -372,7 +364,6 @@ export function saveCurrencyCommission24h(currency: CommissionCurrency, percent:
   return (
     upsertCurrencyCommission(currency, percent, {
       expiresAt: Date.now() + COMMISSION_24H_MS,
-      cloudPersisted: false,
     }) != null
   );
 }
@@ -416,8 +407,7 @@ export function replaceCloudCurrencyCommissions(cloudEntries: CloudCurrencyCommi
           percent: cloud.percent,
           isActive: cloudIsActive,
           updatedAt: cloudUpdatedAt,
-          expiresAt: cloud.expiresAt ?? null,
-          cloudPersisted: cloud.cloudPersisted ?? true,
+          cloudPersisted: true,
         };
       }
     } else {
@@ -427,8 +417,7 @@ export function replaceCloudCurrencyCommissions(cloudEntries: CloudCurrencyCommi
         percent: cloud.percent,
         isActive: cloudIsActive,
         updatedAt: cloudUpdatedAt,
-        expiresAt: cloud.expiresAt ?? null,
-        cloudPersisted: cloud.cloudPersisted ?? true,
+        cloudPersisted: true,
       });
     }
   }
