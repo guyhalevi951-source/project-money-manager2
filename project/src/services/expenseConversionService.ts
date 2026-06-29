@@ -1105,9 +1105,6 @@ export function overlaySavedExpenseDualSnapshot(
   );
 
   if (!hydrationMatch) {
-    // #region agent log
-    fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84f6e4'},body:JSON.stringify({sessionId:'84f6e4',location:'expenseConversionService.ts:overlaySaved',message:'skip persisted overlay — draft diverged',data:{feeDisabled,savedFeeApplied:existing.feeApplied===true,typedAmount,snapshotSpot: snapshot.displayAmountInSpot??null},timestamp:Date.now(),hypothesisId:'A',runId:'fee-toggle-fix'})}).catch(()=>{});
-    // #endregion
     return snapshot;
   }
 
