@@ -5465,12 +5465,6 @@ function App() {
     editDraftCurrency != null &&
     capsuleHasManualRateForConversion(editCapsule, editDraftCurrency, displayCurrency);
 
-  // #region agent log
-  if (editingExpenseId != null && editDraftCurrency != null) {
-    fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84f6e4'},body:JSON.stringify({sessionId:'84f6e4',location:'App.tsx:editModalVisibility',message:'edit modal modifier visibility',data:{editDraftCurrency,displayCurrency,editDraftNeedsConversion,editShowsManualRate,editShowsFee,editCapsuleHasFee,editCapsuleHasManual,editApplyFee,editApplyManualRate},timestamp:Date.now(),hypothesisId:'A,C,D',runId:'currency-switch-post'})}).catch(()=>{});
-  }
-  // #endregion
-
   // When the user changes the draft currency, re-default the checkboxes against the
   // capsule: a newly relevant checkbox defaults to checked, an irrelevant one to off.
   // The initial open keeps the expense's saved checkbox state (handled on edit start).
@@ -5500,9 +5494,6 @@ function App() {
       editExpenseSnapshot,
       editSavedOriginalCurrency,
     );
-    // #region agent log
-    fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84f6e4'},body:JSON.stringify({sessionId:'84f6e4',location:'App.tsx:editCurrencySwitch',message:'currency switch checkbox reset',data:{editDraftCurrency,displayCurrency,editShowsManualRate,editShowsFee,nextApplyManual,nextApplyFee,savedOriginal:editSavedOriginalCurrency},timestamp:Date.now(),hypothesisId:'B',runId:'currency-switch-post'})}).catch(()=>{});
-    // #endregion
     setEditApplyManualRate(nextApplyManual);
     setEditApplyFee(nextApplyFee);
   }, [
