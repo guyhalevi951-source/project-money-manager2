@@ -5549,6 +5549,9 @@ function App() {
 
     void previewPromise.then((preview) => {
       if (!cancelled) {
+        // #region agent log
+        fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84f6e4'},body:JSON.stringify({sessionId:'84f6e4',location:'App.tsx:editPreviewResolved',message:'edit preview recomputed',data:{editDraftCurrency,displayAmount:preview?.displayAmount ?? null,hydrationMatch:editExpenseSnapshot!=null&&editHydrationMatchesSavedExpense(typed,!editPreviewManualRateDisabled,editPreviewFeeDisabled,editExpenseSnapshot,editDraftCurrency,displayCurrency)},timestamp:Date.now(),hypothesisId:'B,D',runId:'currency-commit-post'})}).catch(()=>{});
+        // #endregion
         setEditPreviewAmount(preview?.displayAmount ?? null);
       }
     });
@@ -5575,21 +5578,35 @@ function App() {
   const handleEditExpenseSave = () => {
     if (!editingExpenseId || !editExpenseDraft) return;
 
-    const typedAmount = parseFloat(editExpenseDraft.amount);
+    const draft = editExpenseDraft;
+    const draftCurrency = draft.currency;
+    const expenseId = editingExpenseId;
+    const typedAmount = parseFloat(draft.amount);
     if (isNaN(typedAmount) || !(typedAmount > 0)) return;
 
     const feeDisabled = !editApplyFee;
+    const savedOriginalAtOpen =
+      editExpenseSnapshot != null ? getExpenseEditCurrency(editExpenseSnapshot) : null;
+    const currencyChanged =
+      savedOriginalAtOpen != null && draftCurrency !== savedOriginalAtOpen;
+
+    // #region agent log
+    fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84f6e4'},body:JSON.stringify({sessionId:'84f6e4',location:'App.tsx:editSaveStart',message:'edit save currency commit',data:{draftCurrency,savedOriginalAtOpen,currencyChanged,displayCurrency},timestamp:Date.now(),hypothesisId:'A,E',runId:'currency-commit-post'})}).catch(()=>{});
+    // #endregion
 
     const resolveConversion = async () => {
-      const normalizedDate = normalizeDate(editExpenseDraft.date);
+      const normalizedDate = normalizeDate(draft.date);
       const rates = getCachedExchangeRates();
+      const transactionMatchesDisplay = draftCurrency === displayCurrency;
 
       // Legacy rows without a capsule: ILS 1:1 only when display is also ILS.
-      if (editCapsule == null && editExpenseDraft.currency === 'ILS' && displayCurrency === 'ILS') {
+      if (editCapsule == null && draftCurrency === 'ILS' && displayCurrency === 'ILS') {
         const ils = roundMoneyAmount(typedAmount);
         return {
           amount: ils, savedManualRate: null as number | null, savedSpotRate: 1,
           amountInManual: undefined as number | undefined, amountInSpot: ils,
+          displayAmountInManual: undefined as number | undefined,
+          displayAmountInSpot: undefined as number | undefined,
           appliedFeePercent: 0, manualRateUsed: false, feeApplied: false,
         };
       }
@@ -5599,7 +5616,7 @@ function App() {
       const snapshot = editCapsule != null
         ? await recordDualExpenseConversionFromTimeCapsule(
             typedAmount,
-            editExpenseDraft.currency,
+            draftCurrency,
             rates,
             {
               transactionDate: normalizedDate,
@@ -5612,7 +5629,7 @@ function App() {
           )
         : await recordDualExpenseConversionFromSnapshot(
             typedAmount,
-            editExpenseDraft.currency,
+            draftCurrency,
             rates,
             {
               transactionDate: normalizedDate,
@@ -5632,13 +5649,36 @@ function App() {
       const appliedFeePercent = feeApplied ? (snapshot.appliedFeePercent ?? 0) : 0;
 
       const preserveDisplaySnapshots =
+        !currencyChanged &&
         editExpenseSnapshot != null &&
         editHydrationMatchesSavedExpense(
           typedAmount,
           !editApplyManualRate,
           feeDisabled,
           editExpenseSnapshot,
+          draftCurrency,
+          displayCurrency,
         );
+
+      let displayAmountInManual =
+        preserveDisplaySnapshots && editExpenseSnapshot?.displayAmountInManual != null
+          ? roundMoneyAmount(editExpenseSnapshot.displayAmountInManual)
+          : snapshot.displayAmountInManual != null
+            ? roundMoneyAmount(snapshot.displayAmountInManual)
+            : undefined;
+      let displayAmountInSpot =
+        preserveDisplaySnapshots && editExpenseSnapshot?.displayAmountInSpot != null
+          ? roundMoneyAmount(editExpenseSnapshot.displayAmountInSpot)
+          : snapshot.displayAmountInSpot != null
+            ? roundMoneyAmount(snapshot.displayAmountInSpot)
+            : undefined;
+
+      if (transactionMatchesDisplay) {
+        displayAmountInSpot = roundMoneyAmount(typedAmount);
+        if (!manualRateUsed) {
+          displayAmountInManual = undefined;
+        }
+      }
 
       return {
         amount,
@@ -5646,64 +5686,62 @@ function App() {
         savedSpotRate: snapshot.savedSpotRate,
         amountInManual: snapshot.amountInManual != null ? roundMoneyAmount(snapshot.amountInManual) : undefined,
         amountInSpot: roundMoneyAmount(snapshot.amountInSpot),
-        displayAmountInManual:
-          preserveDisplaySnapshots && editExpenseSnapshot?.displayAmountInManual != null
-            ? roundMoneyAmount(editExpenseSnapshot.displayAmountInManual)
-            : snapshot.displayAmountInManual != null
-              ? roundMoneyAmount(snapshot.displayAmountInManual)
-              : undefined,
-        displayAmountInSpot:
-          preserveDisplaySnapshots && editExpenseSnapshot?.displayAmountInSpot != null
-            ? roundMoneyAmount(editExpenseSnapshot.displayAmountInSpot)
-            : snapshot.displayAmountInSpot != null
-              ? roundMoneyAmount(snapshot.displayAmountInSpot)
-              : undefined,
+        displayAmountInManual,
+        displayAmountInSpot,
         appliedFeePercent,
         manualRateUsed,
         feeApplied,
+        preserveDisplaySnapshots,
       };
     };
 
     void resolveConversion().then((conversion) => {
       if (conversion == null || !(conversion.amount > 0)) return;
 
-      const normalizedDate = normalizeDate(editExpenseDraft.date);
-      const normalizedDescription = editExpenseDraft.description.trim();
+      const normalizedDate = normalizeDate(draft.date);
+      const normalizedDescription = draft.description.trim();
       const roundedTypedAmount = roundMoneyAmount(typedAmount);
+      const commitCurrency = draftCurrency;
 
-      const nextExpenses = expenses.map((expense) =>
-        expense.id === editingExpenseId
-          ? {
-              ...expense,
-              description: normalizedDescription,
-              amount: conversion.amount,
-              category: editExpenseDraft.category,
-              date: normalizedDate,
-              originalAmount: roundedTypedAmount,
-              originalCurrency: editExpenseDraft.currency,
-              appliedFeePercent: conversion.appliedFeePercent,
-              manualRateUsed: conversion.manualRateUsed,
-              feeApplied: conversion.feeApplied,
-              savedManualRate: conversion.savedManualRate ?? undefined,
-              savedSpotRate: conversion.savedSpotRate,
-              amountInManual: conversion.amountInManual,
-              amountInSpot: conversion.amountInSpot,
-              displayAmountInManual: conversion.displayAmountInManual,
-              displayAmountInSpot: conversion.displayAmountInSpot,
-              manualRateDisabled: !conversion.manualRateUsed,
-              feeDisabled: !conversion.feeApplied,
-            }
-          : expense,
-      );
+      // #region agent log
+      fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84f6e4'},body:JSON.stringify({sessionId:'84f6e4',location:'App.tsx:editSaveCommit',message:'edit save payload currency',data:{commitCurrency,savedOriginalAtOpen,preserveDisplaySnapshots:conversion.preserveDisplaySnapshots,displayAmountInSpot:conversion.displayAmountInSpot},timestamp:Date.now(),hypothesisId:'A,E',runId:'currency-commit-post'})}).catch(()=>{});
+      // #endregion
 
-      const payload = buildCurrentFinancialPayload(nextExpenses);
-      setExpenses(nextExpenses);
-      commitFinancialPayload(payload, { cloud: true });
-      suppressCloudSaveRef.current = false;
+      setExpenses((prev) => {
+        const nextExpenses = prev.map((expense) =>
+          expense.id === expenseId
+            ? {
+                ...expense,
+                description: normalizedDescription,
+                amount: conversion.amount,
+                category: draft.category,
+                date: normalizedDate,
+                originalAmount: roundedTypedAmount,
+                originalCurrency: commitCurrency,
+                appliedFeePercent: conversion.appliedFeePercent,
+                manualRateUsed: conversion.manualRateUsed,
+                feeApplied: conversion.feeApplied,
+                savedManualRate: conversion.savedManualRate ?? undefined,
+                savedSpotRate: conversion.savedSpotRate,
+                amountInManual: conversion.amountInManual,
+                amountInSpot: conversion.amountInSpot,
+                displayAmountInManual: conversion.displayAmountInManual,
+                displayAmountInSpot: conversion.displayAmountInSpot,
+                manualRateDisabled: !conversion.manualRateUsed,
+                feeDisabled: !conversion.feeApplied,
+              }
+            : expense,
+        );
 
-      setRecentlyUpdatedExpenseId(editingExpenseId);
+        const payload = buildCurrentFinancialPayload(nextExpenses);
+        commitFinancialPayload(payload, { cloud: true });
+        suppressCloudSaveRef.current = false;
+        return nextExpenses;
+      });
+
+      setRecentlyUpdatedExpenseId(expenseId);
       window.setTimeout(() => {
-        setRecentlyUpdatedExpenseId((current) => (current === editingExpenseId ? null : current));
+        setRecentlyUpdatedExpenseId((current) => (current === expenseId ? null : expenseId));
       }, 1800);
 
       setEditingExpenseId(null);

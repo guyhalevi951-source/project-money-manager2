@@ -287,6 +287,8 @@ export default function ExpenseAmountField({
         previewManualRateDisabled,
         previewFeeDisabled,
         previewSavedDisplaySnapshot,
+        inputCurrency,
+        displayCurrency,
       )
     ) {
       const persisted = resolvePersistedEditDisplayAmount(

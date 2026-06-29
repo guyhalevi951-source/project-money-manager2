@@ -1136,9 +1136,19 @@ export function editHydrationMatchesSavedExpense(
   manualRateDisabled: boolean,
   feeDisabled: boolean,
   existing: SavedExpenseDualSnapshotOverlay | null | undefined,
+  draftCurrency?: ExpenseCurrency | null,
+  displayCurrency?: ExpenseCurrency,
 ): boolean {
   if (existing == null || existing.originalAmount == null || !(typedAmount > 0)) return false;
   if (Math.abs(roundMoney(typedAmount) - roundMoney(existing.originalAmount)) >= 0.005) return false;
+
+  if (draftCurrency != null && existing.originalCurrency != null) {
+    const savedCurrency = symbolToCurrency(
+      existing.originalCurrency,
+      displayCurrency ?? draftCurrency,
+    );
+    if (savedCurrency != null && savedCurrency !== draftCurrency) return false;
+  }
 
   const savedManual = existing.manualRateUsed !== false;
   const savedFee = existing.feeApplied === true;
@@ -1164,7 +1174,12 @@ export function overlaySavedExpenseDualSnapshot(
   snapshot: DualExpenseConversionSnapshot,
   existing: SavedExpenseDualSnapshotOverlay | null | undefined,
   typedAmount: number,
-  options?: { manualRateDisabled?: boolean; feeDisabled?: boolean },
+  options?: {
+    manualRateDisabled?: boolean;
+    feeDisabled?: boolean;
+    draftCurrency?: ExpenseCurrency;
+    displayCurrency?: ExpenseCurrency;
+  },
 ): DualExpenseConversionSnapshot {
   if (existing == null) return snapshot;
 
@@ -1176,6 +1191,8 @@ export function overlaySavedExpenseDualSnapshot(
     manualRateDisabled,
     feeDisabled,
     existing,
+    options?.draftCurrency,
+    options?.displayCurrency,
   );
 
   if (!hydrationMatch) {
@@ -1557,6 +1574,8 @@ export async function recordDualExpenseConversionFromTimeCapsule(
   const overlayOpts = {
     manualRateDisabled: options.manualRateDisabled ?? false,
     feeDisabled,
+    draftCurrency: from,
+    displayCurrency,
   };
 
   if (from === 'ILS') {
@@ -1704,6 +1723,8 @@ export async function previewExpenseDisplayAmountFromTimeCapsule(
       options.manualRateDisabled,
       feeDisabled,
       options.existingSnapshot,
+      currency,
+      options.displayCurrency,
     )
   ) {
     const displayAmount = resolvePersistedEditDisplayAmount(
@@ -1745,6 +1766,8 @@ export async function previewExpenseDisplayAmountFromTimeCapsule(
       options.manualRateDisabled,
       feeDisabled,
       options.existingSnapshot,
+      currency,
+      options.displayCurrency,
     );
 
   const displayAmount = resolveExpensePrimaryDisplayAmount(
@@ -1786,6 +1809,8 @@ export async function previewExpenseDisplayAmountFromSnapshot(
       options.manualRateDisabled,
       feeDisabled,
       options.existingSnapshot,
+      currency,
+      options.displayCurrency,
     )
   ) {
     const displayAmount = resolvePersistedEditDisplayAmount(
@@ -1825,6 +1850,8 @@ export async function previewExpenseDisplayAmountFromSnapshot(
       options.manualRateDisabled,
       feeDisabled,
       options.existingSnapshot,
+      currency,
+      options.displayCurrency,
     );
 
   const displayAmount = resolveExpensePrimaryDisplayAmount(
