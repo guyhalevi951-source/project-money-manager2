@@ -1094,76 +1094,43 @@ export function overlaySavedExpenseDualSnapshot(
 ): DualExpenseConversionSnapshot {
   if (existing == null) return snapshot;
 
-  const hydrationMatch =
-    options != null &&
-    editDisplayPathsMatchSavedFeeState(
-      typedAmount,
-      options.feeDisabled ?? false,
-      existing,
-    );
+  const manualRateDisabled = options?.manualRateDisabled ?? false;
+  const feeDisabled = options?.feeDisabled ?? false;
 
-  if (hydrationMatch) {
-    const patched: DualExpenseConversionSnapshot = {
-      ...snapshot,
-      manualRateAvailable:
-        existing.manualRateUsed !== false &&
-        (existing.displayAmountInManual != null || snapshot.manualRateAvailable),
-      feeAvailable:
-        existing.feeApplied === true || snapshot.feeAvailable,
-    };
-    if (existing.displayAmountInManual != null && existing.displayAmountInManual > 0) {
-      patched.displayAmountInManual = existing.displayAmountInManual;
-    }
-    if (existing.displayAmountInSpot != null && existing.displayAmountInSpot > 0) {
-      patched.displayAmountInSpot = existing.displayAmountInSpot;
-    }
-    if (existing.amountInSpot != null) patched.amountInSpot = existing.amountInSpot;
-    if (existing.amountInManual != null) patched.amountInManual = existing.amountInManual;
-    if (existing.savedManualRate != null) patched.savedManualRate = existing.savedManualRate;
-    if (existing.savedSpotRate != null) patched.savedSpotRate = existing.savedSpotRate;
-    if ((existing.appliedFeePercent ?? 0) > 0) {
-      patched.appliedFeePercent = existing.appliedFeePercent!;
-    }
-    return patched;
+  const hydrationMatch = editHydrationMatchesSavedExpense(
+    typedAmount,
+    manualRateDisabled,
+    feeDisabled,
+    existing,
+  );
+
+  if (!hydrationMatch) {
+    // #region agent log
+    fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84f6e4'},body:JSON.stringify({sessionId:'84f6e4',location:'expenseConversionService.ts:overlaySaved',message:'skip persisted overlay — draft diverged',data:{feeDisabled,savedFeeApplied:existing.feeApplied===true,typedAmount,snapshotSpot: snapshot.displayAmountInSpot??null},timestamp:Date.now(),hypothesisId:'A',runId:'fee-toggle-fix'})}).catch(()=>{});
+    // #endregion
+    return snapshot;
   }
-
-  if (snapshot.manualRateAvailable) return snapshot;
-
-  const hasSavedManual =
-    expenseHasSavedManualRateSnapshot(existing) || existing.manualRateUsed === true;
-  const hasSavedFee = expenseHasSavedFeeSnapshot(existing) || existing.feeApplied === true;
-  if (!hasSavedManual && !hasSavedFee) return snapshot;
 
   const patched: DualExpenseConversionSnapshot = {
     ...snapshot,
-    manualRateAvailable: hasSavedManual ? true : snapshot.manualRateAvailable,
-    feeAvailable: hasSavedFee ? true : snapshot.feeAvailable,
+    manualRateAvailable:
+      existing.manualRateUsed !== false &&
+      (existing.displayAmountInManual != null || snapshot.manualRateAvailable),
+    feeAvailable: existing.feeApplied === true || snapshot.feeAvailable,
   };
-
   if (existing.displayAmountInManual != null && existing.displayAmountInManual > 0) {
     patched.displayAmountInManual = existing.displayAmountInManual;
   }
   if (existing.displayAmountInSpot != null && existing.displayAmountInSpot > 0) {
     patched.displayAmountInSpot = existing.displayAmountInSpot;
   }
-  if (existing.savedManualRate != null && existing.savedManualRate > 0) {
-    patched.savedManualRate = existing.savedManualRate;
-    if (existing.amountInManual != null) {
-      patched.amountInManual = existing.amountInManual;
-    } else if (typedAmount > 0) {
-      patched.amountInManual = roundMoney(typedAmount * existing.savedManualRate);
-    }
-  }
-  if (existing.savedSpotRate != null && existing.savedSpotRate > 0) {
-    patched.savedSpotRate = existing.savedSpotRate;
-    if (existing.amountInSpot != null) {
-      patched.amountInSpot = existing.amountInSpot;
-    }
-  }
-  if ((existing.appliedFeePercent ?? 0) > 0 && !(patched.appliedFeePercent > 0)) {
+  if (existing.amountInSpot != null) patched.amountInSpot = existing.amountInSpot;
+  if (existing.amountInManual != null) patched.amountInManual = existing.amountInManual;
+  if (existing.savedManualRate != null) patched.savedManualRate = existing.savedManualRate;
+  if (existing.savedSpotRate != null) patched.savedSpotRate = existing.savedSpotRate;
+  if ((existing.appliedFeePercent ?? 0) > 0) {
     patched.appliedFeePercent = existing.appliedFeePercent!;
   }
-
   return patched;
 }
 
@@ -1661,7 +1628,12 @@ export async function previewExpenseDisplayAmountFromTimeCapsule(
 
   if (
     options.existingSnapshot &&
-    editDisplayPathsMatchSavedFeeState(amount, feeDisabled, options.existingSnapshot)
+    editHydrationMatchesSavedExpense(
+      amount,
+      options.manualRateDisabled,
+      feeDisabled,
+      options.existingSnapshot,
+    )
   ) {
     const displayAmount = resolvePersistedEditDisplayAmount(
       options.existingSnapshot,
@@ -1697,7 +1669,12 @@ export async function previewExpenseDisplayAmountFromTimeCapsule(
 
   const usePersistedDisplay =
     options.existingSnapshot != null &&
-    editDisplayPathsMatchSavedFeeState(amount, feeDisabled, options.existingSnapshot);
+    editHydrationMatchesSavedExpense(
+      amount,
+      options.manualRateDisabled,
+      feeDisabled,
+      options.existingSnapshot,
+    );
 
   const displayAmount = resolveExpensePrimaryDisplayAmount(
     amount,
@@ -1733,7 +1710,12 @@ export async function previewExpenseDisplayAmountFromSnapshot(
 
   if (
     options.existingSnapshot &&
-    editDisplayPathsMatchSavedFeeState(amount, feeDisabled, options.existingSnapshot)
+    editHydrationMatchesSavedExpense(
+      amount,
+      options.manualRateDisabled,
+      feeDisabled,
+      options.existingSnapshot,
+    )
   ) {
     const displayAmount = resolvePersistedEditDisplayAmount(
       options.existingSnapshot,
@@ -1767,7 +1749,12 @@ export async function previewExpenseDisplayAmountFromSnapshot(
 
   const usePersistedDisplay =
     options.existingSnapshot != null &&
-    editDisplayPathsMatchSavedFeeState(amount, feeDisabled, options.existingSnapshot);
+    editHydrationMatchesSavedExpense(
+      amount,
+      options.manualRateDisabled,
+      feeDisabled,
+      options.existingSnapshot,
+    );
 
   const displayAmount = resolveExpensePrimaryDisplayAmount(
     amount,

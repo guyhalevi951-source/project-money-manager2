@@ -9,7 +9,7 @@ import {
   resolveCapsuleForeignDisplayAmount,
   resolveLiveForeignDisplayAmount,
   resolveManualRateFromCapsule,
-  editDisplayPathsMatchSavedFeeState,
+  editHydrationMatchesSavedExpense,
   resolvePersistedEditDisplayAmount,
   type ExpenseCreationTimeCapsule,
   type SavedExpenseDualSnapshotOverlay,
@@ -282,7 +282,12 @@ export default function ExpenseAmountField({
 
     if (
       previewSavedDisplaySnapshot &&
-      editDisplayPathsMatchSavedFeeState(parsedAmount, previewFeeDisabled, previewSavedDisplaySnapshot)
+      editHydrationMatchesSavedExpense(
+        parsedAmount,
+        previewManualRateDisabled,
+        previewFeeDisabled,
+        previewSavedDisplaySnapshot,
+      )
     ) {
       const persisted = resolvePersistedEditDisplayAmount(
         previewSavedDisplaySnapshot,

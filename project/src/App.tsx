@@ -104,7 +104,7 @@ import {
   captureExpenseTimeCapsule,
   expenseEditShowsFeeToggle,
   expenseEditShowsManualRateToggle,
-  editDisplayPathsMatchSavedFeeState,
+  editHydrationMatchesSavedExpense,
   previewExpenseDisplayAmountFromSnapshot,
   previewExpenseDisplayAmountFromTimeCapsule,
   recordDualExpenseConversion,
@@ -5505,7 +5505,11 @@ function App() {
 
     void previewPromise.then((preview) => {
       if (!cancelled) {
-        setEditPreviewAmount(preview?.displayAmount ?? null);
+        const nextAmount = preview?.displayAmount ?? null;
+        // #region agent log
+        fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84f6e4'},body:JSON.stringify({sessionId:'84f6e4',location:'App.tsx:editPreviewEffect',message:'lower preview updated',data:{editApplyFee,editPreviewFeeDisabled,displayAmount:nextAmount},timestamp:Date.now(),hypothesisId:'C',runId:'fee-toggle-fix'})}).catch(()=>{});
+        // #endregion
+        setEditPreviewAmount(nextAmount);
       }
     });
 
@@ -5518,6 +5522,8 @@ function App() {
     editDraftDate,
     editPreviewManualRateDisabled,
     editPreviewFeeDisabled,
+    editApplyFee,
+    editApplyManualRate,
     editShowsManualRate,
     editShowsFee,
     displayCurrency,
@@ -5582,14 +5588,13 @@ function App() {
         : roundMoneyAmount(snapshot.amountInSpot);
 
       const feeApplied = editShowsFee ? editApplyFee : false;
-      const appliedFeePercent = feeApplied
-        ? snapshot.appliedFeePercent
-        : (editExpenseSnapshot?.appliedFeePercent ?? snapshot.appliedFeePercent ?? 0);
+      const appliedFeePercent = feeApplied ? (snapshot.appliedFeePercent ?? 0) : 0;
 
       const preserveDisplaySnapshots =
         editExpenseSnapshot != null &&
-        editDisplayPathsMatchSavedFeeState(
+        editHydrationMatchesSavedExpense(
           typedAmount,
+          !editApplyManualRate,
           feeDisabled,
           editExpenseSnapshot,
         );
@@ -5620,6 +5625,9 @@ function App() {
 
     void resolveConversion().then((conversion) => {
       if (conversion == null || !(conversion.amount > 0)) return;
+      // #region agent log
+      fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84f6e4'},body:JSON.stringify({sessionId:'84f6e4',location:'App.tsx:editSave',message:'expense edit saved',data:{feeApplied:conversion.feeApplied,appliedFeePercent:conversion.appliedFeePercent,displaySpot:conversion.displayAmountInSpot??null,amount:conversion.amount},timestamp:Date.now(),hypothesisId:'B,E',runId:'fee-toggle-fix'})}).catch(()=>{});
+      // #endregion
 
       const normalizedDate = normalizeDate(editExpenseDraft.date);
       const normalizedDescription = editExpenseDraft.description.trim();
