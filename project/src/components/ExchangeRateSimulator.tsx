@@ -653,12 +653,13 @@ export default function ExchangeRateSimulator({
     if (section !== 'commissions') return;
     const timer = window.setInterval(() => {
       // #region agent log
-      fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84f6e4'},body:JSON.stringify({sessionId:'84f6e4',location:'ExchangeRateSimulator.tsx:commissionInterval',message:'commission interval tick',data:{section,now:Date.now(),storedCount:storedCommissions.length},timestamp:Date.now(),hypothesisId:'D,E',runId:'pre-fix'})}).catch(()=>{});
+      fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84f6e4'},body:JSON.stringify({sessionId:'84f6e4',location:'ExchangeRateSimulator.tsx:commissionInterval',message:'commission interval tick',data:{section,now:Date.now()},timestamp:Date.now(),hypothesisId:'D,E',runId:'post-fix'})}).catch(()=>{});
       // #endregion
+      setClockTick(Date.now());
       refreshStoredCommissions();
     }, 60_000);
     return () => window.clearInterval(timer);
-  }, [section, refreshStoredCommissions, storedCommissions.length]);
+  }, [section, refreshStoredCommissions]);
 
   useEffect(() => {
     if (section !== 'manual-rate') return;
@@ -1519,24 +1520,19 @@ export default function ExchangeRateSimulator({
           storedCommissions.map((entry) => {
             const isGlobal = isGlobalCommissionCurrency(entry.currency);
             const meta = isGlobal ? null : getCurrencyMeta(entry.currency);
-            const legacyEntry = entry as CurrencyCommissionEntry & {
-              expiresAt?: number | null;
-              source?: string;
-              cloudPersisted?: boolean;
-            };
             let validityText = tr('exchangeRateSave24h');
-            if (legacyEntry.cloudPersisted || legacyEntry.source === 'cloud') {
+            if (entry.cloudPersisted) {
               validityText = tr('exchangeRateValidForeverCloud');
-            } else if (legacyEntry.expiresAt != null) {
-              validityText = formatRemainingTime(legacyEntry.expiresAt);
+            } else if (entry.expiresAt != null) {
+              validityText = formatRemainingTime(entry.expiresAt);
             }
             // #region agent log
-            fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84f6e4'},body:JSON.stringify({sessionId:'84f6e4',location:'ExchangeRateSimulator.tsx:renderCommissionsList',message:'render commission row',data:{id:entry.id,currency:entry.currency,expiresAt:legacyEntry.expiresAt??null,source:legacyEntry.source??null,cloudPersisted:legacyEntry.cloudPersisted??false,validityText,now:Date.now()},timestamp:Date.now(),hypothesisId:'B',runId:'pre-fix'})}).catch(()=>{});
+            fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84f6e4'},body:JSON.stringify({sessionId:'84f6e4',location:'ExchangeRateSimulator.tsx:renderCommissionsList',message:'render commission row',data:{id:entry.id,currency:entry.currency,expiresAt:entry.expiresAt??null,cloudPersisted:entry.cloudPersisted??false,validityText,now:Date.now()},timestamp:Date.now(),hypothesisId:'B',runId:'post-fix'})}).catch(()=>{});
             // #endregion
 
             return (
               <div
-                key={`commission-${entry.currency}-${entry.source}`}
+                key={`commission-${entry.id}`}
                 className="flex flex-col gap-2 rounded-lg border border-slate-700/60 bg-slate-950/60 p-2.5 sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="min-w-0">
