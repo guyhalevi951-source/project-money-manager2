@@ -5549,9 +5549,6 @@ function App() {
 
     void previewPromise.then((preview) => {
       if (!cancelled) {
-        // #region agent log
-        fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84f6e4'},body:JSON.stringify({sessionId:'84f6e4',location:'App.tsx:editPreviewResolved',message:'edit preview recomputed',data:{editDraftCurrency,displayAmount:preview?.displayAmount ?? null,hydrationMatch:editExpenseSnapshot!=null&&editHydrationMatchesSavedExpense(typed,!editPreviewManualRateDisabled,editPreviewFeeDisabled,editExpenseSnapshot,editDraftCurrency,displayCurrency)},timestamp:Date.now(),hypothesisId:'B,D',runId:'currency-commit-post'})}).catch(()=>{});
-        // #endregion
         setEditPreviewAmount(preview?.displayAmount ?? null);
       }
     });
@@ -5589,10 +5586,6 @@ function App() {
       editExpenseSnapshot != null ? getExpenseEditCurrency(editExpenseSnapshot) : null;
     const currencyChanged =
       savedOriginalAtOpen != null && draftCurrency !== savedOriginalAtOpen;
-
-    // #region agent log
-    fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84f6e4'},body:JSON.stringify({sessionId:'84f6e4',location:'App.tsx:editSaveStart',message:'edit save currency commit',data:{draftCurrency,savedOriginalAtOpen,currencyChanged,displayCurrency},timestamp:Date.now(),hypothesisId:'A,E',runId:'currency-commit-post'})}).catch(()=>{});
-    // #endregion
 
     const resolveConversion = async () => {
       const normalizedDate = normalizeDate(draft.date);
@@ -5691,7 +5684,6 @@ function App() {
         appliedFeePercent,
         manualRateUsed,
         feeApplied,
-        preserveDisplaySnapshots,
       };
     };
 
@@ -5702,10 +5694,6 @@ function App() {
       const normalizedDescription = draft.description.trim();
       const roundedTypedAmount = roundMoneyAmount(typedAmount);
       const commitCurrency = draftCurrency;
-
-      // #region agent log
-      fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84f6e4'},body:JSON.stringify({sessionId:'84f6e4',location:'App.tsx:editSaveCommit',message:'edit save payload currency',data:{commitCurrency,savedOriginalAtOpen,preserveDisplaySnapshots:conversion.preserveDisplaySnapshots,displayAmountInSpot:conversion.displayAmountInSpot},timestamp:Date.now(),hypothesisId:'A,E',runId:'currency-commit-post'})}).catch(()=>{});
-      // #endregion
 
       setExpenses((prev) => {
         const nextExpenses = prev.map((expense) =>
