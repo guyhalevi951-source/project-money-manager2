@@ -248,6 +248,80 @@ export function capsuleHasFeeForCurrency(
   return (resolveFeePercentFromCapsule(capsule, currency) ?? 0) > 0;
 }
 
+function resolveSavedExpenseCurrency(
+  snapshot: SavedExpenseDualSnapshotOverlay | null | undefined,
+  displayCurrency: ExpenseCurrency,
+): ExpenseCurrency | null {
+  if (snapshot?.originalCurrency == null) return null;
+  return symbolToCurrency(snapshot.originalCurrency, displayCurrency);
+}
+
+/** Edit modal: show manual-rate toggle for the active draft currency pair. */
+export function resolveEditModalShowsManualRate(
+  draftCurrency: ExpenseCurrency,
+  displayCurrency: ExpenseCurrency,
+  capsule: ExpenseCreationTimeCapsule | undefined,
+  snapshot: SavedExpenseDualSnapshotOverlay | null | undefined,
+): boolean {
+  if (draftCurrency === displayCurrency) return false;
+  if (capsule != null) {
+    return capsuleHasManualRateForConversion(capsule, draftCurrency, displayCurrency);
+  }
+  const savedCurrency = resolveSavedExpenseCurrency(snapshot, displayCurrency);
+  if (savedCurrency != null && savedCurrency !== draftCurrency) return false;
+  return snapshot != null && expenseEditShowsManualRateToggle(snapshot);
+}
+
+/** Edit modal: show fee toggle for the active draft currency. */
+export function resolveEditModalShowsFee(
+  draftCurrency: ExpenseCurrency,
+  displayCurrency: ExpenseCurrency,
+  capsule: ExpenseCreationTimeCapsule | undefined,
+  snapshot: SavedExpenseDualSnapshotOverlay | null | undefined,
+): boolean {
+  if (draftCurrency === displayCurrency) return false;
+  if (capsule != null) {
+    return capsuleHasFeeForCurrency(capsule, draftCurrency);
+  }
+  const savedCurrency = resolveSavedExpenseCurrency(snapshot, displayCurrency);
+  if (savedCurrency != null && savedCurrency !== draftCurrency) return false;
+  return snapshot != null && expenseEditShowsFeeToggle(snapshot);
+}
+
+/** Default manual-rate checkbox when the draft currency changes mid-edit. */
+export function resolveEditModalDefaultApplyManualRate(
+  draftCurrency: ExpenseCurrency,
+  displayCurrency: ExpenseCurrency,
+  capsule: ExpenseCreationTimeCapsule | undefined,
+  snapshot: SavedExpenseDualSnapshotOverlay | null | undefined,
+  savedOriginalCurrency: ExpenseCurrency | null,
+): boolean {
+  if (!resolveEditModalShowsManualRate(draftCurrency, displayCurrency, capsule, snapshot)) {
+    return false;
+  }
+  if (savedOriginalCurrency != null && draftCurrency === savedOriginalCurrency && snapshot != null) {
+    return snapshot.manualRateUsed !== false;
+  }
+  return true;
+}
+
+/** Default fee checkbox when the draft currency changes mid-edit. */
+export function resolveEditModalDefaultApplyFee(
+  draftCurrency: ExpenseCurrency,
+  displayCurrency: ExpenseCurrency,
+  capsule: ExpenseCreationTimeCapsule | undefined,
+  snapshot: SavedExpenseDualSnapshotOverlay | null | undefined,
+  savedOriginalCurrency: ExpenseCurrency | null,
+): boolean {
+  if (!resolveEditModalShowsFee(draftCurrency, displayCurrency, capsule, snapshot)) {
+    return false;
+  }
+  if (savedOriginalCurrency != null && draftCurrency === savedOriginalCurrency && snapshot != null) {
+    return snapshot.feeApplied === true;
+  }
+  return true;
+}
+
 /** Commission % for ledger conversion — honors source-currency rules (incl. global ALL). */
 function resolveExpenseLedgerFeePercent(fromCurrency: string, feeDisabled: boolean): number {
   if (feeDisabled || fromCurrency === 'ILS') return 0;
