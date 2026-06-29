@@ -652,9 +652,6 @@ export default function ExchangeRateSimulator({
   useEffect(() => {
     if (section !== 'commissions') return;
     const timer = window.setInterval(() => {
-      // #region agent log
-      fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84f6e4'},body:JSON.stringify({sessionId:'84f6e4',location:'ExchangeRateSimulator.tsx:commissionInterval',message:'commission interval tick',data:{section,now:Date.now()},timestamp:Date.now(),hypothesisId:'D,E',runId:'post-fix'})}).catch(()=>{});
-      // #endregion
       setClockTick(Date.now());
       refreshStoredCommissions();
     }, 60_000);
@@ -1526,9 +1523,6 @@ export default function ExchangeRateSimulator({
             } else if (entry.expiresAt != null) {
               validityText = formatRemainingTime(entry.expiresAt);
             }
-            // #region agent log
-            fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84f6e4'},body:JSON.stringify({sessionId:'84f6e4',location:'ExchangeRateSimulator.tsx:renderCommissionsList',message:'render commission row',data:{id:entry.id,currency:entry.currency,expiresAt:entry.expiresAt??null,cloudPersisted:entry.cloudPersisted??false,validityText,now:Date.now()},timestamp:Date.now(),hypothesisId:'B',runId:'post-fix'})}).catch(()=>{});
-            // #endregion
 
             return (
               <div

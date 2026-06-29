@@ -224,9 +224,6 @@ export function listActiveCurrencyCommissions(): CurrencyCommissionEntry[] {
   const active = readEntries()
     .filter((e) => isCommissionEntryLive(e, now))
     .sort((a, b) => b.updatedAt - a.updatedAt);
-  // #region agent log
-  fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84f6e4'},body:JSON.stringify({sessionId:'84f6e4',location:'currencyCommissionService.ts:listActive',message:'listActiveCurrencyCommissions',data:{now,count:active.length,entries:active.map((e)=>({id:e.id,currency:e.currency,isActive:e.isActive,updatedAt:e.updatedAt,expiresAt:e.expiresAt??null,cloudPersisted:e.cloudPersisted??false}))},timestamp:Date.now(),hypothesisId:'B,C',runId:'post-fix'})}).catch(()=>{});
-  // #endregion
   return active;
 }
 
@@ -307,9 +304,6 @@ export function upsertCurrencyCommission(
 
   deactivated.push(newEntry);
   writeEntries(deactivated);
-  // #region agent log
-  fetch('http://127.0.0.1:7475/ingest/df81c92d-99fe-4b03-b533-6e1562f33c8b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84f6e4'},body:JSON.stringify({sessionId:'84f6e4',location:'currencyCommissionService.ts:upsert',message:'commission upserted',data:{id:newEntry.id,currency:newEntry.currency,isActive:newEntry.isActive,updatedAt:newEntry.updatedAt,expiresAt:newEntry.expiresAt??null,cloudPersisted:newEntry.cloudPersisted??false},timestamp:Date.now(),hypothesisId:'A',runId:'post-fix'})}).catch(()=>{});
-  // #endregion
   dispatchCommissionsUpdated();
   return newEntry;
 }
